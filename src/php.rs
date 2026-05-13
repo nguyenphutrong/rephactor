@@ -10,7 +10,7 @@ use tree_sitter::{Node, Parser};
 
 use crate::document::{byte_offset_for_lsp_position, lsp_position_for_byte_offset};
 
-const ACTION_TITLE: &str = "Add names to arguments";
+const ACTION_TITLE: &str = "Rephactor: Add names to arguments";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Signature {
@@ -1041,7 +1041,7 @@ fn action_title_for_edits(edits: &[TextEdit]) -> String {
     if edits.len() == 1
         && let Some(parameter_name) = edits[0].new_text.strip_suffix(": ")
     {
-        return format!("Add name identifier '{parameter_name}'");
+        return format!("Rephactor: Add name identifier '{parameter_name}'");
     }
 
     ACTION_TITLE.to_string()
@@ -1944,7 +1944,10 @@ mod tests {
             .remove(&uri())
             .expect("edits");
 
-        assert_eq!(action.title, "Add name identifier 'exchange_gift'");
+        assert_eq!(
+            action.title,
+            "Rephactor: Add name identifier 'exchange_gift'"
+        );
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "exchange_gift: ");
         assert_eq!(

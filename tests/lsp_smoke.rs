@@ -196,7 +196,7 @@ fn lsp_returns_named_argument_code_action_for_open_document() {
     let actions = server.code_actions(&uri, 2, 5);
 
     assert_eq!(actions.len(), 1);
-    assert_eq!(actions[0]["title"], "Add names to arguments");
+    assert_eq!(actions[0]["title"], "Rephactor: Add names to arguments");
     assert_eq!(actions[0]["kind"], "refactor.rewrite");
     assert_eq!(
         insert_texts(&actions[0], &uri),
@@ -234,7 +234,10 @@ fn lsp_handles_partial_named_argument() {
     let actions = server.code_actions(&uri, 5, 5);
 
     assert_eq!(actions.len(), 1);
-    assert_eq!(actions[0]["title"], "Add name identifier 'exchange_gift'");
+    assert_eq!(
+        actions[0]["title"],
+        "Rephactor: Add name identifier 'exchange_gift'"
+    );
     assert_eq!(insert_texts(&actions[0], &uri), vec!["exchange_gift: "]);
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
