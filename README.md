@@ -367,6 +367,7 @@ files that are not open in the editor are picked up on the next request.
 - Unresolved class-level PHPDoc `@property`, `@property-read`,
   `@property-write`, `@mixin`, and `@method` type diagnostics for open PHP
   documents.
+- Unresolved local PHPDoc `@var` type diagnostics for open PHP documents.
 - Duplicate function and class-like declaration diagnostics for open PHP
   documents.
 - Duplicate method diagnostics for open PHP documents.

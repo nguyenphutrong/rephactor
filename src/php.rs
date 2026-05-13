@@ -3985,7 +3985,51 @@ fn phpdoc_type_annotation_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     collect_phpdoc_type_annotation_diagnostics(root, root, text, imports, index, &mut diagnostics);
+    collect_phpdoc_var_type_annotation_diagnostics(root, text, imports, index, &mut diagnostics);
     diagnostics
+}
+
+fn collect_phpdoc_var_type_annotation_diagnostics(
+    root: Node,
+    text: &str,
+    imports: &ImportMap,
+    index: &SymbolIndex,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut line_start = 0;
+    for raw_line in text.lines() {
+        let trimmed = raw_line
+            .trim()
+            .trim_start_matches("/**")
+            .trim_start_matches('*')
+            .trim_end_matches("*/")
+            .trim();
+        if let Some(var_offset) = trimmed.find("@var") {
+            let tokens = trimmed[var_offset + 4..]
+                .split_whitespace()
+                .collect::<Vec<_>>();
+            let type_name = phpdoc_var_tokens(&tokens)
+                .map(|(type_name, _)| type_name)
+                .or_else(|| phpdoc_var_type_token(&tokens));
+            if let Some(type_name) = type_name {
+                let namespace = namespace_at_byte(root, text, line_start);
+                maybe_push_unresolved_phpdoc_type_diagnostic(
+                    text,
+                    imports,
+                    index,
+                    namespace.as_deref(),
+                    &PhpDocTagLine {
+                        text: trimmed[var_offset + 4..].trim().to_string(),
+                        raw: raw_line.to_string(),
+                        start_byte: line_start,
+                    },
+                    type_name,
+                    diagnostics,
+                );
+            }
+        }
+        line_start += raw_line.len() + 1;
+    }
 }
 
 fn collect_phpdoc_type_annotation_diagnostics(
