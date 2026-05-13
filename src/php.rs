@@ -172,6 +172,13 @@ pub struct ReferencesAnalysis {
 }
 
 #[derive(Debug)]
+pub struct RenameAnalysis {
+    pub edit: Option<WorkspaceEdit>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
 pub struct DocumentHighlightAnalysis {
     pub highlights: Vec<DocumentHighlight>,
     pub skip_reason: Option<SkipReason>,
@@ -558,6 +565,29 @@ pub fn analyze_references_for_position_with_cache(
         },
         Err(reason) => ReferencesAnalysis {
             locations: Vec::new(),
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_rename_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    new_name: &str,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> RenameAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match rename_for_position(uri, text, position, new_name, open_documents) {
+        Ok(edit) => RenameAnalysis {
+            edit: Some(edit),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => RenameAnalysis {
+            edit: None,
             skip_reason: Some(reason),
             index_cache_status,
         },
@@ -1441,6 +1471,50 @@ fn references_for_position(
         )
     });
     Ok(locations)
+}
+
+fn rename_for_position(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    new_name: &str,
+    open_documents: &HashMap<Url, String>,
+) -> Result<WorkspaceEdit, SkipReason> {
+    if !is_valid_rename_identifier(new_name) {
+        return Err(SkipReason::NoSupportedCall);
+    }
+
+    let locations = references_for_position(uri, text, position, true, open_documents)?;
+    if locations.is_empty() {
+        return Err(SkipReason::NoEdits);
+    }
+
+    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+    for location in locations {
+        changes.entry(location.uri).or_default().push(TextEdit {
+            range: location.range,
+            new_text: new_name.to_string(),
+        });
+    }
+
+    for edits in changes.values_mut() {
+        edits.sort_by_key(|edit| (edit.range.start.line, edit.range.start.character));
+    }
+
+    Ok(WorkspaceEdit {
+        changes: Some(changes),
+        document_changes: None,
+        change_annotations: None,
+    })
+}
+
+fn is_valid_rename_identifier(name: &str) -> bool {
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
 fn document_highlights_for_position(

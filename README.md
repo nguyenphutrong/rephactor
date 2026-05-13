@@ -35,6 +35,7 @@ of the same resolver and project index.
 - Provide `textDocument/typeDefinition` for locally typed variables.
 - Provide `textDocument/implementation` for class/interface inheritance.
 - Provide `textDocument/hover` for resolved symbols.
+- Provide `textDocument/rename` for exact AST symbol references.
 - Provide deterministic `textDocument/completion` for basic symbols.
 - Add conservative `use` declaration edits for unambiguous class completions.
 - Provide `textDocument/documentSymbol` for outline and breadcrumbs.
@@ -124,7 +125,8 @@ Rephactor currently provides named-argument and class-import refactor code
 actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1,
 Go To Type Definition V1, Go To Implementation V1, Document Symbol V1,
 Workspace Symbol V1, References V1, Diagnostics V1, Document Highlight V1,
-Folding Range V1, Inlay Hint V1, Document Link V1, and Selection Range V1.
+Rename V1, Folding Range V1, Inlay Hint V1, Document Link V1, and Selection
+Range V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -166,6 +168,9 @@ with deterministic case-insensitive, camel-case, and underscore-aware matching.
 References V1 finds exact matching AST name references across Composer-indexed
 PHP files and open document overlays. It is intentionally conservative and does
 not yet perform full type-aware disambiguation.
+
+Rename V1 returns a workspace edit for exact AST symbol references. It does not
+rename files or folders.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, and unresolved type-annotation diagnostics for open
@@ -216,6 +221,7 @@ file watcher is intentionally deferred.
 - Document symbols for functions, class-like declarations, and methods.
 - Workspace symbols for indexed functions, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.
+- Exact AST symbol rename edits across Composer-indexed PHP files.
 - Type definitions for locally typed variables and parameters.
 - Class/interface implementation lookup across indexed PHP files.
 - Parse diagnostics for open PHP documents.

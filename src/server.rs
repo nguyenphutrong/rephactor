@@ -9,7 +9,8 @@ use crate::php::{
     analyze_document_links, analyze_document_symbols, analyze_folding_ranges,
     analyze_hover_for_position_with_cache, analyze_implementation_for_position_with_cache,
     analyze_inlay_hints_for_range_with_cache, analyze_references_for_position_with_cache,
-    analyze_selection_ranges, analyze_signature_help_for_position_with_cache,
+    analyze_rename_for_position_with_cache, analyze_selection_ranges,
+    analyze_signature_help_for_position_with_cache,
     analyze_type_definition_for_position_with_cache, analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
@@ -27,10 +28,11 @@ use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
     ImplementationProviderCapability, InitializeParams, InitializeResult, InlayHint,
     InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location, MessageType, OneOf,
-    ReferenceParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TypeDefinitionProviderCapability, Url, WorkspaceSymbolParams,
+    ReferenceParams, RenameParams, SelectionRange, SelectionRangeParams,
+    SelectionRangeProviderCapability, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TypeDefinitionProviderCapability, Url, WorkspaceEdit,
+    WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -112,6 +114,7 @@ fn server_capabilities() -> ServerCapabilities {
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
@@ -494,6 +497,62 @@ impl LanguageServer for RephactorLanguageServer {
             .await;
 
         Ok(ranges)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_rename_for_position_with_cache(
+                &uri,
+                &document_text,
+                position,
+                &new_name,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::RenameAnalysis {
+                edit: None,
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+        let edit_count = usize::from(analysis.edit.is_some());
+
+        let mut log_message = format!(
+            "Rephactor rename {}:{}:{} -> {} edit(s) in {}ms ({})",
+            uri,
+            position.line,
+            position.character,
+            edit_count,
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if edit_count == 0
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(analysis.edit)
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

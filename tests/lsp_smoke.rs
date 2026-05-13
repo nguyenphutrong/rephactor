@@ -59,6 +59,10 @@ impl LspProcess {
             json!(true)
         );
         assert_eq!(
+            initialize["result"]["capabilities"]["renameProvider"],
+            json!(true)
+        );
+        assert_eq!(
             initialize["result"]["capabilities"]["hoverProvider"],
             json!(true)
         );
@@ -230,6 +234,18 @@ impl LspProcess {
             .as_array()
             .expect("selection range array")
             .clone()
+    }
+
+    fn rename(&mut self, uri: &str, line: u32, character: u32, new_name: &str) -> Value {
+        let response = self.request(
+            "textDocument/rename",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+                "newName": new_name
+            }),
+        );
+        response["result"].clone()
     }
 
     fn hover(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
@@ -656,6 +672,30 @@ fn lsp_returns_selection_ranges_from_syntax_tree() {
         json!({ "line": 1, "character": 37 })
     );
     assert!(ranges[0]["parent"].is_object());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_workspace_edit_for_rename() {
+    let root = temp_project("rename");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction send_invoice($invoice) {}\nsend_invoice($invoice);\n";
+    let uri = server.open_php(&file, text);
+
+    let edit = server.rename(&uri, 1, 12, "dispatch_invoice");
+    let edits = edit["changes"]
+        .get(&uri)
+        .expect("rename edits for uri")
+        .as_array()
+        .expect("rename edits for uri");
+
+    assert_eq!(edits.len(), 2);
+    assert!(
+        edits
+            .iter()
+            .all(|edit| edit["newText"] == "dispatch_invoice")
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
