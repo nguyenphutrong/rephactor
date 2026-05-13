@@ -6019,6 +6019,10 @@ fn clean_reference_name(name: &str) -> String {
 
 fn is_declaration_name(node: Node) -> bool {
     node.parent().is_some_and(|parent| {
+        if parent.kind() == "const_element" {
+            return first_named_child_kind(parent, "name") == Some(node);
+        }
+
         matches!(
             parent.kind(),
             "function_definition"
@@ -6026,6 +6030,7 @@ fn is_declaration_name(node: Node) -> bool {
                 | "interface_declaration"
                 | "trait_declaration"
                 | "method_declaration"
+                | "property_element"
         ) && parent.child_by_field_name("name") == Some(node)
     })
 }

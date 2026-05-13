@@ -196,9 +196,10 @@ constants. When a class-like declaration is renamed from a matching
 `ClassName.php` file, it also adds a file rename operation for the PHP file.
 Folder renames are still skipped.
 
-Code Lens V1 shows exact-reference counts for function, class, interface,
-trait, and method declarations. Class-like and method declarations also show
-indexed implementation counts when derived classes are known.
+Code Lens V1 shows exact-reference counts for function, constant, class,
+interface, trait, method, and property declarations. Class-like and method
+declarations also show indexed implementation counts when derived classes are
+known.
 
 Implement Interface Methods V1 offers a code action on classes with directly
 implemented indexed interfaces and inserts stubs for missing interface methods.
@@ -312,7 +313,8 @@ files that are not open in the editor are picked up on the next request.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
 - Matching class-like PHP file rename operations for class/interface/trait
   declaration renames.
-- Exact-reference and implementation-count code lenses for declarations.
+- Exact-reference and implementation-count code lenses for declarations,
+  including constants and properties.
 - Method declaration lookup for interface/base-class implementations.
 - Type definitions for locally typed variables and parameters.
 - Class/interface implementation lookup across indexed PHP files.

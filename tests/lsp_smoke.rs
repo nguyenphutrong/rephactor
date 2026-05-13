@@ -1443,15 +1443,21 @@ fn lsp_returns_reference_code_lenses_for_declarations() {
     let file = root.join("example.php");
     let uri = server.open_php(
         &file,
-        "<?php\nfunction send_invoice($invoice) {}\nsend_invoice($invoice);\n",
+        "<?php\nconst API_VERSION = '1';\nfunction send_invoice($invoice) {}\necho API_VERSION;\nsend_invoice($invoice);\n",
     );
 
     let lenses = server.code_lens(&uri);
 
-    assert!(lenses.iter().any(|lens| {
-        lens["command"]["title"] == "1 reference"
-            && lens["command"]["command"] == "editor.action.showReferences"
-    }));
+    assert!(
+        lenses
+            .iter()
+            .filter(|lens| {
+                lens["command"]["title"] == "1 reference"
+                    && lens["command"]["command"] == "editor.action.showReferences"
+            })
+            .count()
+            >= 2
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
