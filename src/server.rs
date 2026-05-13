@@ -9,7 +9,7 @@ use crate::php::{
     analyze_document_links, analyze_document_symbols, analyze_folding_ranges,
     analyze_hover_for_position_with_cache, analyze_implementation_for_position_with_cache,
     analyze_inlay_hints_for_range_with_cache, analyze_references_for_position_with_cache,
-    analyze_signature_help_for_position_with_cache,
+    analyze_selection_ranges, analyze_signature_help_for_position_with_cache,
     analyze_type_definition_for_position_with_cache, analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
@@ -27,8 +27,9 @@ use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
     ImplementationProviderCapability, InitializeParams, InitializeResult, InlayHint,
     InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location, MessageType, OneOf,
-    ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
+    ReferenceParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
     TypeDefinitionProviderCapability, Url, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
@@ -123,6 +124,7 @@ fn server_capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
             work_done_progress_options: Default::default(),
         }),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -460,6 +462,38 @@ impl LanguageServer for RephactorLanguageServer {
             .await;
 
         Ok(analysis.definition)
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        let uri = params.text_document.uri;
+        let positions = params.positions;
+        let started_at = Instant::now();
+        let document = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).map(|document| document.text.clone())
+        };
+
+        let ranges =
+            document.map(|document_text| analyze_selection_ranges(&document_text, &positions));
+        let elapsed = started_at.elapsed();
+        let range_count = ranges.as_ref().map_or(0, Vec::len);
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "Rephactor selectionRange {} -> {} range(s) in {}ms",
+                    uri,
+                    range_count,
+                    elapsed.as_millis()
+                ),
+            )
+            .await;
+
+        Ok(ranges)
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

@@ -45,6 +45,7 @@ of the same resolver and project index.
 - Provide `textDocument/foldingRange` for PHP blocks and comments.
 - Provide parameter-name `textDocument/inlayHint` hints for resolved calls.
 - Provide `textDocument/documentLink` for literal include/require paths.
+- Provide syntax-tree `textDocument/selectionRange` expansion.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
@@ -123,7 +124,7 @@ Rephactor currently provides named-argument and class-import refactor code
 actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1,
 Go To Type Definition V1, Go To Implementation V1, Document Symbol V1,
 Workspace Symbol V1, References V1, Diagnostics V1, Document Highlight V1,
-Folding Range V1, Inlay Hint V1, and Document Link V1.
+Folding Range V1, Inlay Hint V1, Document Link V1, and Selection Range V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -182,6 +183,9 @@ Inlay Hint V1 shows parameter names for resolved positional call arguments.
 Document Link V1 links literal relative `include`/`require` paths to files on
 disk.
 
+Selection Range V1 returns syntax-tree ancestor ranges for smart selection
+expansion.
+
 Import refactors support adding an import for a resolvable fully-qualified
 class name, shortening that usage, sorting simple class imports, and removing
 unused simple class imports. Function imports, const imports, and destructive
@@ -221,6 +225,7 @@ file watcher is intentionally deferred.
 - Folding ranges for PHP blocks, imports, and comments.
 - Parameter-name inlay hints for resolved positional call arguments.
 - Document links for literal relative include/require paths.
+- Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class

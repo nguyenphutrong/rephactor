@@ -88,6 +88,10 @@ impl LspProcess {
         );
         assert!(initialize["result"]["capabilities"]["inlayHintProvider"].is_object());
         assert!(initialize["result"]["capabilities"]["documentLinkProvider"].is_object());
+        assert_eq!(
+            initialize["result"]["capabilities"]["selectionRangeProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -212,6 +216,20 @@ impl LspProcess {
             .get("result")
             .filter(|result| !result.is_null())
             .cloned()
+    }
+
+    fn selection_range(&mut self, uri: &str, line: u32, character: u32) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/selectionRange",
+            json!({
+                "textDocument": { "uri": uri },
+                "positions": [{ "line": line, "character": character }]
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("selection range array")
+            .clone()
     }
 
     fn hover(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
@@ -620,6 +638,24 @@ fn lsp_returns_implementations_for_interface() {
         implementations[0]["range"]["start"],
         json!({ "line": 2, "character": 6 })
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_selection_ranges_from_syntax_tree() {
+    let root = temp_project("selection-range");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction handle($customer) { return $customer->name(); }\n";
+    let uri = server.open_php(&file, text);
+
+    let ranges = server.selection_range(&uri, 1, 38);
+
+    assert_eq!(
+        ranges[0]["range"]["start"],
+        json!({ "line": 1, "character": 37 })
+    );
+    assert!(ranges[0]["parent"].is_object());
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

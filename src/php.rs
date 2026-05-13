@@ -9,8 +9,8 @@ use tower_lsp::lsp_types::{
     DocumentLink, DocumentSymbol, DocumentSymbolResponse, FoldingRange, FoldingRangeKind,
     GotoDefinitionResponse, Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel,
     Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
-    SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url,
-    WorkspaceEdit,
+    SelectionRange, SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit,
+    Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -293,6 +293,10 @@ pub fn analyze_diagnostics_for_document_with_cache(
     }
 
     diagnostics
+}
+
+pub fn analyze_selection_ranges(text: &str, positions: &[Position]) -> Vec<SelectionRange> {
+    selection_ranges_for_text(text, positions).unwrap_or_default()
 }
 
 enum CodeActionOutcome {
@@ -1263,6 +1267,69 @@ fn collect_parse_error_diagnostics(node: Node, text: &str, diagnostics: &mut Vec
     for child in node.children(&mut cursor) {
         collect_parse_error_diagnostics(child, text, diagnostics);
     }
+}
+
+fn selection_ranges_for_text(
+    text: &str,
+    positions: &[Position],
+) -> Result<Vec<SelectionRange>, SkipReason> {
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    positions
+        .iter()
+        .map(|position| {
+            let Some(byte_offset) = byte_offset_for_lsp_position(text, *position) else {
+                return Err(SkipReason::InvalidCursorPosition);
+            };
+            selection_range_at_byte(root, text, byte_offset).ok_or(SkipReason::NoSupportedCall)
+        })
+        .collect()
+}
+
+fn selection_range_at_byte(root: Node, text: &str, byte_offset: usize) -> Option<SelectionRange> {
+    let mut current = find_smallest_named_node_at_byte(root, byte_offset)?;
+    let mut ranges = Vec::new();
+    let mut last_range = None;
+
+    loop {
+        if let Ok(range) = range_for_bytes(text, current.start_byte(), current.end_byte())
+            && Some(range) != last_range
+        {
+            ranges.push(range);
+            last_range = Some(range);
+        }
+
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        current = parent;
+    }
+
+    let mut parent = None;
+    for range in ranges.into_iter().rev() {
+        parent = Some(Box::new(SelectionRange { range, parent }));
+    }
+    parent.map(|selection_range| *selection_range)
+}
+
+fn find_smallest_named_node_at_byte<'tree>(
+    node: Node<'tree>,
+    byte_offset: usize,
+) -> Option<Node<'tree>> {
+    if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
+        return None;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = find_smallest_named_node_at_byte(child, byte_offset) {
+            return Some(found);
+        }
+    }
+
+    Some(node)
 }
 
 fn collect_type_reference_nodes<'tree>(node: Node<'tree>, type_nodes: &mut Vec<Node<'tree>>) {
