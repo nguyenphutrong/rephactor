@@ -215,10 +215,11 @@ direct `parent` inside class-like scopes.
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
 function/class-like declaration diagnostics for open documents. It also reports
-duplicate parameter diagnostics, duplicate/unknown named-argument diagnostics
-for resolved calls, too-many-argument diagnostics for resolved non-variadic
-calls, and conservative unused-import diagnostics for normal non-aliased class
-imports. It also reports conservative return-type mismatches when a native or
+duplicate method diagnostics inside class-like declarations, duplicate
+parameter diagnostics, duplicate/unknown named-argument diagnostics for resolved
+calls, too-many-argument diagnostics for resolved non-variadic calls, and
+conservative unused-import diagnostics for normal non-aliased class imports. It
+also reports conservative return-type mismatches when a native or
 PHPDoc-declared return type conflicts with a directly returned scalar literal,
 array literal, or object creation expression, including local variables assigned
 one of those obvious values before return, resolved calls with declared return
@@ -313,6 +314,7 @@ files that are not open in the editor are picked up on the next request.
 - Unresolved type-annotation diagnostics for open PHP documents.
 - Duplicate function and class-like declaration diagnostics for open PHP
   documents.
+- Duplicate method diagnostics for open PHP documents.
 - Duplicate function and method parameter diagnostics for open PHP documents.
 - Duplicate named-argument diagnostics for resolved calls in open PHP documents.
 - Unknown named-argument diagnostics for resolved calls in open PHP documents.

@@ -1473,6 +1473,29 @@ fn lsp_publishes_semantic_diagnostics_for_duplicate_parameters() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_duplicate_methods() {
+    let root = temp_project("duplicate-method-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Sender { public function dispatch() {} public function dispatch() {} }\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "duplicate method declaration App\\Sender::dispatch"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_unknown_named_arguments() {
     let root = temp_project("unknown-named-argument-diagnostics");
     let mut server = LspProcess::start(&root);

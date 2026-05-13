@@ -326,6 +326,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
     }
 
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
+    diagnostics.extend(duplicate_method_diagnostics(root, text));
     diagnostics.extend(duplicate_parameter_diagnostics(root, text));
     diagnostics.extend(return_type_mismatch_diagnostics(
         root, text, &imports, &index,
@@ -2016,6 +2017,67 @@ fn collect_duplicate_checked_declarations<'tree>(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_duplicate_checked_declarations(child, declarations);
+    }
+}
+
+fn duplicate_method_diagnostics(root: Node, text: &str) -> Vec<Diagnostic> {
+    let mut class_nodes = Vec::new();
+    collect_class_like_declarations(root, &mut class_nodes);
+    let mut diagnostics = Vec::new();
+
+    for class_node in class_nodes {
+        let Some(class_name_node) = class_node.child_by_field_name("name") else {
+            continue;
+        };
+        let Some(body) = class_node.child_by_field_name("body") else {
+            continue;
+        };
+        let namespace = namespace_at_byte(root, text, class_node.start_byte());
+        let class_name = qualify_name(node_text(class_name_node, text), namespace.as_deref());
+        let mut seen = HashSet::new();
+        let mut cursor = body.walk();
+
+        for child in body.named_children(&mut cursor) {
+            if child.kind() != "method_declaration" {
+                continue;
+            }
+            let Some(name_node) = child.child_by_field_name("name") else {
+                continue;
+            };
+            let method_name = node_text(name_node, text);
+            if seen.insert(normalize_method_key(method_name)) {
+                continue;
+            }
+
+            diagnostics.push(Diagnostic {
+                range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!("duplicate method declaration {class_name}::{method_name}"),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
+    diagnostics
+}
+
+fn collect_class_like_declarations<'tree>(node: Node<'tree>, declarations: &mut Vec<Node<'tree>>) {
+    if matches!(
+        node.kind(),
+        "class_declaration" | "interface_declaration" | "trait_declaration"
+    ) {
+        declarations.push(node);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_class_like_declarations(child, declarations);
     }
 }
 
