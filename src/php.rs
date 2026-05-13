@@ -5253,7 +5253,7 @@ fn index_class(
     }
     class_info
         .properties
-        .extend(phpdoc_properties_before(text, node.start_byte()));
+        .extend(phpdoc_properties_before(text, node.start_byte(), path));
     let mut cursor = body.walk();
 
     for child in body.named_children(&mut cursor) {
@@ -6917,18 +6917,27 @@ fn phpdoc_methods_before(text: &str, byte_offset: usize) -> Vec<Signature> {
         .collect()
 }
 
-fn phpdoc_properties_before(text: &str, byte_offset: usize) -> Vec<ClassPropertyInfo> {
+fn phpdoc_properties_before(
+    text: &str,
+    byte_offset: usize,
+    path: Option<&Path>,
+) -> Vec<ClassPropertyInfo> {
     ["@property", "@property-read", "@property-write"]
         .into_iter()
-        .flat_map(|tag| phpdoc_tag_lines_before(text, byte_offset, tag))
-        .filter_map(|property_text| {
+        .flat_map(|tag| phpdoc_tag_line_records_before(text, byte_offset, tag))
+        .filter_map(|record| {
+            let property_text = record.text;
             let tokens = property_text.split_whitespace().collect::<Vec<_>>();
             let (_, variable_name) = phpdoc_var_tokens(&tokens)?;
             let name = variable_name.trim_start_matches('$').to_string();
+            let location = record
+                .raw
+                .find(variable_name)
+                .and_then(|offset| source_location(path, record.start_byte + offset));
             (!name.is_empty()).then_some(ClassPropertyInfo {
                 name,
                 is_static: false,
-                location: None,
+                location,
             })
         })
         .collect()
@@ -6983,7 +6992,13 @@ fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
     })
 }
 
-fn phpdoc_tag_lines_before(text: &str, byte_offset: usize, tag: &str) -> Vec<String> {
+struct PhpDocTagLine {
+    text: String,
+    raw: String,
+    start_byte: usize,
+}
+
+fn phpdoc_tag_line_records_before(text: &str, byte_offset: usize, tag: &str) -> Vec<PhpDocTagLine> {
     let Some(before) = text.get(..byte_offset) else {
         return Vec::new();
     };
@@ -7000,18 +7015,31 @@ fn phpdoc_tag_lines_before(text: &str, byte_offset: usize, tag: &str) -> Vec<Str
         return Vec::new();
     }
 
-    between
-        .lines()
-        .filter_map(|line| {
-            let line = line
-                .trim()
-                .trim_start_matches("/**")
-                .trim_start_matches('*')
-                .trim_end_matches("*/")
-                .trim();
-            let tag_offset = line.find(tag)?;
-            Some(line[tag_offset + tag.len()..].trim().to_string())
-        })
+    let mut line_start = comment_start;
+    let mut records = Vec::new();
+    for raw_line in between.lines() {
+        let trimmed = raw_line
+            .trim()
+            .trim_start_matches("/**")
+            .trim_start_matches('*')
+            .trim_end_matches("*/")
+            .trim();
+        if let Some(tag_offset) = trimmed.find(tag) {
+            records.push(PhpDocTagLine {
+                text: trimmed[tag_offset + tag.len()..].trim().to_string(),
+                raw: raw_line.to_string(),
+                start_byte: line_start,
+            });
+        }
+        line_start += raw_line.len() + 1;
+    }
+    records
+}
+
+fn phpdoc_tag_lines_before(text: &str, byte_offset: usize, tag: &str) -> Vec<String> {
+    phpdoc_tag_line_records_before(text, byte_offset, tag)
+        .into_iter()
+        .map(|record| record.text)
         .collect()
 }
 

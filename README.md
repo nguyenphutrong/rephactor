@@ -225,7 +225,7 @@ the following assignment, then feeds them into method resolution for completion,
 signature help, code actions, and conservative diagnostics. Class-level
 `@method` annotations are indexed as magic methods for the same features, and
 class-level `@property` annotations are indexed as magic instance properties for
-completion and hover.
+completion, hover, and definition lookup.
 Function-like PHPDoc `@param` annotations understand `self`, `static`, and
 direct `parent` inside class-like scopes.
 
@@ -437,7 +437,8 @@ files that are not open in the editor are picked up on the next request.
   resolution.
 - PHPDoc `@mixin ClassName` annotations for class instance method resolution.
 - PHPDoc `@method` annotations for class magic method resolution.
-- PHPDoc `@property` annotations for class magic property completion and hover.
+- PHPDoc `@property` annotations for class magic property completion, hover,
+  and definition lookup.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.

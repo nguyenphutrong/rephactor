@@ -1928,8 +1928,13 @@ fn lsp_returns_phpdoc_property_completions_and_hover() {
 
     let hover = server.hover(&uri, 7, 16).expect("hover result");
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+    let definition = server.definition(&uri, 7, 16).expect("definition result");
 
     assert!(markdown.contains("property InvoiceSender::$status"));
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 2, "character": 20 })
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
