@@ -54,6 +54,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["hoverProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["completionProvider"]["triggerCharacters"],
+            json!(["\\", ":", ">", "$"])
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -164,6 +168,20 @@ impl LspProcess {
             .get("result")
             .filter(|result| !result.is_null())
             .cloned()
+    }
+
+    fn completion(&mut self, uri: &str, line: u32, character: u32) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("completion array")
+            .clone()
     }
 
     fn send(&mut self, message: Value) {
@@ -392,6 +410,50 @@ fn lsp_returns_null_hover_for_dynamic_call() {
     let uri = server.open_php(&file, text);
 
     assert!(server.hover(&uri, 2, 2).is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_class_and_function_completions() {
+    let root = temp_project("completion-basic");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass CustomerRecord {}\nfunction customer_report($shop) {}\nCustomerRecord::sync();\n";
+    let uri = server.open_php(&file, text);
+
+    let class_items = server.completion(&uri, 3, 4);
+
+    assert!(
+        class_items
+            .iter()
+            .any(|item| item["label"] == "CustomerRecord")
+    );
+
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass CustomerRecord {}\nfunction customer_report($shop) {}\ncustomer_report($shop);\n",
+    );
+    let function_items = server.completion(&uri, 3, 9);
+
+    assert!(
+        function_items
+            .iter()
+            .any(|item| item["label"] == "customer_report")
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_method_completion_after_static_scope() {
+    let root = temp_project("completion-static-method");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass CustomerRecord { public static function syncOrder($order) {} }\nCustomerRecord::syncOrder();\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 2, 20);
+
+    assert!(items.iter().any(|item| item["label"] == "syncOrder"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

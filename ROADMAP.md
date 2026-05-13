@@ -87,4 +87,4 @@
 - [x] Implement `textDocument/definition`.
 - [x] Implement import refactor code actions.
 - [x] Implement hover for resolved symbols.
-- [ ] Implement deterministic completion V1.
+- [x] Implement deterministic completion V1.

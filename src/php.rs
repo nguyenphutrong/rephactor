@@ -4,9 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, GotoDefinitionResponse, Hover, HoverContents,
-    Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
-    SignatureHelp, SignatureInformation, TextEdit, Url, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
+    CompletionResponse, GotoDefinitionResponse, Hover, HoverContents, Location, MarkupContent,
+    MarkupKind, ParameterInformation, ParameterLabel, Position, Range, SignatureHelp,
+    SignatureInformation, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -16,6 +17,7 @@ const ACTION_TITLE: &str = "[Rephactor] Add names to arguments";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Signature {
+    name: String,
     parameters: Vec<String>,
     location: Option<SourceLocation>,
     doc_summary: Option<String>,
@@ -135,6 +137,13 @@ pub struct DefinitionAnalysis {
 #[derive(Debug)]
 pub struct HoverAnalysis {
     pub hover: Option<Hover>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct CompletionAnalysis {
+    pub completion: Option<CompletionResponse>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
 }
@@ -271,6 +280,28 @@ pub fn analyze_hover_for_position_with_cache(
         },
         Err(reason) => HoverAnalysis {
             hover: None,
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_completion_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> CompletionAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match completion_for_position_with_cache(uri, text, position, open_documents, cache) {
+        Ok(completion) => CompletionAnalysis {
+            completion: Some(completion),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => CompletionAnalysis {
+            completion: None,
             skip_reason: Some(reason),
             index_cache_status,
         },
@@ -506,6 +537,59 @@ fn hover_for_position_with_cache(
         class_info.location.as_ref(),
         class_info.doc_summary.as_deref(),
     ))
+}
+
+fn completion_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<CompletionResponse, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let prefix = completion_prefix(text, byte_offset);
+
+    let items = if let Some((class_name, method_prefix)) =
+        static_method_completion_context(text, byte_offset)
+    {
+        let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
+        else {
+            return Err(SkipReason::UnresolvedCallable(class_name));
+        };
+        method_completion_items(class_info, &method_prefix)
+    } else if let Some((variable, method_prefix)) =
+        instance_method_completion_context(text, byte_offset)
+    {
+        let variable_types =
+            variable_types_at_byte(root, text, byte_offset, namespace.as_deref(), &imports);
+        let Some(class_name) = variable_types.get(&variable) else {
+            return Err(SkipReason::UnresolvedCallable(variable));
+        };
+        let Some(class_info) = index.resolve_class(class_name, namespace.as_deref(), &imports)
+        else {
+            return Err(SkipReason::UnresolvedCallable(class_name.clone()));
+        };
+        method_completion_items(class_info, &method_prefix)
+    } else {
+        let mut items = class_completion_items(&index, &prefix);
+        items.extend(function_completion_items(&index, &prefix));
+        items
+    };
+
+    if items.is_empty() {
+        Err(SkipReason::NoEdits)
+    } else {
+        Ok(CompletionResponse::Array(items))
+    }
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
@@ -1071,6 +1155,7 @@ fn index_function(
 
     let name = qualify_name(node_text(name_node, text), namespace);
     let signature = Signature {
+        name: name.clone(),
         parameters: parameter_names(parameters_node, text),
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_summary_before(text, node.start_byte()),
@@ -1136,6 +1221,7 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option
 
     let method_name = node_text(name_node, text).to_string();
     let signature = Signature {
+        name: method_name.clone(),
         parameters: parameter_names(parameters_node, text),
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_summary_before(text, node.start_byte()),
@@ -1953,6 +2039,131 @@ fn phpdoc_summary_before(text: &str, byte_offset: usize) -> Option<String> {
         .map(str::to_string)
 }
 
+fn completion_prefix(text: &str, byte_offset: usize) -> String {
+    text.get(..byte_offset)
+        .unwrap_or_default()
+        .chars()
+        .rev()
+        .take_while(|character| {
+            character.is_alphanumeric() || *character == '_' || *character == '\\'
+        })
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect()
+}
+
+fn static_method_completion_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
+    let before = text.get(..byte_offset)?;
+    let colon = before.rfind("::")?;
+    if before[colon + 2..]
+        .chars()
+        .any(|character| !(character.is_alphanumeric() || character == '_'))
+    {
+        return None;
+    }
+
+    let class_name = before[..colon]
+        .chars()
+        .rev()
+        .take_while(|character| {
+            character.is_alphanumeric() || *character == '_' || *character == '\\'
+        })
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    (!class_name.is_empty()).then(|| (class_name, completion_prefix(text, byte_offset)))
+}
+
+fn instance_method_completion_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
+    let before = text.get(..byte_offset)?;
+    let arrow = before.rfind("->")?;
+    if before[arrow + 2..]
+        .chars()
+        .any(|character| !(character.is_alphanumeric() || character == '_'))
+    {
+        return None;
+    }
+
+    let variable = before[..arrow]
+        .chars()
+        .rev()
+        .take_while(|character| {
+            character.is_alphanumeric() || *character == '_' || *character == '$'
+        })
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    variable
+        .starts_with('$')
+        .then(|| (variable, completion_prefix(text, byte_offset)))
+}
+
+fn class_completion_items(index: &SymbolIndex, prefix: &str) -> Vec<CompletionItem> {
+    let mut items = index
+        .classes
+        .values()
+        .filter(|class_info| prefix_matches(last_name_segment(&class_info.fqn), prefix))
+        .map(|class_info| CompletionItem {
+            label: last_name_segment(&class_info.fqn).to_string(),
+            kind: Some(CompletionItemKind::CLASS),
+            detail: Some(class_info.fqn.clone()),
+            ..CompletionItem::default()
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    items
+}
+
+fn function_completion_items(index: &SymbolIndex, prefix: &str) -> Vec<CompletionItem> {
+    let mut labels = index
+        .functions
+        .values()
+        .flat_map(|signatures| signatures.iter())
+        .map(|signature| last_name_segment(&signature.name).to_string())
+        .chain(internal_function_names().into_iter().map(str::to_string))
+        .filter(|name| prefix_matches(name, prefix))
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.to_ascii_lowercase());
+    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    labels
+        .into_iter()
+        .map(|label| CompletionItem {
+            label,
+            kind: Some(CompletionItemKind::FUNCTION),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+fn method_completion_items(class_info: &ClassInfo, prefix: &str) -> Vec<CompletionItem> {
+    let mut labels = class_info
+        .methods
+        .values()
+        .map(|signature| signature.name.clone())
+        .filter(|name| prefix_matches(name, prefix))
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.to_ascii_lowercase());
+    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    labels
+        .into_iter()
+        .map(|label| CompletionItem {
+            label,
+            kind: Some(CompletionItemKind::METHOD),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+fn prefix_matches(name: &str, prefix: &str) -> bool {
+    prefix.is_empty()
+        || name
+            .to_ascii_lowercase()
+            .starts_with(&prefix.to_ascii_lowercase())
+}
+
 fn variable_types_at_byte(
     root: Node,
     text: &str,
@@ -2252,6 +2463,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
     };
 
     Some(Signature {
+        name: name.to_string(),
         parameters: parameters
             .iter()
             .map(|parameter| parameter.to_string())
@@ -2259,6 +2471,27 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         location: None,
         doc_summary: None,
     })
+}
+
+fn internal_function_names() -> Vec<&'static str> {
+    vec![
+        "array_filter",
+        "array_key_exists",
+        "array_map",
+        "array_merge",
+        "count",
+        "explode",
+        "implode",
+        "in_array",
+        "is_array",
+        "json_decode",
+        "json_encode",
+        "preg_match",
+        "str_contains",
+        "str_replace",
+        "strlen",
+        "trim",
+    ]
 }
 
 fn source_location(path: Option<&Path>, byte_offset: usize) -> Option<SourceLocation> {

@@ -33,6 +33,7 @@ of the same resolver and project index.
 - Provide `textDocument/signatureHelp` for resolved callables.
 - Provide `textDocument/definition` for resolved project symbols.
 - Provide `textDocument/hover` for resolved symbols.
+- Provide deterministic `textDocument/completion` for basic symbols.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
@@ -108,7 +109,7 @@ run Rephactor alongside it:
 ```
 
 Rephactor currently provides named-argument and class-import refactor code
-actions, Signature Help V1, Go To Definition V1, and Hover V1.
+actions, Signature Help V1, Go To Definition V1, Hover V1, and Completion V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -125,6 +126,11 @@ project index. It returns no location for dynamic or ambiguous symbols.
 Hover V1 shows a concise PHP signature or class FQN, source location, and the
 nearest PHPDoc summary when available. It intentionally avoids full PHPDoc
 rendering and returns no hover for ambiguous or dynamic symbols.
+
+Completion V1 returns deterministic prefix matches for indexed class names,
+indexed project functions, seeded PHP internal functions, static methods after
+`ClassName::`, and instance methods when the receiver type is locally obvious.
+It intentionally avoids snippets and fuzzy ranking.
 
 Import refactors support adding an import for a resolvable fully-qualified
 class name, shortening that usage, sorting simple class imports, and removing
@@ -150,6 +156,8 @@ file watcher is intentionally deferred.
 ## Supported Cases
 
 - Same-file functions.
+- Basic class, function, static method, and locally obvious instance method
+  completions.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
@@ -176,6 +184,7 @@ Rephactor returns no action instead of guessing for:
 - ambiguous symbols
 - unknown parameter names
 - PHP internal functions outside the seeded stub set
+- completion for dynamic receivers or unresolved classes
 - Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols
