@@ -8497,6 +8497,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "array_values" => &["array"],
         "basename" => &["path", "suffix"],
         "count" => &["value", "mode"],
+        "date" => &["format", "timestamp"],
         "dirname" => &["path", "levels"],
         "explode" => &["separator", "string", "limit"],
         "file_exists" => &["filename"],
@@ -8527,6 +8528,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "strtoupper" => &["string"],
         "substr" => &["string", "offset", "length"],
         "sprintf" => &["format", "values"],
+        "strtotime" => &["datetime", "base_timestamp"],
+        "time" => &[][..],
         "trim" => &["string", "characters"],
         _ => return None,
     };
@@ -8569,6 +8572,7 @@ fn internal_function_parameter_types(
         "array_unique" => &[Some("array"), Some("int")],
         "array_values" => &[Some("array")],
         "basename" => &[Some("string"), Some("string")],
+        "date" => &[Some("string"), Some("int")],
         "dirname" => &[Some("string"), Some("int")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
         "file_exists" => &[Some("string")],
@@ -8604,6 +8608,8 @@ fn internal_function_parameter_types(
         "strtoupper" => &[Some("string")],
         "substr" => &[Some("string"), Some("int"), Some("int")],
         "sprintf" => &[Some("string"), None],
+        "strtotime" => &[Some("string"), Some("int")],
+        "time" => &[],
         "trim" => &[Some("string"), Some("string")],
         _ => &[][..],
     };
@@ -8627,9 +8633,11 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         "array_key_exists" | "file_exists" | "in_array" | "is_array" | "is_bool" | "is_int"
         | "is_null" | "is_numeric" | "is_object" | "is_string" | "str_contains"
         | "str_ends_with" | "str_starts_with" => "bool",
-        "count" | "preg_match" | "strlen" | "strpos" | "strrpos" => "int",
+        "count" | "preg_match" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" => "int",
         "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "realpath" | "rtrim"
-        | "sprintf" | "str_repeat" | "strtolower" | "strtoupper" | "substr" | "trim" => "string",
+        | "date" | "sprintf" | "str_repeat" | "strtolower" | "strtoupper" | "substr" | "trim" => {
+            "string"
+        }
         _ => return None,
     };
     comparable_parameter_type(type_name, None, &ImportMap::default())
@@ -8652,6 +8660,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "array_values",
         "basename",
         "count",
+        "date",
         "dirname",
         "explode",
         "file_exists",
@@ -8682,6 +8691,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "strtoupper",
         "substr",
         "sprintf",
+        "strtotime",
+        "time",
         "trim",
     ]
 }
