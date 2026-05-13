@@ -122,6 +122,7 @@
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
+- [x] Implement inferred return-type `textDocument/inlayHint`.
 - [x] Implement `textDocument/documentLink` for include/require paths.
 - [x] Implement syntax-tree `textDocument/selectionRange`.
 - [x] Implement unresolved type-annotation diagnostics for open files.

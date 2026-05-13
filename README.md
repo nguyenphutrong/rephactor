@@ -213,7 +213,9 @@ document.
 Folding Range V1 folds PHP declaration blocks, compound statements, imports,
 and comments from the syntax tree.
 
-Inlay Hint V1 shows parameter names for resolved positional call arguments.
+Inlay Hint V1 shows parameter names for resolved positional call arguments. It
+also shows conservative return-type hints for function-like declarations without
+a declared return type when they consistently return `new ClassName(...)`.
 
 Document Link V1 links literal relative `include`/`require` paths to files on
 disk.
@@ -274,6 +276,8 @@ files that are not open in the editor are picked up on the next request.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Parameter-name inlay hints for resolved positional call arguments.
+- Inferred return-type inlay hints for function-like declarations that return
+  one `new ClassName(...)` type.
 - Document links for literal relative include/require paths.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.

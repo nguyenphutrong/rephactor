@@ -1421,6 +1421,33 @@ fn lsp_returns_parameter_name_inlay_hints() {
 }
 
 #[test]
+fn lsp_returns_inferred_return_type_inlay_hints() {
+    let root = temp_project("return-type-inlay-hints");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass InvoiceSender {}\nfunction make_sender() { return new InvoiceSender(); }\nfunction declared_sender(): InvoiceSender { return new InvoiceSender(); }\n",
+    );
+
+    let hints = server.inlay_hints(&uri, 0, 0, 4, 0);
+
+    assert!(hints.iter().any(|hint| {
+        hint["label"] == ": InvoiceSender"
+            && hint["kind"] == 1
+            && hint["position"] == json!({ "line": 2, "character": 22 })
+    }));
+    assert_eq!(
+        hints
+            .iter()
+            .filter(|hint| hint["label"] == ": InvoiceSender")
+            .count(),
+        1
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_document_links_for_require_paths() {
     let root = temp_project("document-links");
     let mut server = LspProcess::start(&root);
