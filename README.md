@@ -206,7 +206,8 @@ Code Lens V1 shows exact-reference counts for function, constant, class,
 interface, trait, method, and property declarations. Class-like and method
 declarations also show indexed implementation counts when derived classes are
 known. Trait declarations also show indexed usage counts for classes or traits
-that import them.
+that import them. Method implementations show indexed parent/interface
+declaration counts when available.
 
 Implement Interface Methods V1 offers a code action on classes with directly
 implemented indexed interfaces and inserts stubs for missing interface methods.
@@ -333,8 +334,8 @@ files that are not open in the editor are picked up on the next request.
   and inherited indexed properties.
 - Static property hover and definition lookup for direct, inherited, `self::`,
   `static::`, and direct `parent::` property references.
-- Exact-reference, implementation-count, and trait-usage code lenses for
-  declarations, including constants and properties.
+- Exact-reference, implementation-count, trait-usage, and method-parent code
+  lenses for declarations, including constants and properties.
 - Method declaration lookup for interface/base-class implementations.
 - Type definitions for locally typed variables and parameters.
 - Class/interface implementation lookup across indexed PHP files.

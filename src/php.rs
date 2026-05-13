@@ -3995,9 +3995,102 @@ fn code_lenses_for_document(
         )? {
             lenses.push(implementation_lens);
         }
+
+        if let Some(parent_lens) = parent_method_code_lens_for_declaration(
+            root,
+            name,
+            text,
+            uri,
+            index,
+            &imports,
+            &open_paths,
+        )? {
+            lenses.push(parent_lens);
+        }
     }
 
     Ok(lenses)
+}
+
+fn parent_method_code_lens_for_declaration(
+    root: Node,
+    name: Node,
+    text: &str,
+    uri: &Url,
+    index: &SymbolIndex,
+    imports: &ImportMap,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Result<Option<CodeLens>, SkipReason> {
+    let Some(declaration) = name.parent() else {
+        return Ok(None);
+    };
+    if declaration.kind() != "method_declaration" {
+        return Ok(None);
+    }
+
+    let Some(class_node) = containing_class_like_declaration(declaration) else {
+        return Ok(None);
+    };
+    let Some(class_name_node) = class_node.child_by_field_name("name") else {
+        return Ok(None);
+    };
+    let namespace = namespace_at_byte(root, text, class_node.start_byte());
+    let class_name = clean_name_text(node_text(class_name_node, text));
+    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), imports) else {
+        return Ok(None);
+    };
+
+    let method_key = normalize_method_key(node_text(name, text));
+    let mut signatures = Vec::new();
+    let mut visited = Vec::new();
+    for related_name in class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+    {
+        index.collect_related_method_signatures(
+            related_name,
+            &method_key,
+            &mut visited,
+            &mut signatures,
+        );
+    }
+    let mut locations = signatures
+        .iter()
+        .filter_map(|signature| location_for_source(signature.location.as_ref()?, open_paths))
+        .collect::<Vec<_>>();
+    locations.sort_by_key(|location| {
+        (
+            location.uri.to_string(),
+            location.range.start.line,
+            location.range.start.character,
+        )
+    });
+    locations.dedup_by(|left, right| left.uri == right.uri && left.range == right.range);
+    if locations.is_empty() {
+        return Ok(None);
+    }
+
+    let position = lsp_position_for_byte_offset(text, name.start_byte())
+        .ok_or(SkipReason::InvalidCursorPosition)?;
+
+    Ok(Some(CodeLens {
+        range: range_for_bytes(text, name.start_byte(), name.end_byte())?,
+        command: Some(Command::new(
+            format!(
+                "{} parent{}",
+                locations.len(),
+                if locations.len() == 1 { "" } else { "s" }
+            ),
+            "editor.action.showReferences".to_string(),
+            Some(vec![
+                serde_json::to_value(uri).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(position).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(locations).unwrap_or(serde_json::Value::Null),
+            ]),
+        )),
+        data: None,
+    }))
 }
 
 fn implementation_code_lens_for_declaration(

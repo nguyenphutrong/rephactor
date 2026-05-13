@@ -1966,6 +1966,25 @@ fn lsp_returns_usage_code_lenses_for_trait_declarations() {
 }
 
 #[test]
+fn lsp_returns_parent_code_lenses_for_method_implementations() {
+    let root = temp_project("method-parent-code-lens");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\ninterface Sender { public function dispatch($invoice); }\nclass EmailSender implements Sender { public function dispatch($invoice) {} }\n",
+    );
+
+    let lenses = server.code_lens(&uri);
+
+    assert!(lenses.iter().any(|lens| {
+        lens["command"]["title"] == "1 parent"
+            && lens["command"]["command"] == "editor.action.showReferences"
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_parse_diagnostics_for_open_document() {
     let root = temp_project("diagnostics");
     let mut server = LspProcess::start(&root);
