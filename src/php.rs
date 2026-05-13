@@ -1648,6 +1648,7 @@ fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> 
     };
     let mut ranges = Vec::new();
     collect_folding_ranges(tree.root_node(), text, &mut ranges);
+    collect_custom_region_folding_ranges(text, &mut ranges);
     ranges.sort_by_key(|range| (range.start_line, range.end_line));
     Ok(ranges)
 }
@@ -1870,7 +1871,9 @@ fn folding_kind_for_node(node: Node) -> Option<FoldingRangeKind> {
     match node.kind() {
         "comment" => Some(FoldingRangeKind::Comment),
         "namespace_use_declaration" => Some(FoldingRangeKind::Imports),
-        "compound_statement" | "declaration_list" => Some(FoldingRangeKind::Region),
+        "compound_statement" | "declaration_list" | "heredoc" | "nowdoc" => {
+            Some(FoldingRangeKind::Region)
+        }
         _ => None,
     }
 }
@@ -1890,6 +1893,52 @@ fn folding_range_for_node(node: Node, text: &str, kind: FoldingRangeKind) -> Opt
         kind: Some(kind),
         collapsed_text: None,
     })
+}
+
+fn collect_custom_region_folding_ranges(text: &str, ranges: &mut Vec<FoldingRange>) {
+    let mut stack = Vec::new();
+
+    for (line, content) in text.lines().enumerate() {
+        let line = line as u32;
+        if is_custom_region_start(content) {
+            stack.push(line);
+            continue;
+        }
+
+        if is_custom_region_end(content)
+            && let Some(start_line) = stack.pop()
+            && start_line < line
+        {
+            ranges.push(FoldingRange {
+                start_line,
+                start_character: Some(0),
+                end_line: line,
+                end_character: Some(content.chars().count() as u32),
+                kind: Some(FoldingRangeKind::Region),
+                collapsed_text: None,
+            });
+        }
+    }
+}
+
+fn is_custom_region_start(line: &str) -> bool {
+    custom_region_marker(line)
+        .map(|marker| marker.starts_with("#region") || marker.starts_with("region"))
+        .unwrap_or(false)
+}
+
+fn is_custom_region_end(line: &str) -> bool {
+    custom_region_marker(line)
+        .map(|marker| marker.starts_with("#endregion") || marker.starts_with("endregion"))
+        .unwrap_or(false)
+}
+
+fn custom_region_marker(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    trimmed
+        .strip_prefix("//")
+        .or_else(|| trimmed.strip_prefix('#'))
+        .map(str::trim_start)
 }
 
 fn collect_parse_error_diagnostics(node: Node, text: &str, diagnostics: &mut Vec<Diagnostic>) {
