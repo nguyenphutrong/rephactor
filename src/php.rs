@@ -1945,8 +1945,13 @@ fn collect_return_type_inlay_hints(
         return;
     }
 
-    if matches!(node.kind(), "function_definition" | "method_declaration")
-        && node.child_by_field_name("return_type").is_none()
+    if matches!(
+        node.kind(),
+        "function_definition"
+            | "method_declaration"
+            | "anonymous_function"
+            | "anonymous_function_creation_expression"
+    ) && node.child_by_field_name("return_type").is_none()
         && let Some(parameters) = node.child_by_field_name("parameters")
         && let Some(return_type) = inferred_declaration_return_type(
             context.root,
@@ -2989,6 +2994,7 @@ fn collect_local_call_assignment_return_types(
             node.kind(),
             "function_definition"
                 | "method_declaration"
+                | "anonymous_function"
                 | "anonymous_function_creation_expression"
                 | "arrow_function"
                 | "class_declaration"
@@ -3066,6 +3072,7 @@ fn collect_local_assignment_return_types(
             node.kind(),
             "function_definition"
                 | "method_declaration"
+                | "anonymous_function"
                 | "anonymous_function_creation_expression"
                 | "arrow_function"
                 | "class_declaration"
