@@ -63,6 +63,10 @@ fn named_argument_code_action_with_open_documents(
     position: Position,
     open_documents: &HashMap<Url, String>,
 ) -> Option<CodeAction> {
+    if !document_supports_named_arguments(uri) {
+        return None;
+    }
+
     let byte_offset = byte_offset_for_lsp_position(text, position)?;
     let tree = parse_php(text)?;
     let root = tree.root_node();
@@ -972,6 +976,59 @@ fn find_project_root(document_path: &Path) -> Option<PathBuf> {
     None
 }
 
+fn document_supports_named_arguments(uri: &Url) -> bool {
+    let Ok(document_path) = uri.to_file_path() else {
+        return true;
+    };
+    let Some(project_root) = find_project_root(&document_path) else {
+        return true;
+    };
+
+    project_supports_named_arguments(&project_root)
+}
+
+fn project_supports_named_arguments(project_root: &Path) -> bool {
+    composer_php_constraint(project_root)
+        .map(|constraint| php_constraint_requires_at_least_8(&constraint))
+        .unwrap_or(true)
+}
+
+fn composer_php_constraint(project_root: &Path) -> Option<String> {
+    let composer_text = fs::read_to_string(project_root.join("composer.json")).ok()?;
+    let composer_json: serde_json::Value = serde_json::from_str(&composer_text).ok()?;
+    composer_json
+        .get("require")
+        .and_then(|require| require.get("php"))
+        .and_then(|php| php.as_str())
+        .map(str::to_string)
+}
+
+fn php_constraint_requires_at_least_8(constraint: &str) -> bool {
+    constraint
+        .split("||")
+        .map(str::trim)
+        .filter(|alternative| !alternative.is_empty())
+        .all(php_constraint_alternative_requires_at_least_8)
+}
+
+fn php_constraint_alternative_requires_at_least_8(alternative: &str) -> bool {
+    alternative
+        .split([',', ' '])
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .any(php_constraint_token_requires_at_least_8)
+}
+
+fn php_constraint_token_requires_at_least_8(token: &str) -> bool {
+    let token = token.trim_start_matches('=');
+    let token = token.strip_prefix(">=").unwrap_or(token);
+    let token = token.strip_prefix('^').unwrap_or(token);
+    let token = token.strip_prefix('~').unwrap_or(token);
+    let token = token.strip_prefix('v').unwrap_or(token);
+
+    token == "8" || token.starts_with("8.") || token.starts_with("8.*") || token.starts_with("9")
+}
+
 fn composer_psr4_roots(project_root: &Path) -> Option<Vec<PathBuf>> {
     let composer_text = fs::read_to_string(project_root.join("composer.json")).ok()?;
     let composer_json: serde_json::Value = serde_json::from_str(&composer_text).ok()?;
@@ -1383,6 +1440,59 @@ mod tests {
         assert_eq!(
             apply_edits(caller_text, &edits),
             "<?php\nnamespace App;\nService::sync(first: $first, second: $second);\n"
+        );
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn skips_project_when_composer_php_constraint_allows_php_7() {
+        let project_root = unique_project_root();
+        let src_dir = project_root.join("src");
+        fs::create_dir_all(&src_dir).expect("create source dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"require":{"php":"^7.4"},"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        )
+        .expect("write composer");
+
+        let caller_path = src_dir.join("Caller.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
+        let caller_text = "<?php\nnamespace App;\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+
+        assert!(named_argument_code_action(&caller_uri, caller_text, position(3, 5)).is_none());
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn allows_project_when_composer_requires_php_8() {
+        let project_root = unique_project_root();
+        let src_dir = project_root.join("src");
+        fs::create_dir_all(&src_dir).expect("create source dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"require":{"php":">=8.0 <9.0"},"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        )
+        .expect("write composer");
+
+        let caller_path = src_dir.join("Caller.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
+        let caller_text = "<?php\nnamespace App;\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+
+        let action =
+            named_argument_code_action(&caller_uri, caller_text, position(3, 5)).expect("action");
+        let edits = action
+            .edit
+            .expect("workspace edit")
+            .changes
+            .expect("changes")
+            .remove(&caller_uri)
+            .expect("edits");
+
+        assert_eq!(
+            apply_edits(caller_text, &edits),
+            "<?php\nnamespace App;\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(invoice: $invoice, notify: true);\n"
         );
 
         fs::remove_dir_all(project_root).expect("remove project root");

@@ -121,6 +121,8 @@ only expands long action titles.
 - Project symbols under Composer `autoload.psr-4` roots.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.
+- Projects without a Composer PHP version constraint, or projects whose
+  `require.php` constraint requires PHP 8 or newer.
 
 ## Unsupported Cases
 
@@ -135,8 +137,8 @@ Rephactor returns no action instead of guessing for:
 - Composer autoload modes other than `autoload.psr-4`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols
-- PHP version detection below 8.0; project version configuration is not wired
-  yet
+- Composer `require.php` constraints that allow PHP 7.x, because named
+  arguments require PHP 8
 
 ## Release Status
 
@@ -154,7 +156,6 @@ Deferred until V1 behavior is stable:
 - Composer classmap support
 - PHP internal stubs
 - PHPStan/Psalm metadata
-- project PHP version configuration
 
 ## Manual Acceptance
 

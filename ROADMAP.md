@@ -58,7 +58,7 @@
 - Add PHP internal function stubs.
 - Handle Composer classmaps.
 - Consider PHPStan/Psalm metadata for type resolution.
-- Add configuration for project PHP version.
+- [x] Add configuration for project PHP version.
 
 ## Phase 8: Release Hardening
 
