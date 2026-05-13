@@ -1778,6 +1778,7 @@ fn completion_for_position_with_cache(
             &prefix,
         ));
         items.extend(keyword_completion_items(&prefix));
+        items.extend(superglobal_completion_items(&prefix));
         items.sort_by_key(|item| item.label.to_ascii_lowercase());
         items
     };
@@ -8468,6 +8469,18 @@ fn keyword_completion_items(prefix: &str) -> Vec<CompletionItem> {
         .collect()
 }
 
+fn superglobal_completion_items(prefix: &str) -> Vec<CompletionItem> {
+    php_superglobals()
+        .into_iter()
+        .filter(|name| prefix_matches(name, prefix))
+        .map(|name| CompletionItem {
+            label: name.to_string(),
+            kind: Some(CompletionItemKind::VARIABLE),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
 fn prefix_matches(name: &str, prefix: &str) -> bool {
     let prefix = prefix.trim();
     prefix.is_empty()
@@ -9587,6 +9600,20 @@ fn is_internal_constant_name(name: &str) -> bool {
     internal_constant_names()
         .into_iter()
         .any(|constant| constant.eq_ignore_ascii_case(name))
+}
+
+fn php_superglobals() -> Vec<&'static str> {
+    vec![
+        "$GLOBALS",
+        "$_COOKIE",
+        "$_ENV",
+        "$_FILES",
+        "$_GET",
+        "$_POST",
+        "$_REQUEST",
+        "$_SERVER",
+        "$_SESSION",
+    ]
 }
 
 fn php_keywords() -> Vec<&'static str> {

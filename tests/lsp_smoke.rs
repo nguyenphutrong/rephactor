@@ -1995,6 +1995,26 @@ fn lsp_returns_internal_constant_completions() {
 }
 
 #[test]
+fn lsp_returns_superglobal_completions() {
+    let root = temp_project("completion-superglobals");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\n$_SER;\n");
+
+    let items = server.completion(&uri, 1, 6);
+    let variable_kind =
+        serde_json::to_value(CompletionItemKind::VARIABLE).expect("variable kind json");
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "$_SERVER")
+        .expect("$_SERVER completion");
+
+    assert_eq!(item["kind"], variable_kind);
+    assert!(item.get("additionalTextEdits").is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_method_completion_after_static_scope() {
     let root = temp_project("completion-static-method");
     let mut server = LspProcess::start(&root);
