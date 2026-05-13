@@ -2681,6 +2681,37 @@ fn lsp_resolves_classmap_symbol() {
 }
 
 #[test]
+fn lsp_resolves_composer_autoload_files_functions() {
+    let root = temp_project("autoload-files");
+    let app_dir = root.join("app");
+    std::fs::create_dir_all(&app_dir).expect("create app dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"files":["helpers.php"]}}"#,
+    )
+    .expect("write composer");
+    std::fs::write(
+        root.join("helpers.php"),
+        "<?php\nfunction send_invoice($invoice, $notify) {}\n",
+    )
+    .expect("write helper file");
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(
+        &app_dir.join("Caller.php"),
+        "<?php\nsend_invoice($invoice, true);\n",
+    );
+
+    let actions = server.code_actions(&uri, 1, 5);
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(
+        insert_texts(&actions[0], &uri),
+        vec!["invoice: ", "notify: "]
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_resolves_inherited_method() {
     let root = temp_project("inherited");
     let mut server = LspProcess::start(&root);

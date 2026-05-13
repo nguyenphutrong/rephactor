@@ -407,6 +407,7 @@ files that are not open in the editor are picked up on the next request.
   receiver types.
 - Project symbols under Composer `autoload.psr-4` roots.
 - Project symbols under Composer `autoload.classmap` files or directories.
+- Project symbols under Composer `autoload.files` PHP helper files.
 - A seed set of PHP internal functions, such as `str_replace`, `json_encode`,
   `preg_match`, `in_array`, `str_starts_with`, and `array_values`, with PHP
   manual links in hover.
@@ -430,7 +431,8 @@ Rephactor returns no action instead of guessing for:
 - PSR-12 structural formatting beyond trailing-whitespace cleanup
 - static-analysis diagnostics beyond parser, callable-resolution, and
   conservative return/argument/assignment type mismatch errors
-- Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
+- Composer autoload modes other than `autoload.psr-4`, `autoload.classmap`,
+  and `autoload.files`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols
 - PHPStan/Psalm metadata, including generics, template annotations, and

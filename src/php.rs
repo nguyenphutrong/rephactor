@@ -6937,6 +6937,10 @@ fn composer_autoload_paths(project_root: &Path) -> Option<Vec<PathBuf>> {
         collect_composer_paths(project_root, classmap, &mut roots);
     }
 
+    if let Some(files) = autoload.get("files") {
+        collect_composer_paths(project_root, files, &mut roots);
+    }
+
     (!roots.is_empty()).then_some(roots)
 }
 
