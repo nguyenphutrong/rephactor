@@ -163,9 +163,10 @@ rendering and returns no hover for ambiguous or dynamic symbols.
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
 matches for indexed class names, indexed project functions, seeded PHP internal
 functions, static methods after `ClassName::`, and instance methods when the
-receiver type is locally obvious. It also includes common PHP keyword
-completions and adds a `use` declaration edit for unambiguous namespaced class
-completions when the short name is not already imported or shadowed. It
+receiver type is locally obvious. Method completion includes indexed parent,
+interface, trait, and PHPDoc `@mixin` methods. It also includes common PHP
+keyword completions and adds a `use` declaration edit for unambiguous namespaced
+class completions when the short name is not already imported or shadowed. It
 intentionally avoids snippets and fuzzy ranking.
 
 Document Symbol V1 returns functions, classes, interfaces, traits, and class
@@ -236,6 +237,8 @@ files that are not open in the editor are picked up on the next request.
 - Same-file functions.
 - Basic class, function, static method, and locally obvious instance method
   completions.
+- Related instance method completions from indexed parents, interfaces, traits,
+  and PHPDoc `@mixin` classes.
 - PHP keyword completions.
 - Document symbols for functions, class-like declarations, and methods.
 - Workspace symbols for indexed functions, classes, and methods.

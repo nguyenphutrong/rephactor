@@ -893,6 +893,42 @@ fn lsp_returns_method_completion_after_static_scope() {
 }
 
 #[test]
+fn lsp_returns_related_instance_method_completions() {
+    let root = temp_project("completion-related-methods");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseSender { public function baseDispatch() {} }\ninterface SenderContract { public function contractDispatch(); }\ntrait SenderTrait { public function traitDispatch() {} }\nclass SenderMixin { public function mixinDispatch() {} }\n/** @mixin SenderMixin */\nclass Sender extends BaseSender implements SenderContract { use SenderTrait; }\nfunction run(Sender $sender) {\n    $sender->baseDispatch();\n    $sender->contractDispatch();\n    $sender->traitDispatch();\n    $sender->mixinDispatch();\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let base_items = server.completion(&uri, 8, 17);
+    let contract_items = server.completion(&uri, 9, 21);
+    let trait_items = server.completion(&uri, 10, 18);
+    let mixin_items = server.completion(&uri, 11, 18);
+
+    assert!(
+        base_items
+            .iter()
+            .any(|item| item["label"] == "baseDispatch")
+    );
+    assert!(
+        contract_items
+            .iter()
+            .any(|item| item["label"] == "contractDispatch")
+    );
+    assert!(
+        trait_items
+            .iter()
+            .any(|item| item["label"] == "traitDispatch")
+    );
+    assert!(
+        mixin_items
+            .iter()
+            .any(|item| item["label"] == "mixinDispatch")
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_nested_document_symbols() {
     let root = temp_project("document-symbol");
     let mut server = LspProcess::start(&root);

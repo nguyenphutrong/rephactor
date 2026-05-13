@@ -91,6 +91,7 @@
 - [x] Implement PHP keyword completion.
 - [x] Add conservative auto-import edits for class completions.
 - [x] Add camel/underscore-aware matching for completion and workspace symbols.
+- [x] Include indexed parent/interface/trait/mixin methods in completions.
 
 ## Phase 12: Intelephense Parity Foundations
 
