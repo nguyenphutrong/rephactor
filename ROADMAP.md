@@ -133,6 +133,7 @@
 - [x] Implement unresolved type-annotation diagnostics for open files.
 - [x] Implement conservative return-type mismatch diagnostics for open files.
 - [x] Implement local-variable return-type mismatch diagnostics for open files.
+- [x] Implement returned-call return-type mismatch diagnostics for open files.
 - [x] Implement conservative argument-type mismatch diagnostics for open files.
 - [x] Implement assigned-variable argument-type mismatch diagnostics for open files.
 - [x] Implement conservative assignment-type mismatch diagnostics for open files.

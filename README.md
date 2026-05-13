@@ -211,10 +211,11 @@ calls, and conservative unused-import diagnostics for normal non-aliased class
 imports. It also reports conservative return-type mismatches when a declared
 return type conflicts with a directly returned scalar literal, array literal, or
 object creation expression, including local variables assigned one of those
-obvious values before return. Resolved calls also report conservative argument
-type mismatches when typed parameters receive obvious literal or object-creation
-arguments, including variables assigned obvious values earlier in the same local
-or top-level scope. Typed parameters report assignment mismatches when
+obvious values before return and resolved calls with declared return types.
+Resolved calls also report conservative argument type mismatches when typed
+parameters receive obvious literal or object-creation arguments, including
+variables assigned obvious values earlier in the same local or top-level scope.
+Typed parameters report assignment mismatches when
 reassigned to those obvious values, and local `@var` PHPDoc annotations are
 used as assignment type contracts for the same conservative checks. Broader
 static analysis is still deferred until the type model is stronger.
@@ -294,6 +295,8 @@ files that are not open in the editor are picked up on the next request.
 - Conservative return-type mismatch diagnostics for directly returned literals,
   object creation expressions, and local variables assigned those obvious values
   before return.
+- Conservative return-type mismatch diagnostics for returned resolved calls with
+  declared return types.
 - Conservative argument-type mismatch diagnostics for resolved calls with typed
   parameters and obvious literal, object-creation, or previously assigned
   variable arguments.

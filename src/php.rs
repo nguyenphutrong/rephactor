@@ -24,6 +24,7 @@ struct Signature {
     name: String,
     parameters: Vec<String>,
     parameter_types: Vec<Option<ComparableReturnType>>,
+    return_type: Option<ComparableReturnType>,
     is_variadic: bool,
     is_abstract: bool,
     location: Option<SourceLocation>,
@@ -324,7 +325,9 @@ pub fn analyze_diagnostics_for_document_with_cache(
 
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
     diagnostics.extend(duplicate_parameter_diagnostics(root, text));
-    diagnostics.extend(return_type_mismatch_diagnostics(root, text, &imports));
+    diagnostics.extend(return_type_mismatch_diagnostics(
+        root, text, &imports, &index,
+    ));
     diagnostics.extend(assignment_type_mismatch_diagnostics(root, text, &imports));
     diagnostics.extend(unused_import_diagnostics(
         root,
@@ -2193,9 +2196,10 @@ fn return_type_mismatch_diagnostics(
     root: Node,
     text: &str,
     imports: &ImportMap,
+    index: &SymbolIndex,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    collect_return_type_mismatch_diagnostics(root, root, text, imports, &mut diagnostics);
+    collect_return_type_mismatch_diagnostics(root, root, text, imports, index, &mut diagnostics);
     diagnostics
 }
 
@@ -2204,17 +2208,18 @@ fn collect_return_type_mismatch_diagnostics(
     node: Node,
     text: &str,
     imports: &ImportMap,
+    index: &SymbolIndex,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if matches!(node.kind(), "function_definition" | "method_declaration") {
         diagnostics.extend(return_type_mismatches_for_declaration(
-            root, node, text, imports,
+            root, node, text, imports, index,
         ));
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_return_type_mismatch_diagnostics(root, child, text, imports, diagnostics);
+        collect_return_type_mismatch_diagnostics(root, child, text, imports, index, diagnostics);
     }
 }
 
@@ -2223,6 +2228,7 @@ fn return_type_mismatches_for_declaration(
     declaration: Node,
     text: &str,
     imports: &ImportMap,
+    index: &SymbolIndex,
 ) -> Vec<Diagnostic> {
     let Some(return_type) = declaration
         .child_by_field_name("return_type")
@@ -2246,11 +2252,13 @@ fn return_type_mismatches_for_declaration(
         .into_iter()
         .filter_map(|expression| {
             let actual = inferred_return_expression_type(
+                root,
                 declaration,
                 expression,
                 text,
                 namespace.as_deref(),
                 imports,
+                Some(index),
             )?;
             (declared != actual).then(|| Diagnostic {
                 range: range_for_bytes(text, expression.start_byte(), expression.end_byte())
@@ -2298,17 +2306,27 @@ fn comparable_return_type(
 }
 
 fn inferred_return_expression_type(
+    root: Node,
     declaration: Node,
     expression: Node,
     text: &str,
     namespace: Option<&str>,
     imports: &ImportMap,
+    index: Option<&SymbolIndex>,
 ) -> Option<ComparableReturnType> {
     let kind = expression.kind();
     if kind == "expression" {
         let mut cursor = expression.walk();
         let inner = expression.named_children(&mut cursor).next()?;
-        return inferred_return_expression_type(declaration, inner, text, namespace, imports);
+        return inferred_return_expression_type(
+            root,
+            declaration,
+            inner,
+            text,
+            namespace,
+            imports,
+            index,
+        );
     }
     if matches!(
         kind,
@@ -2359,6 +2377,23 @@ fn inferred_return_expression_type(
             imports,
             node_text(expression, text),
         );
+    }
+    if matches!(
+        kind,
+        "function_call_expression" | "scoped_call_expression" | "member_call_expression"
+    ) {
+        let target = call_target_for_call_node(expression, text).ok()?;
+        return index?
+            .resolve(
+                &target,
+                root,
+                text,
+                expression.start_byte(),
+                namespace,
+                imports,
+            )
+            .ok()?
+            .return_type;
     }
 
     None
@@ -2453,7 +2488,9 @@ fn inferred_assigned_return_type(
         return None;
     }
 
-    inferred_return_expression_type(expression, expression, text, namespace, imports)
+    inferred_return_expression_type(
+        expression, expression, expression, text, namespace, imports, None,
+    )
 }
 
 fn inferred_argument_expression_type(
@@ -2485,7 +2522,9 @@ fn inferred_argument_expression_type(
         return None;
     }
 
-    inferred_return_expression_type(expression, expression, text, namespace, imports)
+    inferred_return_expression_type(
+        expression, expression, expression, text, namespace, imports, None,
+    )
 }
 
 fn assignment_type_mismatch_diagnostics(
@@ -3730,6 +3769,7 @@ fn index_function(
         name: name.clone(),
         parameters: parameter_names(parameters_node, text),
         parameter_types: parameter_types(parameters_node, text, namespace, imports),
+        return_type: declaration_signature_return_type(node, text, namespace, imports),
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: false,
         location: source_location(path, name_node.start_byte()),
@@ -3813,6 +3853,7 @@ fn index_method(
         name: method_name.clone(),
         parameters: parameter_names(parameters_node, text),
         parameter_types: parameter_types(parameters_node, text, namespace, imports),
+        return_type: declaration_signature_return_type(node, text, namespace, imports),
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: method_is_abstract(node, text),
         location: source_location(path, name_node.start_byte()),
@@ -4141,6 +4182,18 @@ fn comparable_parameter_type(
     Some(comparable_return_type(type_name, namespace, imports))
 }
 
+fn declaration_signature_return_type(
+    declaration: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    declaration
+        .child_by_field_name("return_type")
+        .and_then(|type_node| single_named_type(type_node, text))
+        .and_then(|type_name| comparable_parameter_type(&type_name, namespace, imports))
+}
+
 fn parameters_node_has_variadic(parameters_node: Node) -> bool {
     let mut cursor = parameters_node.walk();
     parameters_node
@@ -4338,7 +4391,18 @@ fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
         return Err(SkipReason::NoEdits);
     }
 
-    let target = match node.kind() {
+    let target = call_target_for_call_node(node, text)?;
+
+    Ok(CallInfo {
+        target,
+        arguments,
+        arguments_start_byte: arguments_node.start_byte(),
+        arguments_end_byte: arguments_node.end_byte(),
+    })
+}
+
+fn call_target_for_call_node(node: Node, text: &str) -> Result<CallTarget, SkipReason> {
+    match node.kind() {
         "function_call_expression" => {
             let Some(function_node) = node.child_by_field_name("function") else {
                 return Err(SkipReason::UnsupportedDynamicCall);
@@ -4346,7 +4410,10 @@ fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
             if !is_name_node(function_node) {
                 return Err(SkipReason::UnsupportedDynamicCall);
             }
-            CallTarget::Function(clean_name_text(node_text(function_node, text)))
+            Ok(CallTarget::Function(clean_name_text(node_text(
+                function_node,
+                text,
+            ))))
         }
         "scoped_call_expression" => {
             let Some(scope_node) = node.child_by_field_name("scope") else {
@@ -4358,10 +4425,10 @@ fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
             let Some(method) = member_name_for_call(node, text) else {
                 return Err(SkipReason::UnsupportedDynamicCall);
             };
-            CallTarget::StaticMethod {
+            Ok(CallTarget::StaticMethod {
                 class_name: clean_name_text(node_text(scope_node, text)),
                 method,
-            }
+            })
         }
         "member_call_expression" => {
             let Some(object_node) = node.child_by_field_name("object") else {
@@ -4373,10 +4440,10 @@ fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
             let Some(method) = member_name_for_call(node, text) else {
                 return Err(SkipReason::UnsupportedDynamicCall);
             };
-            CallTarget::InstanceMethod {
+            Ok(CallTarget::InstanceMethod {
                 variable: node_text(object_node, text).to_string(),
                 method,
-            }
+            })
         }
         "object_creation_expression" => {
             let Some(class_node) = class_name_for_object_creation(node) else {
@@ -4385,19 +4452,12 @@ fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
             if !is_name_node(class_node) {
                 return Err(SkipReason::UnsupportedDynamicCall);
             }
-            CallTarget::Constructor {
+            Ok(CallTarget::Constructor {
                 class_name: clean_name_text(node_text(class_node, text)),
-            }
+            })
         }
-        _ => return Err(SkipReason::NoSupportedCall),
-    };
-
-    Ok(CallInfo {
-        target,
-        arguments,
-        arguments_start_byte: arguments_node.start_byte(),
-        arguments_end_byte: arguments_node.end_byte(),
-    })
+        _ => Err(SkipReason::NoSupportedCall),
+    }
 }
 
 fn call_target_range(text: &str, node: Node) -> Result<Range, SkipReason> {
@@ -5181,6 +5241,7 @@ fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
         name: name.to_string(),
         parameters,
         parameter_types: Vec::new(),
+        return_type: None,
         is_variadic,
         is_abstract: false,
         location: None,
@@ -6069,6 +6130,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         name: name.to_string(),
         parameter_types: vec![None; parameters.len()],
         parameters,
+        return_type: None,
         is_variadic: matches!(normalized_name.as_str(), "array_merge"),
         is_abstract: false,
         location: None,
