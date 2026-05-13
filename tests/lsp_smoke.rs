@@ -1348,6 +1348,37 @@ fn lsp_returns_related_instance_method_completions() {
 }
 
 #[test]
+fn lsp_returns_instance_property_completions() {
+    let root = temp_project("completion-instance-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseSender { protected $queue; }\ntrait SenderTrait { protected $channel; }\nclass Sender extends BaseSender { use SenderTrait; private $transport; public function dispatch() {} }\nfunction run(Sender $sender) {\n    $sender->transport;\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 5, 13);
+    let property_kind =
+        serde_json::to_value(CompletionItemKind::PROPERTY).expect("property kind json");
+
+    assert!(items.iter().any(|item| item["label"] == "dispatch"));
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "transport" && item["kind"] == property_kind })
+    );
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "queue" && item["kind"] == property_kind })
+    );
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "channel" && item["kind"] == property_kind })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_instance_method_completion_for_variable_alias() {
     let root = temp_project("completion-variable-alias-methods");
     let mut server = LspProcess::start(&root);

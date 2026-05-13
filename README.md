@@ -172,14 +172,13 @@ Completion V1 returns deterministic prefix, camel-case, and underscore-aware
 matches for indexed class names, indexed project functions and constants,
 seeded PHP internal functions, static methods and class constants from indexed
 classes and related parents/interfaces/traits after `ClassName::`, and instance
-methods when the receiver type is locally obvious, flows through a simple local
-variable alias, or comes from a resolved call with a class return type. Static
-scope completion understands `self`, `static`, and direct `parent` inside
-class-like scopes. Method completion understands native `self`, `static`, and
-direct `parent` parameter types inside class-like scopes. Method completion
-includes indexed parent, interface, trait, and PHPDoc `@mixin` methods. It also
-includes common PHP keyword completions and adds a `use` or `use const`
-declaration edit for unambiguous namespaced class
+methods and properties when the receiver type is locally obvious, flows through
+a simple local variable alias, or comes from a resolved call with a class return
+type. Static scope completion understands `self`, `static`, and direct `parent`
+inside class-like scopes. Method and property completion includes indexed
+parent, interface, trait, and PHPDoc `@mixin` members. It also includes common
+PHP keyword completions and adds a `use` or `use const` declaration edit for
+unambiguous namespaced class
 and constant completions when the short name is not already imported or
 shadowed. It intentionally avoids snippets and fuzzy ranking.
 
@@ -310,6 +309,8 @@ files that are not open in the editor are picked up on the next request.
 - Project constant completions.
 - Class constant completions after `ClassName::`.
 - Static-scope completion after `self::`, `static::`, and direct `parent::`.
+- Instance property completions from indexed classes, parents, traits, and
+  PHPDoc `@mixin` classes.
 - Related instance method completions from indexed parents, interfaces, traits,
   and PHPDoc `@mixin` classes.
 - PHP keyword completions.

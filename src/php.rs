@@ -39,6 +39,7 @@ struct ClassInfo {
     doc_summary: Option<String>,
     methods: HashMap<String, Signature>,
     constants: Vec<ClassConstantInfo>,
+    properties: Vec<ClassPropertyInfo>,
     constructor: Option<Signature>,
     parents: Vec<String>,
     interfaces: Vec<String>,
@@ -50,6 +51,11 @@ struct ClassInfo {
 struct ClassConstantInfo {
     name: String,
     location: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClassPropertyInfo {
+    name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1619,7 +1625,7 @@ fn completion_for_position_with_cache(
         else {
             return Err(SkipReason::UnresolvedCallable(class_name.clone()));
         };
-        method_completion_items(&index, class_info, &method_prefix)
+        instance_member_completion_items(&index, class_info, &method_prefix)
     } else {
         let import_declarations = import_declarations(root, text);
         let mut items = class_completion_items(
@@ -4439,6 +4445,40 @@ impl SymbolIndex {
             self.collect_related_constant_names(related_name, visited, names);
         }
     }
+
+    fn collect_related_property_names(
+        &self,
+        class_name: &str,
+        visited: &mut Vec<String>,
+        names: &mut Vec<String>,
+    ) {
+        let class_key = normalize_symbol_key(class_name);
+        if visited.contains(&class_key) {
+            return;
+        }
+        visited.push(class_key.clone());
+
+        let Some(class_info) = self.classes.get(&class_key) else {
+            return;
+        };
+
+        names.extend(
+            class_info
+                .properties
+                .iter()
+                .map(|property| property.name.clone()),
+        );
+
+        for related_name in class_info
+            .parents
+            .iter()
+            .chain(class_info.interfaces.iter())
+            .chain(class_info.traits.iter())
+            .chain(class_info.mixins.iter())
+        {
+            self.collect_related_property_names(related_name, visited, names);
+        }
+    }
 }
 
 impl ProjectIndexCache {
@@ -4894,6 +4934,13 @@ fn index_class(
             continue;
         }
 
+        if child.kind() == "property_declaration" {
+            class_info
+                .properties
+                .extend(class_property_infos(child, text));
+            continue;
+        }
+
         if child.kind() != "method_declaration" {
             continue;
         }
@@ -4921,6 +4968,26 @@ fn class_constant_infos(node: Node, text: &str, path: Option<&Path>) -> Vec<Clas
     }
 
     constants
+}
+
+fn class_property_infos(node: Node, text: &str) -> Vec<ClassPropertyInfo> {
+    let mut properties = Vec::new();
+    let mut cursor = node.walk();
+
+    for property in node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "property_element")
+    {
+        if let Some(name_node) = property.child_by_field_name("name") {
+            properties.push(ClassPropertyInfo {
+                name: node_text(name_node, text)
+                    .trim_start_matches('$')
+                    .to_string(),
+            });
+        }
+    }
+
+    properties
 }
 
 fn index_method(
@@ -6988,6 +7055,17 @@ fn static_scope_completion_items(
     items
 }
 
+fn instance_member_completion_items(
+    index: &SymbolIndex,
+    class_info: &ClassInfo,
+    prefix: &str,
+) -> Vec<CompletionItem> {
+    let mut items = method_completion_items(index, class_info, prefix);
+    items.extend(property_completion_items(index, class_info, prefix));
+    items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    items
+}
+
 fn resolve_static_scope_class<'a>(
     index: &'a SymbolIndex,
     root: Node,
@@ -7051,6 +7129,44 @@ fn class_constant_completion_items(
         .map(|label| CompletionItem {
             label,
             kind: Some(CompletionItemKind::CONSTANT),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+fn property_completion_items(
+    index: &SymbolIndex,
+    class_info: &ClassInfo,
+    prefix: &str,
+) -> Vec<CompletionItem> {
+    let mut labels = class_info
+        .properties
+        .iter()
+        .map(|property| property.name.clone())
+        .collect::<Vec<_>>();
+
+    let mut visited = Vec::new();
+    for related_name in class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+        .chain(class_info.traits.iter())
+        .chain(class_info.mixins.iter())
+    {
+        index.collect_related_property_names(related_name, &mut visited, &mut labels);
+    }
+
+    let mut labels = labels
+        .into_iter()
+        .filter(|name| prefix_matches(name, prefix))
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.to_ascii_lowercase());
+    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    labels
+        .into_iter()
+        .map(|label| CompletionItem {
+            label,
+            kind: Some(CompletionItemKind::PROPERTY),
             ..CompletionItem::default()
         })
         .collect()
