@@ -170,10 +170,12 @@ matches for indexed class names, indexed project functions, seeded PHP internal
 functions, static methods after `ClassName::`, and instance methods when the
 receiver type is locally obvious, flows through a simple local variable alias,
 or comes from a resolved call with a class return type. Method completion
-includes indexed parent, interface, trait, and PHPDoc `@mixin` methods. It also
-includes common PHP keyword completions and adds a `use` declaration edit for
-unambiguous namespaced class completions when the short name is not already
-imported or shadowed. It intentionally avoids snippets and fuzzy ranking.
+understands native `self` and `static` parameter types inside class-like scopes.
+Method completion includes indexed parent, interface, trait, and PHPDoc
+`@mixin` methods. It also includes common PHP keyword completions and adds a
+`use` declaration edit for unambiguous namespaced class completions when the
+short name is not already imported or shadowed. It intentionally avoids snippets
+and fuzzy ranking.
 
 Document Symbol V1 returns functions, classes, interfaces, traits, and class
 methods for editor outline and breadcrumb UIs.
@@ -381,6 +383,7 @@ files that are not open in the editor are picked up on the next request.
   alias.
 - Instance methods when the receiver type comes from a resolved call with a
   class return type.
+- Instance methods for native `self` and `static` parameter receiver types.
 - Project symbols under Composer `autoload.psr-4` roots.
 - Project symbols under Composer `autoload.classmap` files or directories.
 - A small seed set of PHP internal functions, such as `str_replace`,

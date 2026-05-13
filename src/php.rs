@@ -6167,12 +6167,11 @@ fn collect_parameter_types(
                 continue;
             };
 
-            let type_name = first_named_type(type_node, text);
-            if let Some(type_name) = type_name {
-                types.insert(
-                    node_text(name_node, text).to_string(),
-                    qualify_type_name(&type_name, namespace, imports),
-                );
+            if let Some(type_name) = first_named_type(type_node, text)
+                && let Some(type_name) =
+                    qualify_parameter_type_name(&type_name, node, text, namespace, imports)
+            {
+                types.insert(node_text(name_node, text).to_string(), type_name);
             }
         }
     }
@@ -6181,6 +6180,23 @@ fn collect_parameter_types(
     for child in node.named_children(&mut cursor) {
         collect_parameter_types(child, text, byte_offset, namespace, imports, types);
     }
+}
+
+fn qualify_parameter_type_name(
+    type_name: &str,
+    declaration: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<String> {
+    let normalized = normalize_symbol_key(type_name);
+    if matches!(normalized.as_str(), "self" | "static") {
+        let class_node = containing_class_like_declaration(declaration)?;
+        let name_node = class_node.child_by_field_name("name")?;
+        return Some(qualify_name(node_text(name_node, text), namespace));
+    }
+
+    Some(qualify_type_name(type_name, namespace, imports))
 }
 
 fn collect_phpdoc_param_types(

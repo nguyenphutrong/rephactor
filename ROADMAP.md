@@ -116,6 +116,7 @@
 - [x] Use PHPDoc `@param` parameter contracts in type mismatch diagnostics.
 - [x] Resolve simple local variable aliases for instance method receivers.
 - [x] Resolve assigned call-return types for instance method receivers.
+- [x] Resolve native `self` and `static` parameter receiver types.
 - [x] Resolve PHPDoc `@mixin` methods for instance method resolution.
 - [x] Resolve PHPDoc `@method` magic methods.
 - [x] Implement parser diagnostics for open files.
