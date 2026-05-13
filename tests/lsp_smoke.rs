@@ -1288,7 +1288,7 @@ fn lsp_returns_workspace_symbols_from_composer_project() {
     let service_path = src_dir.join("InvoiceSender.php");
     std::fs::write(
         &service_path,
-        "<?php\nnamespace App;\nfunction send_invoice($invoice) {}\nclass InvoiceSender { public function dispatch($invoice) {} }\n",
+        "<?php\nnamespace App;\nconst API_VERSION = '1';\nfunction send_invoice($invoice) {}\nclass InvoiceSender { public function dispatch($invoice) {} }\n",
     )
     .expect("write service");
     let mut server = LspProcess::start(&root);
@@ -1318,6 +1318,13 @@ fn lsp_returns_workspace_symbols_from_composer_project() {
         symbols
             .iter()
             .any(|symbol| symbol["name"] == "App\\send_invoice")
+    );
+    let symbols = server.workspace_symbols("API");
+
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["name"] == "App\\API_VERSION")
     );
     assert!(
         symbols

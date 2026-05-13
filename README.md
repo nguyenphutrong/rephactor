@@ -182,8 +182,9 @@ Document Symbol V1 returns functions, constants, classes, interfaces, traits,
 and class constants, properties, and methods for editor outline and breadcrumb
 UIs.
 
-Workspace Symbol V1 searches Composer-indexed functions, classes, and methods
-with deterministic case-insensitive, camel-case, and underscore-aware matching.
+Workspace Symbol V1 searches Composer-indexed functions, constants, classes,
+and methods with deterministic case-insensitive, camel-case, and
+underscore-aware matching.
 
 References V1 finds exact matching AST name references across Composer-indexed
 PHP files and open document overlays. It is intentionally conservative and does
@@ -304,7 +305,7 @@ files that are not open in the editor are picked up on the next request.
 - PHP keyword completions.
 - Document symbols for functions, constants, class-like declarations, class
   constants, properties, and methods.
-- Workspace symbols for indexed functions, classes, and methods.
+- Workspace symbols for indexed functions, constants, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
 - Matching class-like PHP file rename operations for class/interface/trait
