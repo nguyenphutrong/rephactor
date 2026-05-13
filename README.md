@@ -32,6 +32,7 @@ of the same resolver and project index.
 - Provide conservative class import refactor code actions.
 - Provide `textDocument/signatureHelp` for resolved callables.
 - Provide `textDocument/definition` for resolved project symbols.
+- Provide `textDocument/hover` for resolved symbols.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
@@ -107,7 +108,7 @@ run Rephactor alongside it:
 ```
 
 Rephactor currently provides named-argument and class-import refactor code
-actions, Signature Help V1, and Go To Definition V1.
+actions, Signature Help V1, Go To Definition V1, and Hover V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -120,6 +121,10 @@ signature for unsupported or ambiguous calls instead of guessing.
 Go To Definition V1 navigates to resolved functions, classes, methods, static
 methods, constructors, traits, interfaces, and imports that are present in the
 project index. It returns no location for dynamic or ambiguous symbols.
+
+Hover V1 shows a concise PHP signature or class FQN, source location, and the
+nearest PHPDoc summary when available. It intentionally avoids full PHPDoc
+rendering and returns no hover for ambiguous or dynamic symbols.
 
 Import refactors support adding an import for a resolvable fully-qualified
 class name, shortening that usage, sorting simple class imports, and removing

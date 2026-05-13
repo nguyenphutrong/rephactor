@@ -4,9 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, GotoDefinitionResponse, Location,
-    ParameterInformation, ParameterLabel, Position, Range, SignatureHelp, SignatureInformation,
-    TextEdit, Url, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, GotoDefinitionResponse, Hover, HoverContents,
+    Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
+    SignatureHelp, SignatureInformation, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -18,12 +18,14 @@ const ACTION_TITLE: &str = "[Rephactor] Add names to arguments";
 struct Signature {
     parameters: Vec<String>,
     location: Option<SourceLocation>,
+    doc_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ClassInfo {
     fqn: String,
     location: Option<SourceLocation>,
+    doc_summary: Option<String>,
     methods: HashMap<String, Signature>,
     constructor: Option<Signature>,
     parents: Vec<String>,
@@ -126,6 +128,13 @@ pub struct SignatureHelpAnalysis {
 #[derive(Debug)]
 pub struct DefinitionAnalysis {
     pub definition: Option<GotoDefinitionResponse>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct HoverAnalysis {
+    pub hover: Option<Hover>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
 }
@@ -240,6 +249,28 @@ pub fn analyze_definition_for_position_with_cache(
         },
         Err(reason) => DefinitionAnalysis {
             definition: None,
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_hover_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> HoverAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match hover_for_position_with_cache(uri, text, position, open_documents, cache) {
+        Ok(hover) => HoverAnalysis {
+            hover: Some(hover),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => HoverAnalysis {
+            hover: None,
             skip_reason: Some(reason),
             index_cache_status,
         },
@@ -426,6 +457,55 @@ fn definition_for_position_with_cache(
     };
 
     location_response(class_info.location.as_ref(), &open_paths)
+}
+
+fn hover_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<Hover, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+
+    if let Ok(call) = find_call_at_byte(root, text, byte_offset) {
+        let signature = index.resolve(
+            &call.target,
+            root,
+            text,
+            byte_offset,
+            namespace.as_deref(),
+            &imports,
+        )?;
+        return Ok(hover_from_parts(
+            signature_label(&call.target, &signature),
+            signature.location.as_ref(),
+            signature.doc_summary.as_deref(),
+        ));
+    }
+
+    let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let class_name = clean_name_text(node_text(name_node, text));
+    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+        return Err(SkipReason::UnresolvedCallable(class_name));
+    };
+
+    Ok(hover_from_parts(
+        format!("class {}", class_info.fqn),
+        class_info.location.as_ref(),
+        class_info.doc_summary.as_deref(),
+    ))
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
@@ -993,6 +1073,7 @@ fn index_function(
     let signature = Signature {
         parameters: parameter_names(parameters_node, text),
         location: source_location(path, name_node.start_byte()),
+        doc_summary: phpdoc_summary_before(text, node.start_byte()),
     };
     index.add_function(name, signature);
 }
@@ -1015,6 +1096,7 @@ fn index_class(
     let mut class_info = ClassInfo {
         fqn: fqn.clone(),
         location: source_location(path, name_node.start_byte()),
+        doc_summary: phpdoc_summary_before(text, node.start_byte()),
         parents: class_like_names_from_direct_child(node, "base_clause", text, namespace),
         interfaces: class_like_names_from_direct_child(
             node,
@@ -1056,6 +1138,7 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option
     let signature = Signature {
         parameters: parameter_names(parameters_node, text),
         location: source_location(path, name_node.start_byte()),
+        doc_summary: phpdoc_summary_before(text, node.start_byte()),
     };
 
     if method_name.eq_ignore_ascii_case("__construct") {
@@ -1824,6 +1907,52 @@ fn signature_label(target: &CallTarget, signature: &Signature) -> String {
     }
 }
 
+fn hover_from_parts(
+    label: String,
+    location: Option<&SourceLocation>,
+    doc_summary: Option<&str>,
+) -> Hover {
+    let mut value = format!("```php\n{label}\n```");
+    if let Some(location) = location {
+        value.push_str("\n\n");
+        value.push_str(&format!("Defined in {}", location.path.display()));
+    }
+    if let Some(summary) = doc_summary.filter(|summary| !summary.is_empty()) {
+        value.push_str("\n\n");
+        value.push_str(summary);
+    }
+
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }),
+        range: None,
+    }
+}
+
+fn phpdoc_summary_before(text: &str, byte_offset: usize) -> Option<String> {
+    let before = text.get(..byte_offset)?;
+    let comment_start = before.rfind("/**")?;
+    let between = before.get(comment_start..)?;
+    let comment_end = between.rfind("*/")?;
+    if comment_start + comment_end + 2 < before.trim_end().len() {
+        return None;
+    }
+
+    between
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches("/**")
+                .trim_start_matches('*')
+                .trim_end_matches("*/")
+                .trim()
+        })
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
 fn variable_types_at_byte(
     root: Node,
     text: &str,
@@ -2128,6 +2257,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
             .map(|parameter| parameter.to_string())
             .collect(),
         location: None,
+        doc_summary: None,
     })
 }
 

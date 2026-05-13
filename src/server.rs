@@ -4,15 +4,17 @@ use std::time::Instant;
 use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
-    analyze_definition_for_position_with_cache, analyze_signature_help_for_position_with_cache,
+    analyze_definition_for_position_with_cache, analyze_hover_for_position_with_cache,
+    analyze_signature_help_for_position_with_cache,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-    InitializeResult, MessageType, OneOf, ServerCapabilities, ServerInfo, SignatureHelp,
-    SignatureHelpOptions, SignatureHelpParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, MessageType, OneOf,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -48,6 +50,7 @@ fn server_capabilities() -> ServerCapabilities {
             work_done_progress_options: Default::default(),
         }),
         definition_provider: Some(OneOf::Left(true)),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -265,6 +268,60 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(analysis.definition)
     }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_hover_for_position_with_cache(
+                &uri,
+                &document_text,
+                position,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::HoverAnalysis {
+                hover: None,
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+        let hover_count = usize::from(analysis.hover.is_some());
+
+        let mut log_message = format!(
+            "Rephactor hover {}:{}:{} -> {} hover(s) in {}ms ({})",
+            uri,
+            position.line,
+            position.character,
+            hover_count,
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if hover_count == 0
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(analysis.hover)
+    }
 }
 
 #[cfg(test)]
@@ -291,5 +348,9 @@ mod tests {
         ));
         assert!(capabilities.signature_help_provider.is_some());
         assert_eq!(capabilities.definition_provider, Some(OneOf::Left(true)));
+        assert_eq!(
+            capabilities.hover_provider,
+            Some(HoverProviderCapability::Simple(true))
+        );
     }
 }

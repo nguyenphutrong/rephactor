@@ -86,5 +86,5 @@
 - [x] Implement `textDocument/signatureHelp` for resolved callables.
 - [x] Implement `textDocument/definition`.
 - [x] Implement import refactor code actions.
-- [ ] Implement hover for resolved symbols.
+- [x] Implement hover for resolved symbols.
 - [ ] Implement deterministic completion V1.

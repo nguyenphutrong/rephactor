@@ -50,6 +50,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["definitionProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["hoverProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -137,6 +141,20 @@ impl LspProcess {
     fn definition(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
         let response = self.request(
             "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response
+            .get("result")
+            .filter(|result| !result.is_null())
+            .cloned()
+    }
+
+    fn hover(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
+        let response = self.request(
+            "textDocument/hover",
             json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character }
@@ -336,6 +354,44 @@ fn lsp_returns_null_definition_for_dynamic_call() {
     let uri = server.open_php(&file, text);
 
     assert!(server.definition(&uri, 2, 2).is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_hover_for_resolved_function_call() {
+    let root = temp_project("hover-function");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\n/** Send an invoice. */\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 3, 5).expect("hover result");
+
+    assert_eq!(hover["contents"]["kind"], "markdown");
+    assert!(
+        hover["contents"]["value"]
+            .as_str()
+            .expect("hover markdown")
+            .contains("send_invoice($invoice, $notify)")
+    );
+    assert!(
+        hover["contents"]["value"]
+            .as_str()
+            .expect("hover markdown")
+            .contains("Send an invoice.")
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_null_hover_for_dynamic_call() {
+    let root = temp_project("hover-unsupported");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction send_invoice($invoice, $notify) {}\n$fn($invoice, true);\n";
+    let uri = server.open_php(&file, text);
+
+    assert!(server.hover(&uri, 2, 2).is_none());
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
