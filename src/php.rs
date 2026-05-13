@@ -1068,6 +1068,26 @@ fn implementation_for_position_with_cache(
     let imports = ImportMap::from_root(root, text);
     let index = cache.index_for_document(uri, text, open_documents);
     let open_paths = open_project_documents(open_documents);
+
+    if let Some(method) = find_method_declaration_at_byte(root, byte_offset) {
+        let Some(method_name) = method.child_by_field_name("name") else {
+            return Err(SkipReason::NoSupportedCall);
+        };
+        let Some(class_node) = containing_class_like_declaration(method) else {
+            return Err(SkipReason::NoSupportedCall);
+        };
+        let Some(class_name) = class_node.child_by_field_name("name") else {
+            return Err(SkipReason::NoSupportedCall);
+        };
+        let namespace = namespace_at_byte(root, text, class_node.start_byte());
+        let class_name = clean_name_text(node_text(class_name, text));
+        let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+            return Err(SkipReason::UnresolvedCallable(class_name));
+        };
+        let method_key = normalize_method_key(node_text(method_name, text));
+        return implementation_locations_for_method(&index, target, &method_key, &open_paths);
+    }
+
     let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
         return Err(SkipReason::NoSupportedCall);
     };
@@ -1086,6 +1106,33 @@ fn implementation_for_position_with_cache(
             class_derives_from(&index, class_info, &target.fqn, &mut HashSet::new())
         })
         .filter_map(|class_info| location_for_source(class_info.location.as_ref()?, &open_paths))
+        .collect::<Vec<_>>();
+    locations.sort_by_key(|location| location.uri.to_string());
+
+    if locations.is_empty() {
+        Err(SkipReason::NoEdits)
+    } else {
+        Ok(GotoDefinitionResponse::Array(locations))
+    }
+}
+
+fn implementation_locations_for_method(
+    index: &SymbolIndex,
+    target: &ClassInfo,
+    method_key: &str,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Result<GotoDefinitionResponse, SkipReason> {
+    let mut locations = index
+        .classes
+        .values()
+        .filter(|class_info| {
+            normalize_symbol_key(&class_info.fqn) != normalize_symbol_key(&target.fqn)
+        })
+        .filter(|class_info| {
+            class_derives_from(index, class_info, &target.fqn, &mut HashSet::new())
+        })
+        .filter_map(|class_info| class_info.methods.get(method_key))
+        .filter_map(|signature| location_for_source(signature.location.as_ref()?, open_paths))
         .collect::<Vec<_>>();
     locations.sort_by_key(|location| location.uri.to_string());
 

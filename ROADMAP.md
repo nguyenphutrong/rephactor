@@ -102,6 +102,7 @@
 - [x] Implement `textDocument/declaration` for implemented methods.
 - [x] Implement `textDocument/typeDefinition` for locally typed variables.
 - [x] Implement `textDocument/implementation` for class/interface inheritance.
+- [x] Implement `textDocument/implementation` for interface/base methods.
 - [x] Implement `textDocument/rename` for exact AST symbol references.
 - [x] Implement reference-count `textDocument/codeLens` for declarations.
 - [x] Implement PHPDoc creation code actions for function-like declarations.

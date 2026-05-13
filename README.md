@@ -154,7 +154,9 @@ to the resolved class definition when the type can be inferred from a parameter
 or nearby object creation assignment.
 
 Go To Implementation V1 returns indexed classes that directly or transitively
-extend or implement the class/interface under the cursor.
+extend or implement the class/interface under the cursor. On interface/base
+method declarations, it returns matching implementation methods from derived
+classes.
 
 Hover V1 shows a concise PHP signature or class FQN, source location, and the
 nearest PHPDoc summary when available. Hover for seeded PHP internal functions
@@ -249,6 +251,7 @@ files that are not open in the editor are picked up on the next request.
 - Method declaration lookup for interface/base-class implementations.
 - Type definitions for locally typed variables and parameters.
 - Class/interface implementation lookup across indexed PHP files.
+- Interface/base method implementation lookup across indexed PHP files.
 - Parse diagnostics for open PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Unresolved type-annotation diagnostics for open PHP documents.

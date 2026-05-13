@@ -727,6 +727,30 @@ fn lsp_returns_implementations_for_interface() {
 }
 
 #[test]
+fn lsp_returns_implementations_for_interface_method() {
+    let root = temp_project("implementation-method");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\ninterface Sender { public function dispatch($invoice); }\nclass EmailSender implements Sender { public function dispatch($invoice) {} }\nclass OtherSender { public function dispatch($invoice) {} }\n";
+    let uri = server.open_php(&file, text);
+
+    let implementations = server
+        .implementation(&uri, 1, 35)
+        .expect("implementation result")
+        .as_array()
+        .expect("implementation array")
+        .clone();
+
+    assert_eq!(implementations.len(), 1);
+    assert_eq!(implementations[0]["uri"], uri);
+    assert_eq!(
+        implementations[0]["range"]["start"],
+        json!({ "line": 2, "character": 54 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_selection_ranges_from_syntax_tree() {
     let root = temp_project("selection-range");
     let mut server = LspProcess::start(&root);
