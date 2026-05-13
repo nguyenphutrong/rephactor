@@ -430,7 +430,7 @@ fn index_children(index: &mut SymbolIndex, node: Node, text: &str, namespace: Op
             "function_definition" => {
                 index_function(index, child, text, active_namespace.as_deref());
             }
-            "class_declaration" => {
+            "class_declaration" | "interface_declaration" | "trait_declaration" => {
                 index_class(index, child, text, active_namespace.as_deref());
             }
             _ => index_children(index, child, text, active_namespace.clone()),
@@ -1241,6 +1241,40 @@ mod tests {
         );
 
         fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn indexes_trait_and_interface_methods() {
+        let mut index = SymbolIndex::default();
+        index.index_text(
+            "<?php\nnamespace App;\ntrait Dispatchable { public function dispatch($invoice, $notify) {} }\ninterface Sender { public function send($invoice, $notify); }\n",
+        );
+
+        let trait_info = index
+            .classes
+            .get(&normalize_symbol_key("App\\Dispatchable"))
+            .expect("trait indexed");
+        let interface_info = index
+            .classes
+            .get(&normalize_symbol_key("App\\Sender"))
+            .expect("interface indexed");
+
+        assert_eq!(
+            trait_info
+                .methods
+                .get(&normalize_method_key("dispatch"))
+                .expect("trait method")
+                .parameters,
+            vec!["invoice", "notify"]
+        );
+        assert_eq!(
+            interface_info
+                .methods
+                .get(&normalize_method_key("send"))
+                .expect("interface method")
+                .parameters,
+            vec!["invoice", "notify"]
+        );
     }
 
     #[test]

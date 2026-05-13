@@ -36,7 +36,7 @@
 - [x] Support PSR-4 namespace roots.
 - [x] Index project classes, functions, methods, and constructors conservatively.
 - [x] Resolve normal, grouped, and aliased class imports.
-- [ ] Index traits and interfaces.
+- [x] Index traits and interfaces.
 - [x] Use changed open project documents when building the project index.
 
 ## Phase 5: Method and Constructor Resolution
