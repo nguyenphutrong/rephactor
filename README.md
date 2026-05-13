@@ -236,6 +236,8 @@ as `array<int,Foo>`, `list<Foo>`, and `Foo[]` are treated as conservative
 `array` contracts for mismatch diagnostics.
 Class-level PHPDoc magic property annotations also understand `self`, `static`,
 and direct `parent` for conservative property assignment/type-definition flows.
+Local PHPDoc `@var` annotations also resolve `self`, `static`, and direct
+`parent` inside class-like scopes.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved native and PHPDoc type-annotation diagnostics,
@@ -458,6 +460,8 @@ files that are not open in the editor are picked up on the next request.
 - Local PHPDoc `@var Type $variable` annotations for instance method
   resolution.
 - Inline local PHPDoc `@var Type` annotations for the following assignment.
+- Local PHPDoc `@var` relative `self`, `static`, and direct `parent` types for
+  conservative assignment diagnostics.
 - Function-like PHPDoc `@param Type $variable` annotations for instance method
   resolution.
 - PHPDoc `@mixin ClassName` annotations for class instance method resolution.

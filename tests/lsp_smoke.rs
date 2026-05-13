@@ -3644,6 +3644,35 @@ fn lsp_publishes_semantic_diagnostics_for_inline_phpdoc_var_assignment_type_mism
 }
 
 #[test]
+fn lsp_uses_phpdoc_var_self_static_parent_types_for_diagnostics() {
+    let root = temp_project("phpdoc-var-relative-type-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass BaseSender {}\nclass Invoice {}\nclass Sender extends BaseSender {\n    public function set() {\n        /** @var self $sender */\n        $sender = new Invoice();\n        /** @var parent */\n        $base = new Invoice();\n    }\n}\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $sender: expected App\\Sender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $base: expected App\\BaseSender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_phpdoc_var_call_assignment_type_mismatch() {
     let root = temp_project("phpdoc-var-call-assignment-type-mismatch-diagnostics");
     let mut server = LspProcess::start(&root);

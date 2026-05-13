@@ -3570,6 +3570,7 @@ fn expected_assignment_type_for_left(
             .cloned()
             .or_else(|| {
                 phpdoc_variable_type_at_byte(
+                    context.root,
                     context.text,
                     left.start_byte(),
                     namespace,
@@ -3735,6 +3736,7 @@ fn inferred_assigned_variable_type(
 }
 
 fn phpdoc_variable_type_at_byte(
+    root: Node,
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
@@ -3742,14 +3744,15 @@ fn phpdoc_variable_type_at_byte(
     variable_name: &str,
 ) -> Option<ComparableReturnType> {
     let mut types = HashMap::new();
-    collect_phpdoc_var_types(text, byte_offset, namespace, imports, &mut types);
+    collect_phpdoc_var_types(root, text, byte_offset, namespace, imports, &mut types);
     types
         .get(variable_name)
         .and_then(|type_name| comparable_parameter_type(type_name, namespace, imports))
-        .or_else(|| phpdoc_inline_var_type_before(text, byte_offset, namespace, imports))
+        .or_else(|| phpdoc_inline_var_type_before(root, text, byte_offset, namespace, imports))
 }
 
 fn phpdoc_inline_var_type_before(
+    root: Node,
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
@@ -3759,8 +3762,9 @@ fn phpdoc_inline_var_type_before(
         .into_iter()
         .next()?;
     let tokens = type_name.split_whitespace().collect::<Vec<_>>();
-    phpdoc_var_type_token(&tokens)
-        .and_then(|type_name| comparable_parameter_type(type_name, namespace, imports))
+    phpdoc_var_type_token(&tokens).and_then(|type_name| {
+        comparable_phpdoc_local_type(type_name, root, text, byte_offset, namespace, imports)
+    })
 }
 
 fn collect_return_expressions<'tree>(
@@ -8510,7 +8514,7 @@ fn variable_types_at_byte(
         index,
     };
     collect_assignment_types(root, &assignment_context, &mut types);
-    collect_phpdoc_var_types(text, byte_offset, namespace, imports, &mut types);
+    collect_phpdoc_var_types(root, text, byte_offset, namespace, imports, &mut types);
     types
 }
 
@@ -8787,6 +8791,7 @@ fn assigned_variable_type_name(
 }
 
 fn collect_phpdoc_var_types(
+    root: Node,
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
@@ -8810,10 +8815,16 @@ fn collect_phpdoc_var_types(
                 .split_whitespace()
                 .collect::<Vec<_>>();
             if let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) {
-                types.insert(
-                    variable_name.to_string(),
-                    qualify_type_name(type_name, namespace, imports),
-                );
+                if let Some(type_name) = qualify_phpdoc_local_type_name(
+                    type_name,
+                    root,
+                    text,
+                    byte_offset,
+                    namespace,
+                    imports,
+                ) {
+                    types.insert(variable_name.to_string(), type_name);
+                }
             } else if let Some(type_name) = phpdoc_var_type_token(&tokens) {
                 pending_inline_type = Some(type_name.to_string());
             }
@@ -8826,13 +8837,58 @@ fn collect_phpdoc_var_types(
 
         if let Some(type_name) = pending_inline_type.take()
             && let Some(variable_name) = first_variable_name_in_line(line)
+            && let Some(type_name) = qualify_phpdoc_local_type_name(
+                &type_name,
+                root,
+                text,
+                byte_offset,
+                namespace,
+                imports,
+            )
         {
-            types.insert(
-                variable_name,
-                qualify_type_name(&type_name, namespace, imports),
-            );
+            types.insert(variable_name, type_name);
         }
     }
+}
+
+fn comparable_phpdoc_local_type(
+    type_name: &str,
+    root: Node,
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let qualified =
+        qualify_phpdoc_local_type_name(type_name, root, text, byte_offset, namespace, imports)?;
+    comparable_parameter_type(&qualified, None, &ImportMap::default())
+}
+
+fn qualify_phpdoc_local_type_name(
+    type_name: &str,
+    root: Node,
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<String> {
+    let normalized = normalize_symbol_key(type_name);
+    if matches!(normalized.as_str(), "self" | "static") {
+        let class_node = find_class_declaration_at_byte(root, byte_offset)?;
+        let name_node = class_node.child_by_field_name("name")?;
+        return Some(qualify_name(node_text(name_node, text), namespace));
+    }
+    if normalized == "parent" {
+        let class_node = find_class_declaration_at_byte(root, byte_offset)?;
+        return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
+            .into_iter()
+            .next();
+    }
+    if is_builtin_type_name(type_name) {
+        return Some(clean_name_text(type_name));
+    }
+
+    Some(qualify_type_name(type_name, namespace, imports))
 }
 
 fn phpdoc_var_type_token<'a>(tokens: &'a [&str]) -> Option<&'a str> {
