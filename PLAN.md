@@ -21,8 +21,12 @@ The action must not be offered when:
 - the call contains unpacking (`...`)
 - the call target is dynamic, such as `$fn(...)` or `$object->$method(...)`
 - the conversion would reorder arguments
+- existing named arguments do not match the resolved parameter order
 - parameter names are unavailable or synthetic
 - the file or project PHP version is below 8.0
+
+If a call already has safe named arguments and still has remaining positional
+arguments, the action may insert only the missing names.
 
 ## Technical Approach
 
@@ -85,3 +89,6 @@ Verification:
 - Whether to vendor PHP internal stubs or consume an existing package.
 - Whether Zed extension packaging should install the binary or rely on a local
   command path during early development.
+- Whether Zed should grow a core code-action edit preview, since LSP does not
+  provide a separate preview payload and Rephactor can only return
+  `WorkspaceEdit`.

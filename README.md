@@ -95,14 +95,21 @@ run Rephactor alongside it:
 Rephactor currently provides only one refactor code action:
 `Add names to arguments`.
 
+Zed currently applies LSP code actions directly. It does not show a PHPStorm-
+style diff preview when moving through code action menu items; the aside popover
+only expands long action titles.
+
 ## Supported Cases
 
 - Same-file functions.
 - Namespaced same-file functions.
-- Static methods and constructors when the class is indexed.
+- Static methods and constructors when the class is indexed, including class
+  names imported with normal, grouped, or aliased `use` declarations.
 - Instance methods when the receiver type is locally obvious from a typed
   parameter or `$var = new ClassName(...)`.
 - Project symbols under Composer `autoload.psr-4` roots.
+- Calls that already contain safe named arguments and still have remaining
+  positional arguments. Rephactor inserts only the missing names.
 
 ## Unsupported Cases
 
@@ -110,7 +117,19 @@ Rephactor returns no action instead of guessing for:
 
 - dynamic calls such as `$fn(...)` or `$object->$method(...)`
 - calls with unpacking (`...$args`)
-- calls with existing named arguments
+- calls whose existing named arguments do not match the resolved signature
 - ambiguous symbols
 - unknown parameter names
-- PHP internal functions or Composer classmaps
+- inherited methods, interfaces, traits, PHP internal functions, or Composer
+  classmaps
+
+## Manual Acceptance
+
+1. Install the binary with `cargo install --path .`.
+2. Install the local Zed extension from `zed-extension/`.
+3. Open a PHP project that has Composer PSR-4 autoloading.
+4. Keep Intelephense or Phpactor enabled and add `rephactor` to the PHP
+   `language_servers` list.
+5. Put the cursor inside a supported call expression and run code actions.
+6. Apply `Add names to arguments` and verify that only `parameter_name: `
+   prefixes were inserted.

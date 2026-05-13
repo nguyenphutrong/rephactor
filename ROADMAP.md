@@ -5,7 +5,7 @@
 - [x] Create Rust binary crate.
 - [x] Add LSP and PHP parser dependencies.
 - [x] Document product scope and implementation plan.
-- [x] Add CI once the first tests exist.
+- [ ] Add CI once the first tests exist.
 
 ## Phase 1: LSP Baseline
 
@@ -28,12 +28,14 @@
 - [x] Resolve simple function calls in the current namespace.
 - [x] Generate insertion-only edits for positional arguments.
 - [x] Skip calls with unpacking, dynamic targets, or existing ambiguous named args.
+- [x] Fill missing names when safe named arguments already exist.
 
 ## Phase 4: Project Index
 
 - [x] Read `composer.json`.
 - [x] Support PSR-4 namespace roots.
 - [x] Index project classes, functions, methods, and constructors conservatively.
+- [x] Resolve normal, grouped, and aliased class imports.
 - [ ] Index traits and interfaces.
 - [ ] Incrementally invalidate changed files beyond open-document overrides.
 
@@ -47,7 +49,7 @@
 ## Phase 6: Editor Integration
 
 - [x] Add local Zed extension packaging or documented command setup.
-- [ ] Verify Zed shows and applies the code action.
+- [x] Verify Zed shows and applies the code action.
 - [ ] Add end-to-end fixture or smoke test that exercises LSP JSON-RPC.
 
 ## Phase 7: Broader PHP Semantics
