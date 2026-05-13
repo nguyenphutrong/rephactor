@@ -8488,7 +8488,12 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "array_keys" => &["array", "filter_value", "strict"],
         "array_map" => &["callback", "array", "arrays"],
         "array_merge" => &["arrays"],
+        "array_pop" => &["array"],
+        "array_reverse" => &["array", "preserve_keys"],
+        "array_search" => &["needle", "haystack", "strict"],
+        "array_shift" => &["array"],
         "array_slice" => &["array", "offset", "length", "preserve_keys"],
+        "array_unique" => &["array", "flags"],
         "array_values" => &["array"],
         "basename" => &["path", "suffix"],
         "count" => &["value", "mode"],
@@ -8556,7 +8561,12 @@ fn internal_function_parameter_types(
         "array_keys" => &[Some("array"), None, Some("bool")],
         "array_map" => &[None, Some("array"), None],
         "array_merge" => &[Some("array")],
+        "array_pop" => &[Some("array")],
+        "array_reverse" => &[Some("array"), Some("bool")],
+        "array_search" => &[None, Some("array"), Some("bool")],
+        "array_shift" => &[Some("array")],
         "array_slice" => &[Some("array"), Some("int"), Some("int"), Some("bool")],
+        "array_unique" => &[Some("array"), Some("int")],
         "array_values" => &[Some("array")],
         "basename" => &[Some("string"), Some("string")],
         "dirname" => &[Some("string"), Some("int")],
@@ -8613,7 +8623,7 @@ fn internal_function_parameter_types(
 fn internal_function_return_type(normalized_name: &str) -> Option<ComparableReturnType> {
     let type_name = match normalized_name {
         "array_column" | "array_filter" | "array_keys" | "array_map" | "array_merge"
-        | "array_slice" | "array_values" | "explode" => "array",
+        | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode" => "array",
         "array_key_exists" | "file_exists" | "in_array" | "is_array" | "is_bool" | "is_int"
         | "is_null" | "is_numeric" | "is_object" | "is_string" | "str_contains"
         | "str_ends_with" | "str_starts_with" => "bool",
@@ -8633,7 +8643,12 @@ fn internal_function_names() -> Vec<&'static str> {
         "array_keys",
         "array_map",
         "array_merge",
+        "array_pop",
+        "array_reverse",
+        "array_search",
+        "array_shift",
         "array_slice",
+        "array_unique",
         "array_values",
         "basename",
         "count",

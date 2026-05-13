@@ -1113,6 +1113,47 @@ fn lsp_returns_expanded_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_array_utility_internal_function_metadata() {
+    let root = temp_project("array-utility-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\narray_rev;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 9);
+
+    assert!(items.iter().any(|item| item["label"] == "array_reverse"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for array: expected array, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 8).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("array_reverse($array, $preserve_keys)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/array_reverse)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_filesystem_internal_function_metadata() {
     let root = temp_project("filesystem-internal-functions");
     let mut server = LspProcess::start(&root);
