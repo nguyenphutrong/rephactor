@@ -327,6 +327,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
 
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
     diagnostics.extend(duplicate_method_diagnostics(root, text));
+    diagnostics.extend(duplicate_property_diagnostics(root, text));
     diagnostics.extend(duplicate_parameter_diagnostics(root, text));
     diagnostics.extend(return_type_mismatch_diagnostics(
         root, text, &imports, &index,
@@ -2061,6 +2062,62 @@ fn duplicate_method_diagnostics(root: Node, text: &str) -> Vec<Diagnostic> {
                 tags: None,
                 data: None,
             });
+        }
+    }
+
+    diagnostics
+}
+
+fn duplicate_property_diagnostics(root: Node, text: &str) -> Vec<Diagnostic> {
+    let mut class_nodes = Vec::new();
+    collect_class_like_declarations(root, &mut class_nodes);
+    let mut diagnostics = Vec::new();
+
+    for class_node in class_nodes {
+        let Some(class_name_node) = class_node.child_by_field_name("name") else {
+            continue;
+        };
+        let Some(body) = class_node.child_by_field_name("body") else {
+            continue;
+        };
+        let namespace = namespace_at_byte(root, text, class_node.start_byte());
+        let class_name = qualify_name(node_text(class_name_node, text), namespace.as_deref());
+        let mut seen = HashSet::new();
+        let mut cursor = body.walk();
+
+        for child in body.named_children(&mut cursor) {
+            if child.kind() != "property_declaration" {
+                continue;
+            }
+
+            let mut property_cursor = child.walk();
+            for property in child.named_children(&mut property_cursor) {
+                if property.kind() != "property_element" {
+                    continue;
+                }
+                let Some(name_node) = property.child_by_field_name("name") else {
+                    continue;
+                };
+                let property_name = node_text(name_node, text);
+                if seen.insert(property_name.to_ascii_lowercase()) {
+                    continue;
+                }
+
+                diagnostics.push(Diagnostic {
+                    range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())
+                        .unwrap_or_else(|_| Range::default()),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("rephactor".to_string()),
+                    message: format!(
+                        "duplicate property declaration {class_name}::{property_name}"
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
         }
     }
 

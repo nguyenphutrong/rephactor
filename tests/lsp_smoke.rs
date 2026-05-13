@@ -1496,6 +1496,29 @@ fn lsp_publishes_semantic_diagnostics_for_duplicate_methods() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_duplicate_properties() {
+    let root = temp_project("duplicate-property-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Sender { private $customer; protected $customer; }\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "duplicate property declaration App\\Sender::$customer"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_unknown_named_arguments() {
     let root = temp_project("unknown-named-argument-diagnostics");
     let mut server = LspProcess::start(&root);
