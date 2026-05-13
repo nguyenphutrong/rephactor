@@ -928,6 +928,26 @@ fn lsp_returns_workspace_edit_for_rename() {
 }
 
 #[test]
+fn lsp_returns_workspace_edit_for_constant_rename() {
+    let root = temp_project("rename-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App;\nconst API_VERSION = '1';\necho API_VERSION;\n";
+    let uri = server.open_php(&file, text);
+
+    let edit = server.rename(&uri, 2, 8, "APP_VERSION");
+    let edits = edit["changes"]
+        .get(&uri)
+        .expect("rename edits for uri")
+        .as_array()
+        .expect("rename edits for uri");
+
+    assert_eq!(edits.len(), 2);
+    assert!(edits.iter().all(|edit| edit["newText"] == "APP_VERSION"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_renames_matching_class_file_for_class_rename() {
     let root = temp_project("rename-class-file");
     let mut server = LspProcess::start(&root);
@@ -1364,6 +1384,47 @@ fn lsp_returns_workspace_references_for_function_name() {
         references
             .iter()
             .any(|reference| reference["uri"] == file_uri(&functions_path))
+    );
+    assert_eq!(
+        references
+            .iter()
+            .filter(|reference| reference["uri"] == caller_uri)
+            .count(),
+        2
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_workspace_references_for_constant_name() {
+    let root = temp_project("constant-references");
+    let src_dir = root.join("src");
+    std::fs::create_dir_all(&src_dir).expect("create source dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let constants_path = src_dir.join("constants.php");
+    std::fs::write(
+        &constants_path,
+        "<?php\nnamespace App;\nconst API_VERSION = '1';\n",
+    )
+    .expect("write constants");
+    let caller_path = src_dir.join("Caller.php");
+    let mut server = LspProcess::start(&root);
+    let caller_uri = server.open_php(
+        &caller_path,
+        "<?php\nnamespace App;\necho API_VERSION;\necho API_VERSION;\n",
+    );
+
+    let references = server.references(&caller_uri, 2, 7, true);
+
+    assert_eq!(references.len(), 3);
+    assert!(
+        references
+            .iter()
+            .any(|reference| reference["uri"] == file_uri(&constants_path))
     );
     assert_eq!(
         references

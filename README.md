@@ -186,13 +186,15 @@ Workspace Symbol V1 searches Composer-indexed functions, constants, classes,
 and methods with deterministic case-insensitive, camel-case, and
 underscore-aware matching.
 
-References V1 finds exact matching AST name references across Composer-indexed
-PHP files and open document overlays. It is intentionally conservative and does
-not yet perform full type-aware disambiguation.
+References V1 finds exact matching AST name references for functions,
+constants, classes, methods, and variables across Composer-indexed PHP files
+and open document overlays. It is intentionally conservative and does not yet
+perform full type-aware disambiguation.
 
-Rename V1 returns a workspace edit for exact AST symbol references. When a
-class-like declaration is renamed from a matching `ClassName.php` file, it also
-adds a file rename operation for the PHP file. Folder renames are still skipped.
+Rename V1 returns a workspace edit for exact AST symbol references, including
+constants. When a class-like declaration is renamed from a matching
+`ClassName.php` file, it also adds a file rename operation for the PHP file.
+Folder renames are still skipped.
 
 Code Lens V1 shows exact-reference counts for function, class, interface,
 trait, and method declarations. Class-like and method declarations also show
