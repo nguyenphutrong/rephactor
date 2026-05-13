@@ -1917,6 +1917,7 @@ fn inlay_hints_for_range(
         index: &index,
     };
     collect_return_type_inlay_hints(root, &return_hint_context, &mut hints);
+    collect_phpdoc_parameter_type_inlay_hints(root, &return_hint_context, &mut hints);
 
     for call_node in call_nodes {
         let byte_offset = call_node.start_byte();
@@ -2013,6 +2014,90 @@ fn collect_return_type_inlay_hints(
     for child in node.named_children(&mut cursor) {
         collect_return_type_inlay_hints(child, context, hints);
     }
+}
+
+fn collect_phpdoc_parameter_type_inlay_hints(
+    node: Node,
+    context: &ReturnTypeInlayContext<'_, '_>,
+    hints: &mut Vec<InlayHint>,
+) {
+    if node.end_byte() < context.start_byte || node.start_byte() > context.end_byte {
+        return;
+    }
+
+    if matches!(
+        node.kind(),
+        "function_definition"
+            | "method_declaration"
+            | "anonymous_function"
+            | "anonymous_function_creation_expression"
+            | "arrow_function"
+    ) && let Some(parameters) = node.child_by_field_name("parameters")
+    {
+        let namespace = namespace_at_byte(context.root, context.text, node.start_byte());
+        let phpdoc_types =
+            phpdoc_param_types_for_inlay(node, context.text, namespace.as_deref(), context.imports);
+        let mut cursor = parameters.walk();
+        for parameter in parameters.named_children(&mut cursor) {
+            if !matches!(
+                parameter.kind(),
+                "simple_parameter" | "variadic_parameter" | "property_promotion_parameter"
+            ) || parameter.child_by_field_name("type").is_some()
+            {
+                continue;
+            }
+            let Some(name_node) = parameter.child_by_field_name("name") else {
+                continue;
+            };
+            let variable_name = node_text(name_node, context.text);
+            let Some(type_name) = phpdoc_types.get(variable_name) else {
+                continue;
+            };
+            let Some(position) = lsp_position_for_byte_offset(context.text, name_node.end_byte())
+            else {
+                continue;
+            };
+            hints.push(InlayHint {
+                position,
+                label: InlayHintLabel::String(format!(": {type_name}")),
+                kind: Some(InlayHintKind::TYPE),
+                text_edits: None,
+                tooltip: None,
+                padding_left: None,
+                padding_right: None,
+                data: None,
+            });
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_phpdoc_parameter_type_inlay_hints(child, context, hints);
+    }
+}
+
+fn phpdoc_param_types_for_inlay(
+    declaration: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> HashMap<String, String> {
+    let mut byte_offsets = vec![declaration.start_byte()];
+    if let Some(parent) = declaration.parent() {
+        byte_offsets.push(parent.start_byte());
+        if let Some(grandparent) = parent.parent() {
+            byte_offsets.push(grandparent.start_byte());
+        }
+    }
+
+    for byte_offset in byte_offsets {
+        let types = phpdoc_param_types_before(declaration, text, byte_offset, namespace, imports);
+        if !types.is_empty() {
+            return types.into_iter().collect();
+        }
+    }
+
+    HashMap::new()
 }
 
 fn inferred_declaration_return_type(

@@ -3790,6 +3790,46 @@ fn lsp_returns_inferred_return_type_inlay_hints_for_arrow_functions() {
 }
 
 #[test]
+fn lsp_returns_phpdoc_parameter_type_inlay_hints() {
+    let root = temp_project("phpdoc-parameter-type-inlay-hints");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\n/** @param Customer $customer */\nfunction send($customer) { return $customer; }\n",
+    );
+
+    let hints = server.inlay_hints(&uri, 0, 0, 5, 0);
+
+    assert!(hints.iter().any(|hint| {
+        hint["label"] == ": App\\Customer"
+            && hint["kind"] == 1
+            && hint["position"] == json!({ "line": 4, "character": 23 })
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_phpdoc_parameter_type_inlay_hints_for_anonymous_functions() {
+    let root = temp_project("phpdoc-anonymous-parameter-type-inlay-hints");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\n/** @param Customer $customer */\n$handler = function($customer) { return $customer; };\n",
+    );
+
+    let hints = server.inlay_hints(&uri, 0, 0, 5, 0);
+
+    assert!(hints.iter().any(|hint| {
+        hint["label"] == ": App\\Customer"
+            && hint["kind"] == 1
+            && hint["position"] == json!({ "line": 4, "character": 29 })
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_document_links_for_require_paths() {
     let root = temp_project("document-links");
     let mut server = LspProcess::start(&root);

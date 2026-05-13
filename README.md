@@ -283,7 +283,9 @@ Inlay Hint V1 shows parameter names for resolved positional call arguments. It
 also shows conservative return-type hints for function-like declarations,
 anonymous functions, and arrow functions without a declared return type when
 returned expressions infer to one type, including object creation expressions,
-local variables, and resolved calls.
+local variables, and resolved calls. Untyped function-like parameters with
+PHPDoc `@param` annotations also receive conservative type hints, including
+anonymous functions.
 
 Inline Value V1 returns PHP variable lookup ranges for debugger inline values.
 
@@ -426,6 +428,8 @@ files that are not open in the editor are picked up on the next request.
 - Parameter-name inlay hints for resolved positional call arguments.
 - Inferred return-type inlay hints for function-like declarations, anonymous
   functions, and arrow functions that return one obvious or resolved type.
+- PHPDoc parameter-type inlay hints for untyped function-like parameters,
+  including anonymous functions.
 - Inline value variable lookups for PHP variables in debugger ranges.
 - Document links for literal relative include/require paths and `__DIR__` or
   `dirname(__FILE__)` concatenated literals.
