@@ -661,7 +661,8 @@ pub fn analyze_code_lenses_for_document_with_cache(
     cache: &mut ProjectIndexCache,
 ) -> CodeLensAnalysis {
     let index_cache_status = cache.status_for_document(uri);
-    match code_lenses_for_document(uri, text, open_documents) {
+    let index = cache.index_for_document(uri, text, open_documents);
+    match code_lenses_for_document(uri, text, open_documents, &index) {
         Ok(lenses) => CodeLensAnalysis {
             skip_reason: lenses.is_empty().then_some(SkipReason::NoEdits),
             lenses,
@@ -3535,13 +3536,17 @@ fn code_lenses_for_document(
     uri: &Url,
     text: &str,
     open_documents: &HashMap<Url, String>,
+    index: &SymbolIndex,
 ) -> Result<Vec<CodeLens>, SkipReason> {
     let Some(tree) = parse_php(text) else {
         return Err(SkipReason::ParseError);
     };
+    let root = tree.root_node();
+    let imports = ImportMap::from_root(root, text);
+    let open_paths = open_project_documents(open_documents);
 
     let mut declaration_names = Vec::new();
-    collect_declaration_name_nodes(tree.root_node(), &mut declaration_names);
+    collect_declaration_name_nodes(root, &mut declaration_names);
     let mut lenses = Vec::new();
 
     for name in declaration_names {
@@ -3577,9 +3582,91 @@ fn code_lenses_for_document(
             )),
             data: None,
         });
+
+        if let Some(implementation_lens) = implementation_code_lens_for_declaration(
+            root,
+            name,
+            text,
+            uri,
+            index,
+            &imports,
+            &open_paths,
+        )? {
+            lenses.push(implementation_lens);
+        }
     }
 
     Ok(lenses)
+}
+
+fn implementation_code_lens_for_declaration(
+    root: Node,
+    name: Node,
+    text: &str,
+    uri: &Url,
+    index: &SymbolIndex,
+    imports: &ImportMap,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Result<Option<CodeLens>, SkipReason> {
+    let Some(declaration) = name.parent() else {
+        return Ok(None);
+    };
+    if !matches!(
+        declaration.kind(),
+        "class_declaration" | "interface_declaration" | "trait_declaration"
+    ) {
+        return Ok(None);
+    }
+
+    let namespace = namespace_at_byte(root, text, declaration.start_byte());
+    let class_name = clean_name_text(node_text(name, text));
+    let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), imports) else {
+        return Ok(None);
+    };
+    let locations = implementation_locations_for_class(index, target, open_paths);
+    if locations.is_empty() {
+        return Ok(None);
+    }
+    let position = lsp_position_for_byte_offset(text, name.start_byte())
+        .ok_or(SkipReason::InvalidCursorPosition)?;
+
+    Ok(Some(CodeLens {
+        range: range_for_bytes(text, name.start_byte(), name.end_byte())?,
+        command: Some(Command::new(
+            format!(
+                "{} implementation{}",
+                locations.len(),
+                if locations.len() == 1 { "" } else { "s" }
+            ),
+            "editor.action.showReferences".to_string(),
+            Some(vec![
+                serde_json::to_value(uri).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(position).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(locations).unwrap_or(serde_json::Value::Null),
+            ]),
+        )),
+        data: None,
+    }))
+}
+
+fn implementation_locations_for_class(
+    index: &SymbolIndex,
+    target: &ClassInfo,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Vec<Location> {
+    let mut locations = index
+        .classes
+        .values()
+        .filter(|class_info| {
+            normalize_symbol_key(&class_info.fqn) != normalize_symbol_key(&target.fqn)
+        })
+        .filter(|class_info| {
+            class_derives_from(index, class_info, &target.fqn, &mut HashSet::new())
+        })
+        .filter_map(|class_info| location_for_source(class_info.location.as_ref()?, open_paths))
+        .collect::<Vec<_>>();
+    locations.sort_by_key(|location| location.uri.to_string());
+    locations
 }
 
 fn range_for_node(text: &str, node: Node) -> Range {
