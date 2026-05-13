@@ -4441,7 +4441,7 @@ fn index_function(
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: false,
         location: source_location(path, name_node.start_byte()),
-        doc_summary: phpdoc_summary_before(text, node.start_byte()),
+        doc_summary: phpdoc_hover_before(text, node.start_byte()),
     };
     index.add_function(name, signature);
 }
@@ -4465,7 +4465,7 @@ fn index_class(
     let mut class_info = ClassInfo {
         fqn: fqn.clone(),
         location: source_location(path, name_node.start_byte()),
-        doc_summary: phpdoc_summary_before(text, node.start_byte()),
+        doc_summary: phpdoc_hover_before(text, node.start_byte()),
         parents: class_like_names_from_direct_child(node, "base_clause", text, namespace),
         interfaces: class_like_names_from_direct_child(
             node,
@@ -4531,7 +4531,7 @@ fn index_method(
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: method_is_abstract(node, text),
         location: source_location(path, name_node.start_byte()),
-        doc_summary: phpdoc_summary_before(text, node.start_byte()),
+        doc_summary: phpdoc_hover_before(text, node.start_byte()),
     };
 
     if method_name.eq_ignore_ascii_case("__construct") {
@@ -5893,6 +5893,20 @@ fn hover_from_parts(
 }
 
 fn phpdoc_summary_before(text: &str, byte_offset: usize) -> Option<String> {
+    phpdoc_clean_lines_before(text, byte_offset)?
+        .into_iter()
+        .find(|line| !line.is_empty())
+}
+
+fn phpdoc_hover_before(text: &str, byte_offset: usize) -> Option<String> {
+    let lines = phpdoc_clean_lines_before(text, byte_offset)?
+        .into_iter()
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn phpdoc_clean_lines_before(text: &str, byte_offset: usize) -> Option<Vec<String>> {
     let before = text.get(..byte_offset)?;
     let comment_start = before.rfind("/**")?;
     let between = before.get(comment_start..)?;
@@ -5901,17 +5915,19 @@ fn phpdoc_summary_before(text: &str, byte_offset: usize) -> Option<String> {
         return None;
     }
 
-    between
-        .lines()
-        .map(|line| {
-            line.trim()
-                .trim_start_matches("/**")
-                .trim_start_matches('*')
-                .trim_end_matches("*/")
-                .trim()
-        })
-        .find(|line| !line.is_empty())
-        .map(str::to_string)
+    Some(
+        between
+            .lines()
+            .map(|line| {
+                line.trim()
+                    .trim_start_matches("/**")
+                    .trim_start_matches('*')
+                    .trim_end_matches("*/")
+                    .trim()
+                    .to_string()
+            })
+            .collect(),
+    )
 }
 
 fn phpdoc_mixins_before(text: &str, byte_offset: usize, namespace: Option<&str>) -> Vec<String> {

@@ -159,11 +159,11 @@ method declarations, it returns matching implementation methods from derived
 classes.
 
 Hover V1 shows a concise PHP signature or class FQN, source location, and the
-nearest PHPDoc summary when available. Hover for seeded PHP internal functions
-links to the official PHP manual. Seeded internal functions include conservative
-parameter and return metadata for simple scalar/array contracts. It
-intentionally avoids full PHPDoc rendering and returns no hover for ambiguous or
-dynamic symbols.
+nearest PHPDoc summary plus tag lines when available. Hover for seeded PHP
+internal functions links to the official PHP manual. Seeded internal functions
+include conservative parameter and return metadata for simple scalar/array
+contracts. It intentionally avoids rich PHPDoc rendering and returns no hover
+for ambiguous or dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
 matches for indexed class names, indexed project functions, seeded PHP internal

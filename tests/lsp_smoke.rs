@@ -698,24 +698,17 @@ fn lsp_returns_hover_for_resolved_function_call() {
     let root = temp_project("hover-function");
     let mut server = LspProcess::start(&root);
     let file = root.join("example.php");
-    let text = "<?php\n/** Send an invoice. */\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+    let text = "<?php\n/**\n * Send an invoice.\n * @param Invoice $invoice\n * @return void\n */\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
     let uri = server.open_php(&file, text);
 
-    let hover = server.hover(&uri, 3, 5).expect("hover result");
+    let hover = server.hover(&uri, 7, 5).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
 
     assert_eq!(hover["contents"]["kind"], "markdown");
-    assert!(
-        hover["contents"]["value"]
-            .as_str()
-            .expect("hover markdown")
-            .contains("send_invoice($invoice, $notify)")
-    );
-    assert!(
-        hover["contents"]["value"]
-            .as_str()
-            .expect("hover markdown")
-            .contains("Send an invoice.")
-    );
+    assert!(markdown.contains("send_invoice($invoice, $notify)"));
+    assert!(markdown.contains("Send an invoice."));
+    assert!(markdown.contains("@param Invoice $invoice"));
+    assert!(markdown.contains("@return void"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
