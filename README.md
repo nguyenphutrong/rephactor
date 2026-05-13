@@ -61,8 +61,9 @@ return a path, add Cargo's bin directory to your shell profile:
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
-Prebuilt release binaries are not published yet. Until the V1 behavior settles,
-the supported install path is `cargo install --path .` from this repository.
+Tagged releases publish prebuilt macOS, Linux, and Windows binaries through the
+release workflow. During active development, `cargo install --path .` remains
+the fastest local install path.
 
 ## Zed Setup
 
@@ -155,9 +156,10 @@ Current release posture:
   `cargo test`, and `cargo clippy -- -D warnings`.
 - Verify the Zed extension with `scripts/check-zed-extension.sh`.
 
+Release binaries are built by GitHub Actions when a `v*` tag is pushed.
+
 Deferred until V1 behavior is stable:
 
-- prebuilt macOS, Linux, and Windows binaries
 - full PHP internal stubs
 - PHPStan/Psalm metadata
 

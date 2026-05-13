@@ -63,6 +63,6 @@
 ## Phase 8: Release Hardening
 
 - [x] Add CI for formatting, check, clippy, tests, and Zed extension Wasm check.
-- [ ] Add release binaries for macOS, Linux, and Windows.
+- [x] Add release binaries for macOS, Linux, and Windows.
 - [x] Publish installation instructions.
 - [x] Document known unsupported cases.

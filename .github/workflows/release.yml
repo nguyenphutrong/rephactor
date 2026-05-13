@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: rephactor-macos
+            binary: rephactor
+            archive: tar.gz
+          - os: ubuntu-latest
+            artifact: rephactor-x86_64-unknown-linux-gnu
+            binary: rephactor
+            archive: tar.gz
+          - os: windows-latest
+            artifact: rephactor-x86_64-pc-windows-msvc
+            binary: rephactor.exe
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+
+      - name: Package Unix binary
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          mkdir -p dist package
+          cp "target/release/${{ matrix.binary }}" package/
+          cp README.md ROADMAP.md package/
+          tar -czf "dist/${{ matrix.artifact }}.tar.gz" -C package .
+
+      - name: Package Windows binary
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, package
+          Copy-Item "target/release/${{ matrix.binary }}" package/
+          Copy-Item README.md, ROADMAP.md package/
+          Compress-Archive -Path package/* -DestinationPath "dist/${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
