@@ -5,18 +5,20 @@ use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
-    analyze_document_highlights, analyze_document_symbols, analyze_folding_ranges,
-    analyze_hover_for_position_with_cache, analyze_inlay_hints_for_range_with_cache,
-    analyze_parse_diagnostics, analyze_references_for_position_with_cache,
-    analyze_signature_help_for_position_with_cache, analyze_workspace_symbols,
+    analyze_document_highlights, analyze_document_links, analyze_document_symbols,
+    analyze_folding_ranges, analyze_hover_for_position_with_cache,
+    analyze_inlay_hints_for_range_with_cache, analyze_parse_diagnostics,
+    analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
+    analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentHighlight, DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse,
-    FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
+    DocumentHighlight, DocumentHighlightParams, DocumentLink, DocumentLinkOptions,
+    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
+    FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
     InitializeResult, InlayHint, InlayHintOptions, InlayHintParams, InlayHintServerCapabilities,
     Location, MessageType, OneOf, ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp,
@@ -97,6 +99,10 @@ fn server_capabilities() -> ServerCapabilities {
                 work_done_progress_options: Default::default(),
             },
         ))),
+        document_link_provider: Some(DocumentLinkOptions {
+            resolve_provider: Some(false),
+            work_done_progress_options: Default::default(),
+        }),
         ..ServerCapabilities::default()
     }
 }
@@ -718,6 +724,44 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(Some(analysis.hints))
     }
+
+    async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        let uri = params.text_document.uri;
+        let started_at = Instant::now();
+        let document_text = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).map(|document| document.text.clone())
+        };
+
+        let analysis = if let Some(document_text) = document_text {
+            analyze_document_links(&uri, &document_text)
+        } else {
+            crate::php::DocumentLinkAnalysis {
+                links: Vec::new(),
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+            }
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor documentLink {} -> {} link(s) in {}ms",
+            uri,
+            analysis.links.len(),
+            elapsed.as_millis()
+        );
+        if analysis.links.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(Some(analysis.links))
+    }
 }
 
 #[cfg(test)]
@@ -767,5 +811,6 @@ mod tests {
             Some(FoldingRangeProviderCapability::Simple(true))
         );
         assert!(capabilities.inlay_hint_provider.is_some());
+        assert!(capabilities.document_link_provider.is_some());
     }
 }

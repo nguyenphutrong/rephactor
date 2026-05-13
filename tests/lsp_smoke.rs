@@ -79,6 +79,7 @@ impl LspProcess {
             json!(true)
         );
         assert!(initialize["result"]["capabilities"]["inlayHintProvider"].is_object());
+        assert!(initialize["result"]["capabilities"]["documentLinkProvider"].is_object());
         server.notify("initialized", json!({}));
         server
     }
@@ -300,6 +301,19 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("inlay hint array")
+            .clone()
+    }
+
+    fn document_links(&mut self, uri: &str) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/documentLink",
+            json!({
+                "textDocument": { "uri": uri }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("document link array")
             .clone()
     }
 
@@ -775,6 +789,24 @@ fn lsp_returns_parameter_name_inlay_hints() {
         vec!["invoice:", "notify:"]
     );
     assert!(hints.iter().all(|hint| hint["kind"] == 2));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_document_links_for_require_paths() {
+    let root = temp_project("document-links");
+    let mut server = LspProcess::start(&root);
+    let lib_dir = root.join("lib");
+    std::fs::create_dir_all(&lib_dir).expect("create lib dir");
+    let target = lib_dir.join("helpers.php");
+    std::fs::write(&target, "<?php\nfunction helper() {}\n").expect("write helper");
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nrequire 'lib/helpers.php';\n");
+
+    let links = server.document_links(&uri);
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["target"], file_uri(&target));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

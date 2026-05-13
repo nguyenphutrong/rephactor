@@ -98,4 +98,5 @@
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
+- [x] Implement `textDocument/documentLink` for include/require paths.
 - [ ] Implement semantic diagnostics for open files.

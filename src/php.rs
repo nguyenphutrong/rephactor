@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
     CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentHighlight, DocumentHighlightKind,
-    DocumentSymbol, DocumentSymbolResponse, FoldingRange, FoldingRangeKind, GotoDefinitionResponse,
-    Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel, Location, MarkupContent,
-    MarkupKind, ParameterInformation, ParameterLabel, Position, Range, SignatureHelp,
-    SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
+    DocumentLink, DocumentSymbol, DocumentSymbolResponse, FoldingRange, FoldingRangeKind,
+    GotoDefinitionResponse, Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel,
+    Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
+    SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url,
+    WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -187,6 +188,12 @@ pub struct InlayHintAnalysis {
     pub hints: Vec<InlayHint>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct DocumentLinkAnalysis {
+    pub links: Vec<DocumentLink>,
+    pub skip_reason: Option<SkipReason>,
 }
 
 pub fn analyze_parse_diagnostics(text: &str) -> Vec<Diagnostic> {
@@ -466,6 +473,19 @@ pub fn analyze_inlay_hints_for_range_with_cache(
             hints: Vec::new(),
             skip_reason: Some(reason),
             index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_document_links(uri: &Url, text: &str) -> DocumentLinkAnalysis {
+    match document_links_for_text(uri, text) {
+        Ok(links) => DocumentLinkAnalysis {
+            skip_reason: links.is_empty().then_some(SkipReason::NoEdits),
+            links,
+        },
+        Err(reason) => DocumentLinkAnalysis {
+            links: Vec::new(),
+            skip_reason: Some(reason),
         },
     }
 }
@@ -761,6 +781,71 @@ fn document_symbols_for_text(text: &str) -> Result<DocumentSymbolResponse, SkipR
 
     let symbols = collect_document_symbols(tree.root_node(), text)?;
     Ok(DocumentSymbolResponse::Nested(symbols))
+}
+
+fn document_links_for_text(uri: &Url, text: &str) -> Result<Vec<DocumentLink>, SkipReason> {
+    let Some(tree) = parse_php_allowing_errors(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let Some(document_path) = uri.to_file_path().ok() else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let base_dir = document_path.parent().unwrap_or_else(|| Path::new(""));
+    let mut links = Vec::new();
+    collect_document_links(tree.root_node(), text, base_dir, &mut links);
+    Ok(links)
+}
+
+fn collect_document_links(node: Node, text: &str, base_dir: &Path, links: &mut Vec<DocumentLink>) {
+    if is_include_or_require_node(node)
+        && let Some((target_path, start_byte, end_byte)) =
+            include_literal_target(node, text, base_dir)
+        && target_path.is_file()
+        && let Some(target) = Url::from_file_path(target_path).ok()
+        && let Ok(range) = range_for_bytes(text, start_byte, end_byte)
+    {
+        links.push(DocumentLink {
+            range,
+            target: Some(target),
+            tooltip: None,
+            data: None,
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_document_links(child, text, base_dir, links);
+    }
+}
+
+fn is_include_or_require_node(node: Node) -> bool {
+    matches!(
+        node.kind(),
+        "include_expression"
+            | "include_once_expression"
+            | "require_expression"
+            | "require_once_expression"
+    )
+}
+
+fn include_literal_target(
+    node: Node,
+    text: &str,
+    base_dir: &Path,
+) -> Option<(PathBuf, usize, usize)> {
+    let node_text = node_text(node, text);
+    let quote_index = node_text.find(['"', '\''])?;
+    let quote = node_text.as_bytes()[quote_index] as char;
+    let rest = node_text.get(quote_index + 1..)?;
+    let end_quote = rest.find(quote)?;
+    let relative = rest.get(..end_quote)?;
+    if relative.contains("://") {
+        return None;
+    }
+
+    let start_byte = node.start_byte() + quote_index + 1;
+    let end_byte = start_byte + relative.len();
+    Some((base_dir.join(relative), start_byte, end_byte))
 }
 
 fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> {
