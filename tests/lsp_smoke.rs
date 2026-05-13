@@ -1909,6 +1909,31 @@ fn lsp_returns_instance_property_completions() {
 }
 
 #[test]
+fn lsp_returns_phpdoc_property_completions_and_hover() {
+    let root = temp_project("completion-phpdoc-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\n/**\n * @property string $status\n */\nclass InvoiceSender {}\nfunction run(InvoiceSender $sender) {\n    $sender->sta;\n    $sender->status;\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 6, 16);
+    let property_kind =
+        serde_json::to_value(CompletionItemKind::PROPERTY).expect("property kind json");
+
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "status" && item["kind"] == property_kind })
+    );
+
+    let hover = server.hover(&uri, 7, 16).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("property InvoiceSender::$status"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_this_property_completions() {
     let root = temp_project("completion-this-properties");
     let mut server = LspProcess::start(&root);

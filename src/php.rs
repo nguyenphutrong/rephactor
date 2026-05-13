@@ -5251,6 +5251,9 @@ fn index_class(
             .methods
             .insert(normalize_method_key(&signature.name), signature);
     }
+    class_info
+        .properties
+        .extend(phpdoc_properties_before(text, node.start_byte()));
     let mut cursor = body.walk();
 
     for child in body.named_children(&mut cursor) {
@@ -6911,6 +6914,23 @@ fn phpdoc_methods_before(text: &str, byte_offset: usize) -> Vec<Signature> {
     phpdoc_tag_lines_before(text, byte_offset, "@method")
         .into_iter()
         .filter_map(|method_text| phpdoc_method_signature(&method_text))
+        .collect()
+}
+
+fn phpdoc_properties_before(text: &str, byte_offset: usize) -> Vec<ClassPropertyInfo> {
+    ["@property", "@property-read", "@property-write"]
+        .into_iter()
+        .flat_map(|tag| phpdoc_tag_lines_before(text, byte_offset, tag))
+        .filter_map(|property_text| {
+            let tokens = property_text.split_whitespace().collect::<Vec<_>>();
+            let (_, variable_name) = phpdoc_var_tokens(&tokens)?;
+            let name = variable_name.trim_start_matches('$').to_string();
+            (!name.is_empty()).then_some(ClassPropertyInfo {
+                name,
+                is_static: false,
+                location: None,
+            })
+        })
         .collect()
 }
 
