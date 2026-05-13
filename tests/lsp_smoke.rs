@@ -1199,6 +1199,51 @@ fn lsp_returns_datetime_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_math_internal_function_metadata() {
+    let root = temp_project("math-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nrou;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 3);
+
+    assert!(items.iter().any(|item| item["label"] == "round"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nround('bad', 'precision');\nfunction takes_string(string $value) {}\ntakes_string(abs(1));\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for num: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for precision: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got int"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 2).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("round($num, $precision, $mode)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/round)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_filesystem_internal_function_metadata() {
     let root = temp_project("filesystem-internal-functions");
     let mut server = LspProcess::start(&root);

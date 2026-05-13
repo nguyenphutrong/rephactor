@@ -8482,6 +8482,7 @@ fn normalize_method_key(name: &str) -> String {
 fn internal_function_signature(name: &str) -> Option<Signature> {
     let normalized_name = normalize_symbol_key(name);
     let parameters = match normalized_name.as_str() {
+        "abs" => &["num"][..],
         "array_filter" => &["array", "callback", "mode"][..],
         "array_key_exists" => &["key", "array"],
         "array_column" => &["array", "column_key", "index_key"],
@@ -8496,11 +8497,13 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "array_unique" => &["array", "flags"],
         "array_values" => &["array"],
         "basename" => &["path", "suffix"],
+        "ceil" => &["num"],
         "count" => &["value", "mode"],
         "date" => &["format", "timestamp"],
         "dirname" => &["path", "levels"],
         "explode" => &["separator", "string", "limit"],
         "file_exists" => &["filename"],
+        "floor" => &["num"],
         "implode" => &["separator", "array"],
         "in_array" => &["needle", "haystack", "strict"],
         "is_array" => &["value"],
@@ -8513,8 +8516,11 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "json_decode" => &["json", "associative", "depth", "flags"],
         "json_encode" => &["value", "flags", "depth"],
         "ltrim" => &["string", "characters"],
+        "max" => &["value", "values"],
+        "min" => &["value", "values"],
         "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
         "realpath" => &["path"],
+        "round" => &["num", "precision", "mode"],
         "rtrim" => &["string", "characters"],
         "str_contains" => &["haystack", "needle"],
         "str_ends_with" => &["haystack", "needle"],
@@ -8558,6 +8564,7 @@ fn internal_function_parameter_types(
     parameter_count: usize,
 ) -> Vec<Option<ComparableReturnType>> {
     let type_names = match normalized_name {
+        "abs" => &[Some("int")][..],
         "array_filter" => &[Some("array"), None, None][..],
         "array_key_exists" => &[None, Some("array")],
         "array_column" => &[Some("array"), None, None],
@@ -8572,10 +8579,12 @@ fn internal_function_parameter_types(
         "array_unique" => &[Some("array"), Some("int")],
         "array_values" => &[Some("array")],
         "basename" => &[Some("string"), Some("string")],
+        "ceil" => &[Some("int")],
         "date" => &[Some("string"), Some("int")],
         "dirname" => &[Some("string"), Some("int")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
         "file_exists" => &[Some("string")],
+        "floor" => &[Some("int")],
         "implode" => &[Some("string"), Some("array")],
         "in_array" => &[None, Some("array"), Some("bool")],
         "is_array" => &[None],
@@ -8588,6 +8597,8 @@ fn internal_function_parameter_types(
         "json_decode" => &[Some("string"), Some("bool"), Some("int"), Some("int")],
         "json_encode" => &[None, Some("int"), Some("int")],
         "ltrim" => &[Some("string"), Some("string")],
+        "max" => &[None, None],
+        "min" => &[None, None],
         "preg_match" => &[
             Some("string"),
             Some("string"),
@@ -8596,6 +8607,7 @@ fn internal_function_parameter_types(
             Some("int"),
         ],
         "realpath" => &[Some("string")],
+        "round" => &[Some("int"), Some("int"), None],
         "rtrim" => &[Some("string"), Some("string")],
         "str_contains" => &[Some("string"), Some("string")],
         "str_ends_with" => &[Some("string"), Some("string")],
@@ -8633,7 +8645,8 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         "array_key_exists" | "file_exists" | "in_array" | "is_array" | "is_bool" | "is_int"
         | "is_null" | "is_numeric" | "is_object" | "is_string" | "str_contains"
         | "str_ends_with" | "str_starts_with" => "bool",
-        "count" | "preg_match" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" => "int",
+        "abs" | "ceil" | "count" | "floor" | "preg_match" | "round" | "strlen" | "strpos"
+        | "strrpos" | "strtotime" | "time" => "int",
         "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "realpath" | "rtrim"
         | "date" | "sprintf" | "str_repeat" | "strtolower" | "strtoupper" | "substr" | "trim" => {
             "string"
@@ -8645,6 +8658,7 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
 
 fn internal_function_names() -> Vec<&'static str> {
     vec![
+        "abs",
         "array_filter",
         "array_column",
         "array_key_exists",
@@ -8659,11 +8673,13 @@ fn internal_function_names() -> Vec<&'static str> {
         "array_unique",
         "array_values",
         "basename",
+        "ceil",
         "count",
         "date",
         "dirname",
         "explode",
         "file_exists",
+        "floor",
         "implode",
         "in_array",
         "is_array",
@@ -8676,8 +8692,11 @@ fn internal_function_names() -> Vec<&'static str> {
         "json_decode",
         "json_encode",
         "ltrim",
+        "max",
+        "min",
         "preg_match",
         "realpath",
+        "round",
         "rtrim",
         "str_contains",
         "str_ends_with",
