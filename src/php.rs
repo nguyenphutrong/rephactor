@@ -4380,6 +4380,40 @@ impl SymbolIndex {
             self.collect_related_method_names(related_name, visited, names);
         }
     }
+
+    fn collect_related_constant_names(
+        &self,
+        class_name: &str,
+        visited: &mut Vec<String>,
+        names: &mut Vec<String>,
+    ) {
+        let class_key = normalize_symbol_key(class_name);
+        if visited.contains(&class_key) {
+            return;
+        }
+        visited.push(class_key.clone());
+
+        let Some(class_info) = self.classes.get(&class_key) else {
+            return;
+        };
+
+        names.extend(
+            class_info
+                .constants
+                .iter()
+                .map(|constant| constant.name.clone()),
+        );
+
+        for related_name in class_info
+            .parents
+            .iter()
+            .chain(class_info.interfaces.iter())
+            .chain(class_info.traits.iter())
+            .chain(class_info.mixins.iter())
+        {
+            self.collect_related_constant_names(related_name, visited, names);
+        }
+    }
 }
 
 impl ProjectIndexCache {
@@ -6924,16 +6958,35 @@ fn static_scope_completion_items(
     prefix: &str,
 ) -> Vec<CompletionItem> {
     let mut items = method_completion_items(index, class_info, prefix);
-    items.extend(class_constant_completion_items(class_info, prefix));
+    items.extend(class_constant_completion_items(index, class_info, prefix));
     items.sort_by_key(|item| item.label.to_ascii_lowercase());
     items
 }
 
-fn class_constant_completion_items(class_info: &ClassInfo, prefix: &str) -> Vec<CompletionItem> {
+fn class_constant_completion_items(
+    index: &SymbolIndex,
+    class_info: &ClassInfo,
+    prefix: &str,
+) -> Vec<CompletionItem> {
     let mut labels = class_info
         .constants
         .iter()
         .map(|constant| constant.name.clone())
+        .collect::<Vec<_>>();
+
+    let mut visited = Vec::new();
+    for related_name in class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+        .chain(class_info.traits.iter())
+        .chain(class_info.mixins.iter())
+    {
+        index.collect_related_constant_names(related_name, &mut visited, &mut labels);
+    }
+
+    let mut labels = labels
+        .into_iter()
         .filter(|name| prefix_matches(name, prefix))
         .collect::<Vec<_>>();
     labels.sort_by_key(|label| label.to_ascii_lowercase());
