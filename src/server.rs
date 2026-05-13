@@ -5,9 +5,10 @@ use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
-    analyze_document_highlights, analyze_document_symbols, analyze_hover_for_position_with_cache,
-    analyze_parse_diagnostics, analyze_references_for_position_with_cache,
-    analyze_signature_help_for_position_with_cache, analyze_workspace_symbols,
+    analyze_document_highlights, analyze_document_symbols, analyze_folding_ranges,
+    analyze_hover_for_position_with_cache, analyze_parse_diagnostics,
+    analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
+    analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -15,11 +16,11 @@ use tower_lsp::lsp_types::{
     CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentHighlight, DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, MessageType, OneOf, ReferenceParams,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
-    WorkspaceSymbolParams,
+    FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
+    InitializeResult, Location, MessageType, OneOf, ReferenceParams, ServerCapabilities,
+    ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SymbolInformation,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -88,6 +89,7 @@ fn server_capabilities() -> ServerCapabilities {
         workspace_symbol_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -620,6 +622,44 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(Some(analysis.highlights))
     }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let uri = params.text_document.uri;
+        let started_at = Instant::now();
+        let document_text = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).map(|document| document.text.clone())
+        };
+
+        let analysis = if let Some(document_text) = document_text {
+            analyze_folding_ranges(&document_text)
+        } else {
+            crate::php::FoldingRangeAnalysis {
+                ranges: Vec::new(),
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+            }
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor foldingRange {} -> {} range(s) in {}ms",
+            uri,
+            analysis.ranges.len(),
+            elapsed.as_millis()
+        );
+        if analysis.ranges.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(Some(analysis.ranges))
+    }
 }
 
 #[cfg(test)]
@@ -663,6 +703,10 @@ mod tests {
         assert_eq!(
             capabilities.document_highlight_provider,
             Some(OneOf::Left(true))
+        );
+        assert_eq!(
+            capabilities.folding_range_provider,
+            Some(FoldingRangeProviderCapability::Simple(true))
         );
     }
 }

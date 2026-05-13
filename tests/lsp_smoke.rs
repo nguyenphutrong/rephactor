@@ -74,6 +74,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["documentHighlightProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["foldingRangeProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -258,6 +262,19 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("document highlights array")
+            .clone()
+    }
+
+    fn folding_ranges(&mut self, uri: &str) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/foldingRange",
+            json!({
+                "textDocument": { "uri": uri }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("folding range array")
             .clone()
     }
 
@@ -684,6 +701,32 @@ fn lsp_returns_document_highlights_for_symbol_name() {
 
     assert_eq!(highlights.len(), 3);
     assert!(highlights.iter().all(|highlight| highlight["kind"] == 1));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_folding_ranges_for_blocks_and_comments() {
+    let root = temp_project("folding-range");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\n/**\n * Summary.\n */\nclass InvoiceSender {\n    public function dispatch($invoice) {\n        send_invoice($invoice);\n    }\n}\n",
+    );
+
+    let ranges = server.folding_ranges(&uri);
+
+    assert!(ranges.iter().any(|range| range["kind"] == "comment"));
+    assert!(
+        ranges
+            .iter()
+            .any(|range| range["startLine"] == 4 && range["endLine"] == 8)
+    );
+    assert!(
+        ranges
+            .iter()
+            .any(|range| range["startLine"] == 5 && range["endLine"] == 7)
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

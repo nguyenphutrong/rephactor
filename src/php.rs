@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
     CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentHighlight, DocumentHighlightKind,
-    DocumentSymbol, DocumentSymbolResponse, GotoDefinitionResponse, Hover, HoverContents, Location,
-    MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
-    SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url,
-    WorkspaceEdit,
+    DocumentSymbol, DocumentSymbolResponse, FoldingRange, FoldingRangeKind, GotoDefinitionResponse,
+    Hover, HoverContents, Location, MarkupContent, MarkupKind, ParameterInformation,
+    ParameterLabel, Position, Range, SignatureHelp, SignatureInformation, SymbolInformation,
+    SymbolKind, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -173,6 +173,12 @@ pub struct ReferencesAnalysis {
 #[derive(Debug)]
 pub struct DocumentHighlightAnalysis {
     pub highlights: Vec<DocumentHighlight>,
+    pub skip_reason: Option<SkipReason>,
+}
+
+#[derive(Debug)]
+pub struct FoldingRangeAnalysis {
+    pub ranges: Vec<FoldingRange>,
     pub skip_reason: Option<SkipReason>,
 }
 
@@ -417,6 +423,19 @@ pub fn analyze_document_highlights(text: &str, position: Position) -> DocumentHi
         },
         Err(reason) => DocumentHighlightAnalysis {
             highlights: Vec::new(),
+            skip_reason: Some(reason),
+        },
+    }
+}
+
+pub fn analyze_folding_ranges(text: &str) -> FoldingRangeAnalysis {
+    match folding_ranges_for_text(text) {
+        Ok(ranges) => FoldingRangeAnalysis {
+            skip_reason: ranges.is_empty().then_some(SkipReason::NoEdits),
+            ranges,
+        },
+        Err(reason) => FoldingRangeAnalysis {
+            ranges: Vec::new(),
             skip_reason: Some(reason),
         },
     }
@@ -713,6 +732,55 @@ fn document_symbols_for_text(text: &str) -> Result<DocumentSymbolResponse, SkipR
 
     let symbols = collect_document_symbols(tree.root_node(), text)?;
     Ok(DocumentSymbolResponse::Nested(symbols))
+}
+
+fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> {
+    let Some(tree) = parse_php_allowing_errors(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let mut ranges = Vec::new();
+    collect_folding_ranges(tree.root_node(), text, &mut ranges);
+    ranges.sort_by_key(|range| (range.start_line, range.end_line));
+    Ok(ranges)
+}
+
+fn collect_folding_ranges(node: Node, text: &str, ranges: &mut Vec<FoldingRange>) {
+    if let Some(kind) = folding_kind_for_node(node)
+        && let Some(range) = folding_range_for_node(node, text, kind)
+    {
+        ranges.push(range);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_folding_ranges(child, text, ranges);
+    }
+}
+
+fn folding_kind_for_node(node: Node) -> Option<FoldingRangeKind> {
+    match node.kind() {
+        "comment" => Some(FoldingRangeKind::Comment),
+        "namespace_use_declaration" => Some(FoldingRangeKind::Imports),
+        "compound_statement" | "declaration_list" => Some(FoldingRangeKind::Region),
+        _ => None,
+    }
+}
+
+fn folding_range_for_node(node: Node, text: &str, kind: FoldingRangeKind) -> Option<FoldingRange> {
+    let start = lsp_position_for_byte_offset(text, node.start_byte())?;
+    let end = lsp_position_for_byte_offset(text, node.end_byte())?;
+    if start.line >= end.line {
+        return None;
+    }
+
+    Some(FoldingRange {
+        start_line: start.line,
+        start_character: Some(start.character),
+        end_line: end.line,
+        end_character: Some(end.character),
+        kind: Some(kind),
+        collapsed_text: None,
+    })
 }
 
 fn collect_parse_error_diagnostics(node: Node, text: &str, diagnostics: &mut Vec<Diagnostic>) {

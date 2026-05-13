@@ -96,4 +96,5 @@
 - [x] Implement `textDocument/references`.
 - [x] Implement parser diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
+- [x] Implement `textDocument/foldingRange`.
 - [ ] Implement semantic diagnostics for open files.
