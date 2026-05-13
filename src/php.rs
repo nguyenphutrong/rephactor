@@ -4024,6 +4024,44 @@ fn collect_phpdoc_type_annotation_diagnostics(
         }
     }
 
+    if matches!(
+        node.kind(),
+        "class_declaration" | "interface_declaration" | "trait_declaration"
+    ) {
+        let namespace = namespace_at_byte(root, text, node.start_byte());
+        for tag in ["@property", "@property-read", "@property-write"] {
+            for record in phpdoc_tag_line_records_before(text, node.start_byte(), tag) {
+                let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+                if let Some((type_name, _)) = phpdoc_var_tokens(&tokens) {
+                    maybe_push_unresolved_phpdoc_type_diagnostic(
+                        text,
+                        imports,
+                        index,
+                        namespace.as_deref(),
+                        &record,
+                        type_name,
+                        diagnostics,
+                    );
+                }
+            }
+        }
+
+        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@mixin") {
+            if let Some(type_name) = record.text.split_whitespace().next() {
+                let type_name = type_name.split('<').next().unwrap_or(type_name);
+                maybe_push_unresolved_phpdoc_type_diagnostic(
+                    text,
+                    imports,
+                    index,
+                    namespace.as_deref(),
+                    &record,
+                    type_name,
+                    diagnostics,
+                );
+            }
+        }
+    }
+
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_phpdoc_type_annotation_diagnostics(root, child, text, imports, index, diagnostics);
