@@ -114,6 +114,7 @@
 - [x] Resolve inline local PHPDoc `@var Type` annotations for the following assignment.
 - [x] Resolve PHPDoc `@param` parameter types.
 - [x] Use PHPDoc `@param` parameter contracts in type mismatch diagnostics.
+- [x] Resolve PHPDoc `@param self/static/parent` contracts in class-like scopes.
 - [x] Resolve simple local variable aliases for instance method receivers.
 - [x] Resolve assigned call-return types for instance method receivers.
 - [x] Resolve native `self` and `static` parameter receiver types.

@@ -4535,14 +4535,19 @@ fn declaration_signature_parameter_types(
     imports: &ImportMap,
 ) -> Vec<Option<ComparableReturnType>> {
     let native_types = parameter_types(declaration, parameters_node, text, namespace, imports);
-    let phpdoc_types =
-        phpdoc_param_types_before(text, declaration.start_byte(), namespace, imports)
-            .into_iter()
-            .filter_map(|(variable_name, type_name)| {
-                comparable_parameter_type(&type_name, namespace, imports)
-                    .map(|return_type| (variable_name, return_type))
-            })
-            .collect::<HashMap<_, _>>();
+    let phpdoc_types = phpdoc_param_types_before(
+        declaration,
+        text,
+        declaration.start_byte(),
+        namespace,
+        imports,
+    )
+    .into_iter()
+    .filter_map(|(variable_name, type_name)| {
+        comparable_parameter_type(&type_name, namespace, imports)
+            .map(|return_type| (variable_name, return_type))
+    })
+    .collect::<HashMap<_, _>>();
 
     parameter_names(parameters_node, text)
         .into_iter()
@@ -6248,7 +6253,7 @@ fn collect_phpdoc_param_types(
 
     if matches!(node.kind(), "function_definition" | "method_declaration") {
         for (variable_name, type_name) in
-            phpdoc_param_types_before(text, node.start_byte(), namespace, imports)
+            phpdoc_param_types_before(node, text, node.start_byte(), namespace, imports)
         {
             types.entry(variable_name).or_insert(type_name);
         }
@@ -6261,6 +6266,7 @@ fn collect_phpdoc_param_types(
 }
 
 fn phpdoc_param_types_before(
+    declaration: Node,
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
@@ -6298,10 +6304,34 @@ fn phpdoc_param_types_before(
             let (type_name, variable_name) = phpdoc_var_tokens(&tokens)?;
             Some((
                 variable_name.to_string(),
-                qualify_type_name(type_name, namespace, imports),
+                qualify_phpdoc_parameter_type_name(
+                    type_name,
+                    declaration,
+                    text,
+                    namespace,
+                    imports,
+                ),
             ))
         })
         .collect()
+}
+
+fn qualify_phpdoc_parameter_type_name(
+    type_name: &str,
+    declaration: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> String {
+    qualify_parameter_type_name(type_name, declaration, text, namespace, imports).unwrap_or_else(
+        || {
+            if is_builtin_type_name(type_name) {
+                clean_name_text(type_name)
+            } else {
+                qualify_type_name(type_name, namespace, imports)
+            }
+        },
+    )
 }
 
 struct AssignmentTypeCollectionContext<'a, 'tree> {

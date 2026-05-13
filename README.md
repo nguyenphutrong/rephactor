@@ -207,6 +207,8 @@ PHPDoc Type V1 reads function-like `@param Type $variable` annotations, local
 the following assignment, then feeds them into method resolution for completion,
 signature help, code actions, and conservative diagnostics. Class-level
 `@method` annotations are indexed as magic methods for the same features.
+Function-like PHPDoc `@param` annotations understand `self`, `static`, and
+direct `parent` inside class-like scopes.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
@@ -329,6 +331,8 @@ files that are not open in the editor are picked up on the next request.
   and direct `parent` parameter contracts.
 - Conservative argument-type mismatch diagnostics for PHPDoc `@param`
   parameter contracts.
+- Conservative argument-type mismatch diagnostics for PHPDoc `@param self`,
+  `@param static`, and direct `@param parent` contracts.
 - Nullable native and PHPDoc parameter diagnostics that accept `null` for
   `?Type` and `Type|null`.
 - Conservative argument-type mismatch diagnostics for seeded PHP internal
