@@ -4454,6 +4454,36 @@ fn lsp_resolves_instance_method_from_phpdoc_method() {
 }
 
 #[test]
+fn lsp_uses_phpdoc_method_types_for_diagnostics() {
+    let root = temp_project("phpdoc-method-type-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\nclass Invoice {}\n/** @method Customer make(Invoice $invoice) */\nclass Sender {}\nfunction takes_invoice(Invoice $invoice) {}\nfunction run(Sender $sender) {\n    $sender->make(new Customer());\n    takes_invoice($sender->make(new Invoice()));\n}\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic["message"]
+                    == "argument type mismatch for invoice: expected App\\Invoice, got App\\Customer"
+                    && diagnostic["severity"] == 1
+            })
+            .count()
+            >= 2
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_empty_for_unsupported_calls() {
     let root = temp_project("unsupported");
     let mut server = LspProcess::start(&root);

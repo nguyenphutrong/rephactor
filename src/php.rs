@@ -5573,7 +5573,7 @@ fn index_class(
         mixins: phpdoc_mixins_before(text, node.start_byte(), namespace),
         ..ClassInfo::default()
     };
-    for signature in phpdoc_methods_before(text, node.start_byte()) {
+    for signature in phpdoc_methods_before(text, node.start_byte(), namespace, imports) {
         class_info
             .methods
             .insert(normalize_method_key(&signature.name), signature);
@@ -7237,10 +7237,15 @@ fn phpdoc_mixins_before(text: &str, byte_offset: usize, namespace: Option<&str>)
         .collect()
 }
 
-fn phpdoc_methods_before(text: &str, byte_offset: usize) -> Vec<Signature> {
+fn phpdoc_methods_before(
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Vec<Signature> {
     phpdoc_tag_lines_before(text, byte_offset, "@method")
         .into_iter()
-        .filter_map(|method_text| phpdoc_method_signature(&method_text))
+        .filter_map(|method_text| phpdoc_method_signature(&method_text, namespace, imports))
         .collect()
 }
 
@@ -7305,53 +7310,84 @@ fn phpdoc_readonly_properties_before(text: &str, byte_offset: usize) -> HashSet<
         .collect()
 }
 
-fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
+fn phpdoc_method_signature(
+    method_text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<Signature> {
     let open = method_text.find('(')?;
     let close = method_text.rfind(')')?;
     if close < open {
         return None;
     }
 
-    let name = method_text[..open]
-        .split_whitespace()
-        .rev()
-        .find(|token| *token != "static")?
-        .trim();
+    let before_open = method_text[..open].split_whitespace().collect::<Vec<_>>();
+    let name_index = before_open.iter().rposition(|token| *token != "static")?;
+    let name = before_open.get(name_index)?.trim();
+    let return_type = name_index
+        .checked_sub(1)
+        .and_then(|index| before_open.get(index))
+        .filter(|token| **token != "static")
+        .map(|type_name| comparable_return_type(type_name, namespace, imports));
+
+    let name = name.split_whitespace().next().unwrap_or(name).trim();
     if name.is_empty() {
         return None;
     }
 
     let parameter_text = &method_text[open + 1..close];
     let is_variadic = parameter_text.contains("...");
-    let parameters = parameter_text
+    let parameter_parts = parameter_text
         .split(',')
         .filter_map(|parameter| {
             let parameter = parameter.trim();
-            if parameter.is_empty() {
-                return None;
-            }
-            parameter
-                .split_whitespace()
-                .last()
-                .map(|name| {
-                    name.trim_start_matches("...")
-                        .trim_start_matches('$')
-                        .to_string()
-                })
-                .filter(|name| !name.is_empty())
+            (!parameter.is_empty()).then_some(parameter)
         })
+        .collect::<Vec<_>>();
+    let parameters = parameter_parts
+        .iter()
+        .filter_map(|parameter| phpdoc_method_parameter_name(parameter))
+        .collect::<Vec<_>>();
+    let parameter_types = parameter_parts
+        .iter()
+        .filter_map(|parameter| phpdoc_method_parameter_type(parameter, namespace, imports))
         .collect::<Vec<_>>();
 
     Some(Signature {
         name: name.to_string(),
         parameters,
-        parameter_types: Vec::new(),
-        return_type: None,
+        parameter_types,
+        return_type,
         is_variadic,
         is_abstract: false,
         location: None,
         doc_summary: None,
     })
+}
+
+fn phpdoc_method_parameter_name(parameter: &str) -> Option<String> {
+    parameter
+        .split_whitespace()
+        .last()
+        .map(|name| {
+            name.trim_start_matches("...")
+                .trim_start_matches('$')
+                .to_string()
+        })
+        .filter(|name| !name.is_empty())
+}
+
+fn phpdoc_method_parameter_type(
+    parameter: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<Option<ComparableReturnType>> {
+    let tokens = parameter.split_whitespace().collect::<Vec<_>>();
+    if tokens.len() < 2 {
+        return Some(None);
+    }
+    let type_name = tokens.first()?.trim();
+    Some(comparable_parameter_type(type_name, namespace, imports))
 }
 
 struct PhpDocTagLine {
