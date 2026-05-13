@@ -176,13 +176,34 @@ impl SymbolIndex {
     }
 
     fn index_project(&mut self, project_root: &Path, open_documents: &HashMap<PathBuf, String>) {
-        let Some(psr4_roots) = composer_psr4_roots(project_root) else {
+        let Some(paths) = composer_autoload_paths(project_root) else {
             return;
         };
 
-        for root in psr4_roots {
-            self.index_php_files(&root, open_documents);
+        for path in paths {
+            self.index_php_path(&path, open_documents);
         }
+    }
+
+    fn index_php_path(&mut self, path: &Path, open_documents: &HashMap<PathBuf, String>) {
+        if path.is_dir() {
+            self.index_php_files(path, open_documents);
+            return;
+        }
+
+        if path.extension().and_then(|extension| extension.to_str()) != Some("php") {
+            return;
+        }
+
+        if let Some(open_text) = open_documents.get(path) {
+            self.index_text(open_text);
+            return;
+        }
+
+        let Ok(text) = fs::read_to_string(path) else {
+            return;
+        };
+        self.index_text(&text);
     }
 
     fn index_php_files(&mut self, root: &Path, open_documents: &HashMap<PathBuf, String>) {
@@ -194,23 +215,11 @@ impl SymbolIndex {
             let path = entry.path();
 
             if path.is_dir() {
-                self.index_php_files(&path, open_documents);
+                self.index_php_path(&path, open_documents);
                 continue;
             }
 
-            if path.extension().and_then(|extension| extension.to_str()) != Some("php") {
-                continue;
-            }
-
-            if let Some(open_text) = open_documents.get(&path) {
-                self.index_text(open_text);
-                continue;
-            }
-
-            let Ok(text) = fs::read_to_string(&path) else {
-                continue;
-            };
-            self.index_text(&text);
+            self.index_php_path(&path, open_documents);
         }
     }
 
@@ -1029,26 +1038,37 @@ fn php_constraint_token_requires_at_least_8(token: &str) -> bool {
     token == "8" || token.starts_with("8.") || token.starts_with("8.*") || token.starts_with("9")
 }
 
-fn composer_psr4_roots(project_root: &Path) -> Option<Vec<PathBuf>> {
+fn composer_autoload_paths(project_root: &Path) -> Option<Vec<PathBuf>> {
     let composer_text = fs::read_to_string(project_root.join("composer.json")).ok()?;
     let composer_json: serde_json::Value = serde_json::from_str(&composer_text).ok()?;
-    let psr4 = composer_json
-        .get("autoload")
-        .and_then(|autoload| autoload.get("psr-4"))?
-        .as_object()?;
+    let autoload = composer_json.get("autoload")?;
     let mut roots = Vec::new();
 
-    for value in psr4.values() {
-        if let Some(path) = value.as_str() {
-            roots.push(project_root.join(path));
-        } else if let Some(paths) = value.as_array() {
-            for path in paths.iter().filter_map(|path| path.as_str()) {
-                roots.push(project_root.join(path));
-            }
+    if let Some(psr4) = autoload.get("psr-4").and_then(|psr4| psr4.as_object()) {
+        for value in psr4.values() {
+            collect_composer_paths(project_root, value, &mut roots);
         }
     }
 
-    Some(roots)
+    if let Some(classmap) = autoload.get("classmap") {
+        collect_composer_paths(project_root, classmap, &mut roots);
+    }
+
+    (!roots.is_empty()).then_some(roots)
+}
+
+fn collect_composer_paths(
+    project_root: &Path,
+    value: &serde_json::Value,
+    paths: &mut Vec<PathBuf>,
+) {
+    if let Some(path) = value.as_str() {
+        paths.push(project_root.join(path));
+    } else if let Some(values) = value.as_array() {
+        for value in values {
+            collect_composer_paths(project_root, value, paths);
+        }
+    }
 }
 
 fn is_name_node(node: Node) -> bool {
@@ -1390,6 +1410,45 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nnamespace App;\nsend_invoice(invoice: $invoice, notify: true);\n"
+        );
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn resolves_project_classes_from_composer_classmap_file() {
+        let project_root = unique_project_root();
+        let legacy_dir = project_root.join("legacy");
+        let app_dir = project_root.join("app");
+        fs::create_dir_all(&legacy_dir).expect("create legacy dir");
+        fs::create_dir_all(&app_dir).expect("create app dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"classmap":["legacy/CustomerSupplier.php"]}}"#,
+        )
+        .expect("write composer");
+        fs::write(
+            legacy_dir.join("CustomerSupplier.php"),
+            "<?php\nnamespace Legacy;\nclass CustomerSupplier { public static function sync($shop_id, $customer_id) {} }\n",
+        )
+        .expect("write classmap class");
+
+        let caller_path = app_dir.join("Caller.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("file uri");
+        let text = "<?php\nnamespace App;\nuse Legacy\\CustomerSupplier;\nCustomerSupplier::sync($shop_id, $customer_id);\n";
+        let action =
+            named_argument_code_action(&caller_uri, text, position(3, 25)).expect("code action");
+        let edits = action
+            .edit
+            .expect("workspace edit")
+            .changes
+            .expect("changes")
+            .remove(&caller_uri)
+            .expect("edits");
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App;\nuse Legacy\\CustomerSupplier;\nCustomerSupplier::sync(shop_id: $shop_id, customer_id: $customer_id);\n"
         );
 
         fs::remove_dir_all(project_root).expect("remove project root");

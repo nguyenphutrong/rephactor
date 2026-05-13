@@ -119,6 +119,7 @@ only expands long action titles.
 - Instance methods when the receiver type is locally obvious from a typed
   parameter or `$var = new ClassName(...)`.
 - Project symbols under Composer `autoload.psr-4` roots.
+- Project symbols under Composer `autoload.classmap` files or directories.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.
 - Projects without a Composer PHP version constraint, or projects whose
@@ -133,8 +134,8 @@ Rephactor returns no action instead of guessing for:
 - calls whose existing named arguments do not match the resolved signature
 - ambiguous symbols
 - unknown parameter names
-- PHP internal functions or Composer classmaps
-- Composer autoload modes other than `autoload.psr-4`
+- PHP internal functions
+- Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols
 - Composer `require.php` constraints that allow PHP 7.x, because named
@@ -153,7 +154,6 @@ Current release posture:
 Deferred until V1 behavior is stable:
 
 - prebuilt macOS, Linux, and Windows binaries
-- Composer classmap support
 - PHP internal stubs
 - PHPStan/Psalm metadata
 
