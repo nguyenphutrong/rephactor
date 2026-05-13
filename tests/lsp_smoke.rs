@@ -1295,6 +1295,34 @@ fn lsp_publishes_semantic_diagnostics_for_duplicate_named_arguments() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_too_many_arguments() {
+    let root = temp_project("too-many-argument-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction send_invoice($invoice) {}\nfunction collect_all(...$items) {}\nsend_invoice($invoice, true);\ncollect_all($one, $two);\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "too many arguments for send_invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic["message"] == "too many arguments for collect_all" })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_unused_imports() {
     let root = temp_project("unused-import-diagnostics");
     let mut server = LspProcess::start(&root);

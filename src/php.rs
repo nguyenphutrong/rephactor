@@ -22,6 +22,7 @@ const ACTION_TITLE: &str = "[Rephactor] Add names to arguments";
 struct Signature {
     name: String,
     parameters: Vec<String>,
+    is_variadic: bool,
     location: Option<SourceLocation>,
     doc_summary: Option<String>,
 }
@@ -259,6 +260,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
             Ok(signature) => {
                 diagnostics.extend(duplicate_named_argument_diagnostics(text, &call));
                 diagnostics.extend(unknown_named_argument_diagnostics(text, &call, &signature));
+                diagnostics.extend(too_many_argument_diagnostics(text, &call, &signature));
             }
             Err(
                 reason @ (SkipReason::UnresolvedCallable(_) | SkipReason::AmbiguousCallable(_)),
@@ -1691,6 +1693,36 @@ fn duplicate_named_argument_diagnostics(text: &str, call: &CallInfo) -> Vec<Diag
     diagnostics
 }
 
+fn too_many_argument_diagnostics(
+    text: &str,
+    call: &CallInfo,
+    signature: &Signature,
+) -> Vec<Diagnostic> {
+    if signature.is_variadic
+        || call.arguments.iter().any(|argument| argument.is_unpacking)
+        || call.arguments.len() <= signature.parameters.len()
+    {
+        return Vec::new();
+    }
+
+    let Some(argument) = call.arguments.get(signature.parameters.len()) else {
+        return Vec::new();
+    };
+
+    vec![Diagnostic {
+        range: range_for_bytes(text, argument.start_byte, argument.end_byte)
+            .unwrap_or_else(|_| Range::default()),
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: None,
+        code_description: None,
+        source: Some("rephactor".to_string()),
+        message: format!("too many arguments for {}", signature.name),
+        related_information: None,
+        tags: None,
+        data: None,
+    }]
+}
+
 fn collect_function_like_declarations<'tree>(
     node: Node<'tree>,
     declarations: &mut Vec<Node<'tree>>,
@@ -2685,6 +2717,7 @@ fn index_function(
     let signature = Signature {
         name: name.clone(),
         parameters: parameter_names(parameters_node, text),
+        is_variadic: parameters_node_has_variadic(parameters_node),
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_summary_before(text, node.start_byte()),
     };
@@ -2752,6 +2785,7 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option
     let signature = Signature {
         name: method_name.clone(),
         parameters: parameter_names(parameters_node, text),
+        is_variadic: parameters_node_has_variadic(parameters_node),
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_summary_before(text, node.start_byte()),
     };
@@ -3021,6 +3055,13 @@ fn parameter_names(parameters_node: Node, text: &str) -> Vec<String> {
     }
 
     parameters
+}
+
+fn parameters_node_has_variadic(parameters_node: Node) -> bool {
+    let mut cursor = parameters_node.walk();
+    parameters_node
+        .named_children(&mut cursor)
+        .any(|child| child.kind() == "variadic_parameter")
 }
 
 fn namespace_at_byte(root: Node, text: &str, byte_offset: usize) -> Option<String> {
@@ -4699,6 +4740,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
             .iter()
             .map(|parameter| parameter.to_string())
             .collect(),
+        is_variadic: matches!(normalized_name.as_str(), "array_merge"),
         location: None,
         doc_summary: Some(format!(
             "[PHP manual](https://www.php.net/{normalized_name})"
