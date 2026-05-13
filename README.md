@@ -231,9 +231,10 @@ PHPDoc `@method` parameter and return types are used for conservative argument
 diagnostics and resolved-call return-type propagation, including `self`,
 `static`, and direct `parent` inside the annotated class.
 Function-like PHPDoc `@param` annotations understand `self`, `static`, and
-direct `parent` inside class-like scopes. PHPDoc array and list generics such
-as `array<int,Foo>`, `list<Foo>`, and `Foo[]` are treated as conservative
-`array` contracts for mismatch diagnostics.
+direct `parent` inside class-like scopes, and PHPDoc `@return` annotations use
+the same relative class handling. PHPDoc array and list generics such as
+`array<int,Foo>`, `list<Foo>`, and `Foo[]` are treated as conservative `array`
+contracts for mismatch diagnostics.
 Class-level PHPDoc magic property annotations also understand `self`, `static`,
 and direct `parent` for conservative property assignment/type-definition flows.
 Local PHPDoc `@var` annotations also resolve `self`, `static`, and direct
@@ -465,6 +466,8 @@ files that are not open in the editor are picked up on the next request.
   conservative assignment diagnostics.
 - Function-like PHPDoc `@param Type $variable` annotations for instance method
   resolution.
+- Function-like PHPDoc `@return self`, `@return static`, and direct
+  `@return parent` annotations for conservative return diagnostics.
 - PHPDoc `@mixin ClassName` annotations for class instance method resolution.
 - PHPDoc `@method` annotations for class magic method resolution.
 - PHPDoc `@method` parameter and return types for conservative diagnostics,

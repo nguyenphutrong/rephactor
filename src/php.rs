@@ -2861,6 +2861,7 @@ fn return_type_mismatches_for_declaration(
         })
         .or_else(|| {
             phpdoc_return_type_before(
+                declaration,
                 text,
                 declaration.start_byte(),
                 namespace.as_deref(),
@@ -6290,10 +6291,19 @@ fn declaration_signature_return_type(
     declaration
         .child_by_field_name("return_type")
         .and_then(|type_node| comparable_parameter_type_node(type_node, text, namespace, imports))
-        .or_else(|| phpdoc_return_type_before(text, declaration.start_byte(), namespace, imports))
+        .or_else(|| {
+            phpdoc_return_type_before(
+                declaration,
+                text,
+                declaration.start_byte(),
+                namespace,
+                imports,
+            )
+        })
 }
 
 fn phpdoc_return_type_before(
+    declaration: Node,
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
@@ -6303,7 +6313,9 @@ fn phpdoc_return_type_before(
         .into_iter()
         .next()?;
     let return_type = return_line.split_whitespace().next()?.trim();
-    comparable_parameter_type(return_type, namespace, imports)
+    let type_name =
+        qualify_phpdoc_parameter_type_name(return_type, declaration, text, namespace, imports);
+    comparable_parameter_type(&type_name, None, &ImportMap::default())
 }
 
 fn parameters_node_has_variadic(parameters_node: Node) -> bool {
