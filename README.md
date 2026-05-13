@@ -200,11 +200,11 @@ an `@return` tag when a non-void return type is declared. It also adds
 `@throws` tags for directly detected `throw new ExceptionClass(...)`
 expressions.
 
-PHPDoc Type V1 reads function-like `@param Type $variable` annotations and
-local `@var Type $variable` annotations, then feeds them into method resolution
-for completion, signature help, code actions, and conservative diagnostics.
-Class-level `@method` annotations are indexed as magic methods for the same
-features.
+PHPDoc Type V1 reads function-like `@param Type $variable` annotations, local
+`@var Type $variable` annotations, and inline local `@var Type` annotations for
+the following assignment, then feeds them into method resolution for completion,
+signature help, code actions, and conservative diagnostics. Class-level
+`@method` annotations are indexed as magic methods for the same features.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
@@ -366,6 +366,7 @@ files that are not open in the editor are picked up on the next request.
   return tags, plus direct `throw new ExceptionClass(...)` throws tags.
 - Local PHPDoc `@var Type $variable` annotations for instance method
   resolution.
+- Inline local PHPDoc `@var Type` annotations for the following assignment.
 - Function-like PHPDoc `@param Type $variable` annotations for instance method
   resolution.
 - PHPDoc `@mixin ClassName` annotations for class instance method resolution.

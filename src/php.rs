@@ -2985,6 +2985,21 @@ fn phpdoc_variable_type_at_byte(
     types
         .get(variable_name)
         .and_then(|type_name| comparable_parameter_type(type_name, namespace, imports))
+        .or_else(|| phpdoc_inline_var_type_before(text, byte_offset, namespace, imports))
+}
+
+fn phpdoc_inline_var_type_before(
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let type_name = phpdoc_tag_lines_before(text, byte_offset, "@var")
+        .into_iter()
+        .next()?;
+    let tokens = type_name.split_whitespace().collect::<Vec<_>>();
+    phpdoc_var_type_token(&tokens)
+        .and_then(|type_name| comparable_parameter_type(type_name, namespace, imports))
 }
 
 fn collect_return_expressions<'tree>(
@@ -6333,6 +6348,7 @@ fn collect_phpdoc_var_types(
         return;
     };
 
+    let mut pending_inline_type = None;
     for line in before.lines() {
         let line = line
             .trim()
@@ -6340,21 +6356,39 @@ fn collect_phpdoc_var_types(
             .trim_start_matches('*')
             .trim_end_matches("*/")
             .trim();
-        let Some(var_offset) = line.find("@var") else {
+        if let Some(var_offset) = line.find("@var") {
+            let tokens = line[var_offset + 4..]
+                .split_whitespace()
+                .collect::<Vec<_>>();
+            if let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) {
+                types.insert(
+                    variable_name.to_string(),
+                    qualify_type_name(type_name, namespace, imports),
+                );
+            } else if let Some(type_name) = phpdoc_var_type_token(&tokens) {
+                pending_inline_type = Some(type_name.to_string());
+            }
             continue;
-        };
-        let tokens = line[var_offset + 4..]
-            .split_whitespace()
-            .collect::<Vec<_>>();
-        let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) else {
-            continue;
-        };
+        }
 
-        types.insert(
-            variable_name.to_string(),
-            qualify_type_name(type_name, namespace, imports),
-        );
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(type_name) = pending_inline_type.take()
+            && let Some(variable_name) = first_variable_name_in_line(line)
+        {
+            types.insert(
+                variable_name,
+                qualify_type_name(&type_name, namespace, imports),
+            );
+        }
     }
+}
+
+fn phpdoc_var_type_token<'a>(tokens: &'a [&str]) -> Option<&'a str> {
+    let first = tokens.first()?.trim();
+    (!first.starts_with('$')).then_some(first)
 }
 
 fn phpdoc_var_tokens<'a>(tokens: &'a [&str]) -> Option<(&'a str, &'a str)> {
@@ -6367,6 +6401,20 @@ fn phpdoc_var_tokens<'a>(tokens: &'a [&str]) -> Option<(&'a str, &'a str)> {
     } else {
         None
     }
+}
+
+fn first_variable_name_in_line(line: &str) -> Option<String> {
+    let start = line.find('$')?;
+    let rest = line.get(start + 1..)?;
+    let mut end = start + 1;
+    for character in rest.chars() {
+        if character == '_' || character.is_ascii_alphanumeric() {
+            end += character.len_utf8();
+        } else {
+            break;
+        }
+    }
+    (end > start + 1).then(|| line[start..end].to_string())
 }
 
 fn first_named_type(type_node: Node, text: &str) -> Option<String> {

@@ -111,6 +111,7 @@
 - [x] Implement PHPDoc creation code actions for function-like declarations.
 - [x] Add direct thrown-exception tags to PHPDoc creation.
 - [x] Resolve local PHPDoc `@var` variable types.
+- [x] Resolve inline local PHPDoc `@var Type` annotations for the following assignment.
 - [x] Resolve PHPDoc `@param` parameter types.
 - [x] Use PHPDoc `@param` parameter contracts in type mismatch diagnostics.
 - [x] Resolve simple local variable aliases for instance method receivers.
