@@ -8789,6 +8789,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "fopen" => &["filename", "mode", "use_include_path", "context"],
         "gettype" => &["value"],
         "hash" => &["algo", "data", "binary", "options"],
+        "html_entity_decode" => &["string", "flags", "encoding"],
+        "htmlspecialchars" => &["string", "flags", "encoding", "double_encode"],
         "implode" => &["separator", "array"],
         "in_array" => &["needle", "haystack", "strict"],
         "intval" => &["value", "base"],
@@ -8809,7 +8811,9 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "max" => &["value", "values"],
         "md5" => &["string", "binary"],
         "min" => &["value", "values"],
+        "preg_match_all" => &["pattern", "subject", "matches", "flags", "offset"],
         "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
+        "preg_split" => &["pattern", "subject", "limit", "flags"],
         "realpath" => &["path"],
         "round" => &["num", "precision", "mode"],
         "rtrim" => &["string", "characters"],
@@ -8889,6 +8893,8 @@ fn internal_function_parameter_types(
         "fopen" => &[Some("string"), Some("string"), Some("bool"), None],
         "gettype" => &[None],
         "hash" => &[Some("string"), Some("string"), Some("bool"), Some("array")],
+        "html_entity_decode" => &[Some("string"), Some("int"), Some("string")],
+        "htmlspecialchars" => &[Some("string"), Some("int"), Some("string"), Some("bool")],
         "implode" => &[Some("string"), Some("array")],
         "in_array" => &[None, Some("array"), Some("bool")],
         "intval" => &[None, Some("int")],
@@ -8909,6 +8915,13 @@ fn internal_function_parameter_types(
         "max" => &[None, None],
         "md5" => &[Some("string"), Some("bool")],
         "min" => &[None, None],
+        "preg_match_all" => &[
+            Some("string"),
+            Some("string"),
+            None,
+            Some("int"),
+            Some("int"),
+        ],
         "preg_match" => &[
             Some("string"),
             Some("string"),
@@ -8916,6 +8929,7 @@ fn internal_function_parameter_types(
             Some("int"),
             Some("int"),
         ],
+        "preg_split" => &[Some("string"), Some("string"), Some("int"), Some("int")],
         "realpath" => &[Some("string")],
         "round" => &[Some("int"), Some("int"), None],
         "rtrim" => &[Some("string"), Some("string")],
@@ -8955,18 +8969,19 @@ fn internal_function_parameter_types(
 fn internal_function_return_type(normalized_name: &str) -> Option<ComparableReturnType> {
     let type_name = match normalized_name {
         "array_column" | "array_filter" | "array_keys" | "array_map" | "array_merge"
-        | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode" => "array",
+        | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
+        | "preg_split" => "array",
         "array_key_exists" | "fclose" | "file_exists" | "in_array" | "is_array" | "is_bool"
         | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
         | "is_readable" | "is_string" | "is_writable" | "str_contains" | "str_ends_with"
         | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
-        | "preg_match" | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" => "int",
+        | "preg_match" | "preg_match_all" | "round" | "strlen" | "strpos" | "strrpos"
+        | "strtotime" | "time" => "int",
         "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "realpath" | "rtrim"
-        | "date" | "file_get_contents" | "gettype" | "hash" | "md5" | "serialize" | "sha1"
-        | "sprintf" | "str_repeat" | "strtolower" | "strtoupper" | "strval" | "substr" | "trim" => {
-            "string"
-        }
+        | "date" | "file_get_contents" | "gettype" | "hash" | "html_entity_decode"
+        | "htmlspecialchars" | "md5" | "serialize" | "sha1" | "sprintf" | "str_repeat"
+        | "strtolower" | "strtoupper" | "strval" | "substr" | "trim" => "string",
         "boolval" => "bool",
         "floatval" => "float",
         _ => return None,
@@ -9007,6 +9022,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "fopen",
         "gettype",
         "hash",
+        "html_entity_decode",
+        "htmlspecialchars",
         "implode",
         "in_array",
         "intval",
@@ -9027,7 +9044,9 @@ fn internal_function_names() -> Vec<&'static str> {
         "max",
         "md5",
         "min",
+        "preg_match_all",
         "preg_match",
+        "preg_split",
         "realpath",
         "round",
         "rtrim",

@@ -473,8 +473,9 @@ files that are not open in the editor are picked up on the next request.
   `dirname`, `basename`, `realpath`, `str_repeat`, `strpos`, `ltrim`,
   `is_string`, `array_reverse`, `array_unique`, `date`, `strtotime`, `round`,
   `abs`, `hash`, `md5`, `serialize`, `gettype`, `intval`, `strval`,
-  `file_get_contents`, `file_put_contents`, `filesize`, `fopen`, and `is_file`,
-  with PHP manual links in hover.
+  `file_get_contents`, `file_put_contents`, `filesize`, `fopen`, `is_file`,
+  `preg_match_all`, `preg_split`, and `htmlspecialchars`, with PHP manual links
+  in hover.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.
 - Projects without a Composer PHP version constraint, or projects whose
