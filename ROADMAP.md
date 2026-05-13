@@ -135,6 +135,7 @@
 - [x] Implement conservative return-type mismatch diagnostics for open files.
 - [x] Implement PHPDoc `@return` return-type mismatch diagnostics for open files.
 - [x] Accept `null` for nullable native return and parameter type diagnostics.
+- [x] Accept `null` for single-type `Type|null` native and PHPDoc diagnostics.
 - [x] Implement local-variable return-type mismatch diagnostics for open files.
 - [x] Implement returned-call return-type mismatch diagnostics for open files.
 - [x] Implement assigned-call return-type mismatch diagnostics for open files.

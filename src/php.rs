@@ -2238,14 +2238,14 @@ fn return_type_mismatches_for_declaration(
     let declared = declaration
         .child_by_field_name("return_type")
         .and_then(|type_node| {
-            let return_type = single_named_type(type_node, text)?;
-            let (normalized_type_name, _) = nullable_type_name(&return_type);
+            let (return_type, allows_null) = single_named_type_with_nullability(type_node, text)?;
+            let (normalized_type_name, _) = supported_single_type_name(&return_type)?;
             let mut declared = (!matches!(
-                normalize_return_type_name(normalized_type_name).as_str(),
+                normalize_return_type_name(&normalized_type_name).as_str(),
                 "mixed" | "never"
             ))
             .then(|| comparable_return_type(&return_type, namespace.as_deref(), imports))?;
-            declared.allows_null = declared.allows_null || type_node_allows_null(type_node, text);
+            declared.allows_null = declared.allows_null || allows_null;
             Some(declared)
         })
         .or_else(|| {
@@ -2306,8 +2306,9 @@ fn comparable_return_type(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> ComparableReturnType {
-    let (type_name, allows_null) = nullable_type_name(type_name);
-    let normalized = normalize_return_type_name(type_name);
+    let (type_name, allows_null) = supported_single_type_name(type_name)
+        .unwrap_or_else(|| (type_name.trim().to_string(), false));
+    let normalized = normalize_return_type_name(&type_name);
     if let Some(key) = scalar_return_type_key(&normalized) {
         return ComparableReturnType {
             key: key.to_string(),
@@ -2316,7 +2317,7 @@ fn comparable_return_type(
         };
     }
 
-    let qualified = qualify_type_name(type_name, namespace, imports);
+    let qualified = qualify_type_name(&type_name, namespace, imports);
     ComparableReturnType {
         key: format!("class:{}", normalize_symbol_key(&qualified)),
         display: qualified,
@@ -2328,12 +2329,31 @@ fn types_compatible(expected: &ComparableReturnType, actual: &ComparableReturnTy
     expected.key == actual.key || (expected.allows_null && actual.key == "scalar:null")
 }
 
-fn nullable_type_name(type_name: &str) -> (&str, bool) {
+fn supported_single_type_name(type_name: &str) -> Option<(String, bool)> {
     let type_name = type_name.trim();
-    type_name
-        .strip_prefix('?')
-        .map(|inner| (inner.trim(), true))
-        .unwrap_or((type_name, false))
+    if type_name.is_empty() {
+        return None;
+    }
+    if let Some(inner) = type_name.strip_prefix('?') {
+        return Some((inner.trim().to_string(), true));
+    }
+
+    let parts = type_name.split('|').map(str::trim).collect::<Vec<_>>();
+    if parts.len() <= 1 {
+        return Some((type_name.to_string(), false));
+    }
+
+    let mut allows_null = false;
+    let mut concrete = Vec::new();
+    for part in parts {
+        if normalize_return_type_name(part) == "null" {
+            allows_null = true;
+        } else {
+            concrete.push(part);
+        }
+    }
+
+    (allows_null && concrete.len() == 1).then(|| (concrete[0].to_string(), true))
 }
 
 fn inferred_return_expression_type(
@@ -2988,10 +3008,21 @@ fn collect_return_expressions<'tree>(
     }
 }
 
-fn single_named_type(type_node: Node, text: &str) -> Option<String> {
+fn single_named_type_with_nullability(type_node: Node, text: &str) -> Option<(String, bool)> {
     let mut type_names = Vec::new();
     collect_named_type_texts(type_node, text, &mut type_names);
-    (type_names.len() == 1).then(|| type_names.remove(0))
+    let mut allows_null = type_node_allows_null(type_node, text);
+    let mut concrete_types = Vec::new();
+
+    for type_name in type_names {
+        if normalize_return_type_name(&type_name) == "null" {
+            allows_null = true;
+        } else {
+            concrete_types.push(type_name);
+        }
+    }
+
+    (concrete_types.len() == 1).then(|| (concrete_types.remove(0), allows_null))
 }
 
 fn collect_named_type_texts(node: Node, text: &str, type_names: &mut Vec<String>) {
@@ -4456,8 +4487,8 @@ fn comparable_parameter_type(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<ComparableReturnType> {
-    let (normalized_type_name, _) = nullable_type_name(type_name);
-    let normalized = normalize_return_type_name(normalized_type_name);
+    let (normalized_type_name, allows_null) = supported_single_type_name(type_name)?;
+    let normalized = normalize_return_type_name(&normalized_type_name);
     if matches!(
         normalized.as_str(),
         "callable"
@@ -4473,7 +4504,9 @@ fn comparable_parameter_type(
         return None;
     }
 
-    Some(comparable_return_type(type_name, namespace, imports))
+    let mut comparable = comparable_return_type(&normalized_type_name, namespace, imports);
+    comparable.allows_null = comparable.allows_null || allows_null;
+    Some(comparable)
 }
 
 fn comparable_parameter_type_node(
@@ -4482,9 +4515,9 @@ fn comparable_parameter_type_node(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<ComparableReturnType> {
-    let type_name = single_named_type(type_node, text)?;
+    let (type_name, allows_null) = single_named_type_with_nullability(type_node, text)?;
     let mut comparable = comparable_parameter_type(&type_name, namespace, imports)?;
-    comparable.allows_null = comparable.allows_null || type_node_allows_null(type_node, text);
+    comparable.allows_null = comparable.allows_null || allows_null;
     Some(comparable)
 }
 
