@@ -6846,8 +6846,12 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
     let parameters = match normalized_name.as_str() {
         "array_filter" => &["array", "callback", "mode"][..],
         "array_key_exists" => &["key", "array"],
+        "array_column" => &["array", "column_key", "index_key"],
+        "array_keys" => &["array", "filter_value", "strict"],
         "array_map" => &["callback", "array", "arrays"],
         "array_merge" => &["arrays"],
+        "array_slice" => &["array", "offset", "length", "preserve_keys"],
+        "array_values" => &["array"],
         "count" => &["value", "mode"],
         "explode" => &["separator", "string", "limit"],
         "implode" => &["separator", "array"],
@@ -6857,8 +6861,14 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "json_encode" => &["value", "flags", "depth"],
         "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
         "str_contains" => &["haystack", "needle"],
+        "str_ends_with" => &["haystack", "needle"],
+        "str_starts_with" => &["haystack", "needle"],
         "str_replace" => &["search", "replace", "subject", "count"],
         "strlen" => &["string"],
+        "strtolower" => &["string"],
+        "strtoupper" => &["string"],
+        "substr" => &["string", "offset", "length"],
+        "sprintf" => &["format", "values"],
         "trim" => &["string", "characters"],
         _ => return None,
     };
@@ -6873,7 +6883,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         parameter_types,
         parameters,
         return_type: internal_function_return_type(&normalized_name),
-        is_variadic: matches!(normalized_name.as_str(), "array_merge"),
+        is_variadic: matches!(normalized_name.as_str(), "array_merge" | "sprintf"),
         is_abstract: false,
         location: None,
         doc_summary: Some(format!(
@@ -6889,8 +6899,12 @@ fn internal_function_parameter_types(
     let type_names = match normalized_name {
         "array_filter" => &[Some("array"), None, None][..],
         "array_key_exists" => &[None, Some("array")],
+        "array_column" => &[Some("array"), None, None],
+        "array_keys" => &[Some("array"), None, Some("bool")],
         "array_map" => &[None, Some("array"), None],
         "array_merge" => &[Some("array")],
+        "array_slice" => &[Some("array"), Some("int"), Some("int"), Some("bool")],
+        "array_values" => &[Some("array")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
         "implode" => &[Some("string"), Some("array")],
         "in_array" => &[None, Some("array"), Some("bool")],
@@ -6905,7 +6919,13 @@ fn internal_function_parameter_types(
             Some("int"),
         ],
         "str_contains" => &[Some("string"), Some("string")],
+        "str_ends_with" => &[Some("string"), Some("string")],
+        "str_starts_with" => &[Some("string"), Some("string")],
         "strlen" => &[Some("string")],
+        "strtolower" => &[Some("string")],
+        "strtoupper" => &[Some("string")],
+        "substr" => &[Some("string"), Some("int"), Some("int")],
+        "sprintf" => &[Some("string"), None],
         "trim" => &[Some("string"), Some("string")],
         _ => &[][..],
     };
@@ -6924,10 +6944,14 @@ fn internal_function_parameter_types(
 
 fn internal_function_return_type(normalized_name: &str) -> Option<ComparableReturnType> {
     let type_name = match normalized_name {
-        "array_filter" | "array_map" | "array_merge" | "explode" => "array",
-        "array_key_exists" | "in_array" | "is_array" | "str_contains" => "bool",
+        "array_column" | "array_filter" | "array_keys" | "array_map" | "array_merge"
+        | "array_slice" | "array_values" | "explode" => "array",
+        "array_key_exists" | "in_array" | "is_array" | "str_contains" | "str_ends_with"
+        | "str_starts_with" => "bool",
         "count" | "preg_match" | "strlen" => "int",
-        "implode" | "json_encode" | "trim" => "string",
+        "implode" | "json_encode" | "sprintf" | "strtolower" | "strtoupper" | "substr" | "trim" => {
+            "string"
+        }
         _ => return None,
     };
     comparable_parameter_type(type_name, None, &ImportMap::default())
@@ -6936,9 +6960,13 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
 fn internal_function_names() -> Vec<&'static str> {
     vec![
         "array_filter",
+        "array_column",
         "array_key_exists",
+        "array_keys",
         "array_map",
         "array_merge",
+        "array_slice",
+        "array_values",
         "count",
         "explode",
         "implode",
@@ -6948,8 +6976,14 @@ fn internal_function_names() -> Vec<&'static str> {
         "json_encode",
         "preg_match",
         "str_contains",
+        "str_ends_with",
+        "str_starts_with",
         "str_replace",
         "strlen",
+        "strtolower",
+        "strtoupper",
+        "substr",
+        "sprintf",
         "trim",
     ]
 }

@@ -756,6 +756,43 @@ fn lsp_returns_php_manual_link_for_internal_function_hover() {
 }
 
 #[test]
+fn lsp_returns_expanded_internal_function_metadata() {
+    let root = temp_project("expanded-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nstr_starts_with();\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 5);
+
+    assert!(items.iter().any(|item| item["label"] == "str_starts_with"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nstr_starts_with($haystack, $needle);\narray_values(\"not an array\");\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for array: expected array, got string"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("str_starts_with($haystack, $needle)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/str_starts_with)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_declaration_for_implemented_method() {
     let root = temp_project("method-declaration");
     let mut server = LspProcess::start(&root);

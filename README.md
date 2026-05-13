@@ -403,8 +403,9 @@ files that are not open in the editor are picked up on the next request.
   receiver types.
 - Project symbols under Composer `autoload.psr-4` roots.
 - Project symbols under Composer `autoload.classmap` files or directories.
-- A small seed set of PHP internal functions, such as `str_replace`,
-  `json_encode`, `preg_match`, and `in_array`, with PHP manual links in hover.
+- A seed set of PHP internal functions, such as `str_replace`, `json_encode`,
+  `preg_match`, `in_array`, `str_starts_with`, and `array_values`, with PHP
+  manual links in hover.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.
 - Projects without a Composer PHP version constraint, or projects whose
