@@ -1213,6 +1213,39 @@ fn lsp_publishes_semantic_diagnostics_for_duplicate_declarations() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_duplicate_parameters() {
+    let root = temp_project("duplicate-parameter-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction send_invoice($invoice, $invoice) {}\nclass Sender { public function dispatch($order, $order) {} }\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["message"] == "duplicate parameter $invoice")
+            .count(),
+        1
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["message"] == "duplicate parameter $order")
+            .count(),
+        1
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_unused_imports() {
     let root = temp_project("unused-import-diagnostics");
     let mut server = LspProcess::start(&root);

@@ -308,6 +308,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
     }
 
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
+    diagnostics.extend(duplicate_parameter_diagnostics(root, text));
     diagnostics.extend(unused_import_diagnostics(
         root,
         text,
@@ -1572,6 +1573,65 @@ fn collect_duplicate_checked_declarations<'tree>(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_duplicate_checked_declarations(child, declarations);
+    }
+}
+
+fn duplicate_parameter_diagnostics(root: Node, text: &str) -> Vec<Diagnostic> {
+    let mut declarations = Vec::new();
+    collect_function_like_declarations(root, &mut declarations);
+    let mut diagnostics = Vec::new();
+
+    for declaration in declarations {
+        let Some(parameters) = declaration.child_by_field_name("parameters") else {
+            continue;
+        };
+        let mut seen = HashSet::new();
+        let mut cursor = parameters.walk();
+
+        for parameter in parameters.named_children(&mut cursor) {
+            if !matches!(
+                parameter.kind(),
+                "simple_parameter" | "variadic_parameter" | "property_promotion_parameter"
+            ) {
+                continue;
+            }
+            let Some(name_node) = parameter.child_by_field_name("name") else {
+                continue;
+            };
+            let parameter_name = node_text(name_node, text);
+            if seen.insert(parameter_name.to_string()) {
+                continue;
+            }
+
+            diagnostics.push(Diagnostic {
+                range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!("duplicate parameter {parameter_name}"),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
+    diagnostics
+}
+
+fn collect_function_like_declarations<'tree>(
+    node: Node<'tree>,
+    declarations: &mut Vec<Node<'tree>>,
+) {
+    if matches!(node.kind(), "function_definition" | "method_declaration") {
+        declarations.push(node);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_function_like_declarations(child, declarations);
     }
 }
 

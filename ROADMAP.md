@@ -111,6 +111,7 @@
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement duplicate declaration diagnostics for open files.
+- [x] Implement duplicate parameter diagnostics for open files.
 - [x] Implement unused-import diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
