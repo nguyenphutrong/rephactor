@@ -320,6 +320,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
 
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
     diagnostics.extend(duplicate_parameter_diagnostics(root, text));
+    diagnostics.extend(return_type_mismatch_diagnostics(root, text, &imports));
     diagnostics.extend(unused_import_diagnostics(
         root,
         text,
@@ -2077,6 +2078,237 @@ fn collect_function_like_declarations<'tree>(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_function_like_declarations(child, declarations);
+    }
+}
+
+fn return_type_mismatch_diagnostics(
+    root: Node,
+    text: &str,
+    imports: &ImportMap,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    collect_return_type_mismatch_diagnostics(root, root, text, imports, &mut diagnostics);
+    diagnostics
+}
+
+fn collect_return_type_mismatch_diagnostics(
+    root: Node,
+    node: Node,
+    text: &str,
+    imports: &ImportMap,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if matches!(node.kind(), "function_definition" | "method_declaration") {
+        diagnostics.extend(return_type_mismatches_for_declaration(
+            root, node, text, imports,
+        ));
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_return_type_mismatch_diagnostics(root, child, text, imports, diagnostics);
+    }
+}
+
+fn return_type_mismatches_for_declaration(
+    root: Node,
+    declaration: Node,
+    text: &str,
+    imports: &ImportMap,
+) -> Vec<Diagnostic> {
+    let Some(return_type) = declaration
+        .child_by_field_name("return_type")
+        .and_then(|node| single_named_type(node, text))
+    else {
+        return Vec::new();
+    };
+    if matches!(
+        normalize_return_type_name(&return_type).as_str(),
+        "mixed" | "never"
+    ) {
+        return Vec::new();
+    }
+
+    let namespace = namespace_at_byte(root, text, declaration.start_byte());
+    let declared = comparable_return_type(&return_type, namespace.as_deref(), imports);
+    let mut returned = Vec::new();
+    collect_return_expressions(declaration, declaration, &mut returned);
+
+    returned
+        .into_iter()
+        .filter_map(|expression| {
+            let actual =
+                inferred_return_expression_type(expression, text, namespace.as_deref(), imports)?;
+            (declared != actual).then(|| Diagnostic {
+                range: range_for_bytes(text, expression.start_byte(), expression.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!(
+                    "return type mismatch: declared {}, returned {}",
+                    declared.display, actual.display
+                ),
+                related_information: None,
+                tags: None,
+                data: None,
+            })
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ComparableReturnType {
+    key: String,
+    display: String,
+}
+
+fn comparable_return_type(
+    type_name: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> ComparableReturnType {
+    let normalized = normalize_return_type_name(type_name);
+    if let Some(key) = scalar_return_type_key(&normalized) {
+        return ComparableReturnType {
+            key: key.to_string(),
+            display: normalized,
+        };
+    }
+
+    let qualified = qualify_type_name(type_name, namespace, imports);
+    ComparableReturnType {
+        key: format!("class:{}", normalize_symbol_key(&qualified)),
+        display: qualified,
+    }
+}
+
+fn inferred_return_expression_type(
+    expression: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let kind = expression.kind();
+    if kind == "expression" {
+        let mut cursor = expression.walk();
+        let inner = expression.named_children(&mut cursor).next()?;
+        return inferred_return_expression_type(inner, text, namespace, imports);
+    }
+    if matches!(
+        kind,
+        "integer"
+            | "float"
+            | "string"
+            | "encapsed_string"
+            | "string_content"
+            | "nowdoc_string"
+            | "boolean"
+            | "null"
+    ) {
+        let key = match kind {
+            "integer" => "int",
+            "float" => "float",
+            "string" | "encapsed_string" | "string_content" | "nowdoc_string" => "string",
+            "boolean" => "bool",
+            "null" => "null",
+            _ => return None,
+        };
+        return Some(ComparableReturnType {
+            key: format!("scalar:{key}"),
+            display: key.to_string(),
+        });
+    }
+    if kind == "array_creation_expression" {
+        return Some(ComparableReturnType {
+            key: "scalar:array".to_string(),
+            display: "array".to_string(),
+        });
+    }
+    if kind == "object_creation_expression"
+        && let Some(class_node) = class_name_for_object_creation(expression)
+        && is_name_node(class_node)
+    {
+        return Some(comparable_return_type(
+            &clean_name_text(node_text(class_node, text)),
+            namespace,
+            imports,
+        ));
+    }
+
+    None
+}
+
+fn collect_return_expressions<'tree>(
+    declaration: Node<'tree>,
+    node: Node<'tree>,
+    expressions: &mut Vec<Node<'tree>>,
+) {
+    if node != declaration
+        && matches!(
+            node.kind(),
+            "function_definition"
+                | "method_declaration"
+                | "anonymous_function_creation_expression"
+                | "arrow_function"
+                | "class_declaration"
+                | "interface_declaration"
+                | "trait_declaration"
+        )
+    {
+        return;
+    }
+
+    if node.kind() == "return_statement" {
+        let mut cursor = node.walk();
+        if let Some(expression) = node.named_children(&mut cursor).next() {
+            expressions.push(expression);
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_return_expressions(declaration, child, expressions);
+    }
+}
+
+fn single_named_type(type_node: Node, text: &str) -> Option<String> {
+    let mut type_names = Vec::new();
+    collect_named_type_texts(type_node, text, &mut type_names);
+    (type_names.len() == 1).then(|| type_names.remove(0))
+}
+
+fn collect_named_type_texts(node: Node, text: &str, type_names: &mut Vec<String>) {
+    if matches!(
+        node.kind(),
+        "primitive_type" | "named_type" | "name" | "qualified_name" | "relative_name"
+    ) {
+        type_names.push(clean_name_text(node_text(node, text)));
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_named_type_texts(child, text, type_names);
+    }
+}
+
+fn normalize_return_type_name(type_name: &str) -> String {
+    normalize_symbol_key(type_name)
+}
+
+fn scalar_return_type_key(type_name: &str) -> Option<&'static str> {
+    match type_name {
+        "array" => Some("scalar:array"),
+        "bool" | "boolean" | "false" | "true" => Some("scalar:bool"),
+        "float" | "double" => Some("scalar:float"),
+        "int" | "integer" => Some("scalar:int"),
+        "null" => Some("scalar:null"),
+        "string" => Some("scalar:string"),
+        "void" => Some("scalar:void"),
+        _ => None,
     }
 }
 

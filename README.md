@@ -208,8 +208,10 @@ function/class-like declaration diagnostics for open documents. It also reports
 duplicate parameter diagnostics, duplicate/unknown named-argument diagnostics
 for resolved calls, too-many-argument diagnostics for resolved non-variadic
 calls, and conservative unused-import diagnostics for normal non-aliased class
-imports. Broader static analysis is still deferred until the type model is
-stronger.
+imports. It also reports conservative return-type mismatches when a declared
+return type conflicts with a directly returned scalar literal, array literal, or
+object creation expression. Broader static analysis is still deferred until the
+type model is stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -283,6 +285,8 @@ files that are not open in the editor are picked up on the next request.
   documents.
 - Conservative unused-import diagnostics for normal non-aliased class imports in
   open PHP documents.
+- Conservative return-type mismatch diagnostics for directly returned literals
+  and object creation expressions.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Whole-document and range whitespace formatting for trailing whitespace; whole
@@ -333,7 +337,8 @@ Rephactor returns no action instead of guessing for:
 - PHP internal functions outside the seeded stub set
 - completion for dynamic receivers or unresolved classes
 - PSR-12 structural formatting beyond trailing-whitespace cleanup
-- static-analysis diagnostics beyond parser and callable-resolution errors
+- static-analysis diagnostics beyond parser, callable-resolution, and
+  conservative return-type mismatch errors
 - Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols

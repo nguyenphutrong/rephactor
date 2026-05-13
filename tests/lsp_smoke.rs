@@ -1426,6 +1426,34 @@ fn lsp_publishes_semantic_diagnostics_for_unused_imports() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_return_type_mismatch() {
+    let root = temp_project("return-type-mismatch-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\nclass Invoice {}\nfunction count_items(): int { return \"many\"; }\nfunction customer(): Customer { return new Invoice(); }\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "return type mismatch: declared int, returned string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "return type mismatch: declared App\\Customer, returned App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_document_highlights_for_symbol_name() {
     let root = temp_project("document-highlight");
     let mut server = LspProcess::start(&root);
