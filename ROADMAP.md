@@ -103,4 +103,5 @@
 - [x] Implement `textDocument/foldingRange`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
 - [x] Implement `textDocument/documentLink` for include/require paths.
+- [x] Implement unresolved type-annotation diagnostics for open files.
 - [ ] Implement broader semantic diagnostics for open files.

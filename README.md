@@ -156,9 +156,10 @@ References V1 finds exact matching AST name references across Composer-indexed
 PHP files and open document overlays. It is intentionally conservative and does
 not yet perform full type-aware disambiguation.
 
-Diagnostics V1 publishes parser error diagnostics and unresolved/ambiguous
-callable diagnostics for open documents. Broader static analysis is still
-deferred until the type model is stronger.
+Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
+callable diagnostics, and unresolved type-annotation diagnostics for open
+documents. Broader static analysis is still deferred until the type model is
+stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -203,6 +204,7 @@ file watcher is intentionally deferred.
 - Exact AST references across Composer-indexed PHP files.
 - Parse diagnostics for open PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
+- Unresolved type-annotation diagnostics for open PHP documents.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Parameter-name inlay hints for resolved positional call arguments.

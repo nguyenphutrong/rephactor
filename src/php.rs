@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -255,6 +255,41 @@ pub fn analyze_diagnostics_for_document_with_cache(
                 data: None,
             });
         }
+    }
+
+    let mut reported_type_ranges = HashSet::new();
+    let mut type_nodes = Vec::new();
+    collect_type_reference_nodes(root, &mut type_nodes);
+    for type_node in type_nodes {
+        if !reported_type_ranges.insert((type_node.start_byte(), type_node.end_byte())) {
+            continue;
+        }
+
+        let type_name = clean_name_text(node_text(type_node, text));
+        if is_builtin_type_name(&type_name) {
+            continue;
+        }
+
+        let namespace = namespace_at_byte(root, text, type_node.start_byte());
+        if index
+            .resolve_class(&type_name, namespace.as_deref(), &imports)
+            .is_some()
+        {
+            continue;
+        }
+
+        diagnostics.push(Diagnostic {
+            range: range_for_bytes(text, type_node.start_byte(), type_node.end_byte())
+                .unwrap_or_else(|_| Range::default()),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("rephactor".to_string()),
+            message: format!("unresolved type {type_name}"),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
     }
 
     diagnostics
@@ -1070,6 +1105,58 @@ fn collect_parse_error_diagnostics(node: Node, text: &str, diagnostics: &mut Vec
     for child in node.children(&mut cursor) {
         collect_parse_error_diagnostics(child, text, diagnostics);
     }
+}
+
+fn collect_type_reference_nodes<'tree>(node: Node<'tree>, type_nodes: &mut Vec<Node<'tree>>) {
+    if let Some(type_node) = node.child_by_field_name("type") {
+        collect_named_type_nodes(type_node, type_nodes);
+    }
+    if let Some(type_node) = node.child_by_field_name("return_type") {
+        collect_named_type_nodes(type_node, type_nodes);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_type_reference_nodes(child, type_nodes);
+    }
+}
+
+fn collect_named_type_nodes<'tree>(node: Node<'tree>, type_nodes: &mut Vec<Node<'tree>>) {
+    if matches!(
+        node.kind(),
+        "named_type" | "name" | "qualified_name" | "relative_name"
+    ) {
+        type_nodes.push(node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_named_type_nodes(child, type_nodes);
+    }
+}
+
+fn is_builtin_type_name(name: &str) -> bool {
+    matches!(
+        normalize_symbol_key(name).as_str(),
+        "array"
+            | "bool"
+            | "callable"
+            | "false"
+            | "float"
+            | "int"
+            | "iterable"
+            | "mixed"
+            | "never"
+            | "null"
+            | "object"
+            | "parent"
+            | "self"
+            | "static"
+            | "string"
+            | "true"
+            | "void"
+    )
 }
 
 fn references_for_position(
