@@ -57,7 +57,7 @@
 
 - [x] Add an initial seed set of PHP internal function stubs.
 - [x] Handle Composer classmaps.
-- Consider PHPStan/Psalm metadata for type resolution.
+- [x] Consider PHPStan/Psalm metadata for type resolution.
 - [x] Add configuration for project PHP version.
 
 ## Phase 8: Release Hardening

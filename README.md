@@ -140,6 +140,8 @@ Rephactor returns no action instead of guessing for:
 - Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols
+- PHPStan/Psalm metadata, including generics, template annotations, and
+  framework-specific dynamic return type extensions
 - Composer `require.php` constraints that allow PHP 7.x, because named
   arguments require PHP 8
 
