@@ -9294,6 +9294,11 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "json_encode" => &["value", "flags", "depth"],
         "ltrim" => &["string", "characters"],
         "max" => &["value", "values"],
+        "mb_strlen" => &["string", "encoding"],
+        "mb_strpos" => &["haystack", "needle", "offset", "encoding"],
+        "mb_strtolower" => &["string", "encoding"],
+        "mb_strtoupper" => &["string", "encoding"],
+        "mb_substr" => &["string", "start", "length", "encoding"],
         "md5" => &["string", "binary"],
         "min" => &["value", "values"],
         "preg_match_all" => &["pattern", "subject", "matches", "flags", "offset"],
@@ -9398,6 +9403,11 @@ fn internal_function_parameter_types(
         "json_encode" => &[None, Some("int"), Some("int")],
         "ltrim" => &[Some("string"), Some("string")],
         "max" => &[None, None],
+        "mb_strlen" => &[Some("string"), Some("string")],
+        "mb_strpos" => &[Some("string"), Some("string"), Some("int"), Some("string")],
+        "mb_strtolower" => &[Some("string"), Some("string")],
+        "mb_strtoupper" => &[Some("string"), Some("string")],
+        "mb_substr" => &[Some("string"), Some("int"), Some("int"), Some("string")],
         "md5" => &[Some("string"), Some("bool")],
         "min" => &[None, None],
         "preg_match_all" => &[
@@ -9461,12 +9471,13 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "is_readable" | "is_string" | "is_writable" | "str_contains" | "str_ends_with"
         | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
-        | "preg_match" | "preg_match_all" | "round" | "strlen" | "strpos" | "strrpos"
-        | "strtotime" | "time" => "int",
+        | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all" | "round" | "strlen"
+        | "strpos" | "strrpos" | "strtotime" | "time" => "int",
         "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "realpath" | "rtrim"
         | "date" | "file_get_contents" | "gettype" | "hash" | "html_entity_decode"
-        | "htmlspecialchars" | "md5" | "serialize" | "sha1" | "sprintf" | "str_repeat"
-        | "strtolower" | "strtoupper" | "strval" | "substr" | "trim" => "string",
+        | "htmlspecialchars" | "mb_strtolower" | "mb_strtoupper" | "mb_substr" | "md5"
+        | "serialize" | "sha1" | "sprintf" | "str_repeat" | "strtolower" | "strtoupper"
+        | "strval" | "substr" | "trim" => "string",
         "boolval" => "bool",
         "floatval" => "float",
         _ => return None,
@@ -9527,6 +9538,11 @@ fn internal_function_names() -> Vec<&'static str> {
         "json_encode",
         "ltrim",
         "max",
+        "mb_strlen",
+        "mb_strpos",
+        "mb_strtolower",
+        "mb_strtoupper",
+        "mb_substr",
         "md5",
         "min",
         "preg_match_all",
