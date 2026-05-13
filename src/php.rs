@@ -1833,12 +1833,21 @@ fn include_literal_target(
 
     let start_byte = node.start_byte() + quote_index + 1;
     let end_byte = start_byte + relative.len();
-    let target = if before_quote.contains("__DIR__") {
+    let target = if include_path_is_base_relative(before_quote) {
         base_dir.join(relative.trim_start_matches(['/', '\\']))
     } else {
         base_dir.join(relative)
     };
     Some((target, start_byte, end_byte))
+}
+
+fn include_path_is_base_relative(before_quote: &str) -> bool {
+    let normalized = before_quote
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    normalized.contains("__dir__") || normalized.contains("dirname(__file__)")
 }
 
 fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> {
