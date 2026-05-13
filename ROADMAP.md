@@ -104,6 +104,7 @@
 - [x] Implement reference-count `textDocument/codeLens` for declarations.
 - [x] Implement PHPDoc creation code actions for function-like declarations.
 - [x] Resolve local PHPDoc `@var` variable types.
+- [x] Resolve PHPDoc `@mixin` methods for instance method resolution.
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement duplicate declaration diagnostics for open files.

@@ -1387,6 +1387,24 @@ fn lsp_resolves_instance_method_from_phpdoc_var() {
 }
 
 #[test]
+fn lsp_resolves_instance_method_from_phpdoc_mixin() {
+    let root = temp_project("phpdoc-mixin");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass SenderMixin { public function dispatch($invoice, $notify) {} }\n/** @mixin SenderMixin */\nclass Sender {}\nfunction run(Sender $sender, $invoice) {\n    $sender->dispatch($invoice, true);\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 5, 15);
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == "[Rephactor] Add names to arguments")
+        .expect("named argument action");
+
+    assert_eq!(insert_texts(action, &uri), vec!["invoice: ", "notify: "]);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_empty_for_unsupported_calls() {
     let root = temp_project("unsupported");
     let mut server = LspProcess::start(&root);

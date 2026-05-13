@@ -259,6 +259,7 @@ files that are not open in the editor are picked up on the next request.
   return tags.
 - Local PHPDoc `@var Type $variable` annotations for instance method
   resolution.
+- PHPDoc `@mixin ClassName` annotations for class instance method resolution.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.

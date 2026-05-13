@@ -36,6 +36,7 @@ struct ClassInfo {
     parents: Vec<String>,
     interfaces: Vec<String>,
     traits: Vec<String>,
+    mixins: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2057,6 +2058,7 @@ impl SymbolIndex {
             .iter()
             .chain(class_info.interfaces.iter())
             .chain(class_info.traits.iter())
+            .chain(class_info.mixins.iter())
         {
             self.collect_related_method_signatures(
                 related_name,
@@ -2101,6 +2103,7 @@ impl SymbolIndex {
             .iter()
             .chain(class_info.interfaces.iter())
             .chain(class_info.traits.iter())
+            .chain(class_info.mixins.iter())
         {
             self.collect_related_method_signatures(related_name, method_key, visited, signatures);
         }
@@ -2465,6 +2468,7 @@ fn index_class(
             text,
             namespace,
         ),
+        mixins: phpdoc_mixins_before(text, node.start_byte(), namespace),
         ..ClassInfo::default()
     };
     let mut cursor = body.walk();
@@ -3695,6 +3699,43 @@ fn phpdoc_summary_before(text: &str, byte_offset: usize) -> Option<String> {
         })
         .find(|line| !line.is_empty())
         .map(str::to_string)
+}
+
+fn phpdoc_mixins_before(text: &str, byte_offset: usize, namespace: Option<&str>) -> Vec<String> {
+    let Some(before) = text.get(..byte_offset) else {
+        return Vec::new();
+    };
+    let Some(comment_start) = before.rfind("/**") else {
+        return Vec::new();
+    };
+    let Some(between) = before.get(comment_start..) else {
+        return Vec::new();
+    };
+    let Some(comment_end) = between.rfind("*/") else {
+        return Vec::new();
+    };
+    if comment_start + comment_end + 2 < before.trim_end().len() {
+        return Vec::new();
+    }
+
+    between
+        .lines()
+        .filter_map(|line| {
+            let line = line
+                .trim()
+                .trim_start_matches("/**")
+                .trim_start_matches('*')
+                .trim_end_matches("*/")
+                .trim();
+            let rest = line.strip_prefix("@mixin")?.trim();
+            let mixin = rest.split_whitespace().next()?.split('<').next()?.trim();
+            if mixin.is_empty() {
+                None
+            } else {
+                Some(qualify_name(mixin, namespace))
+            }
+        })
+        .collect()
 }
 
 fn phpdoc_for_declaration(text: &str, declaration: Node) -> String {
