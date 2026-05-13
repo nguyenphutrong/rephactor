@@ -21,18 +21,18 @@ use tower_lsp::lsp_types::request::{
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, CodeLens, CodeLensOptions, CodeLensParams, CompletionOptions,
-    CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams, DocumentLink,
-    DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse,
-    FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
-    ImplementationProviderCapability, InitializeParams, InitializeResult, InlayHint,
-    InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location, MessageType, OneOf,
-    ReferenceParams, RenameParams, SelectionRange, SelectionRangeParams,
-    SelectionRangeProviderCapability, ServerCapabilities, ServerInfo, SignatureHelp,
-    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TypeDefinitionProviderCapability, Url, WorkspaceEdit,
-    WorkspaceSymbolParams,
+    CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentHighlight,
+    DocumentHighlightParams, DocumentLink, DocumentLinkOptions, DocumentLinkParams,
+    DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+    FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverParams, HoverProviderCapability, ImplementationProviderCapability, InitializeParams,
+    InitializeResult, InlayHint, InlayHintOptions, InlayHintParams, InlayHintServerCapabilities,
+    Location, MessageType, OneOf, ReferenceParams, RenameParams, SelectionRange,
+    SelectionRangeParams, SelectionRangeProviderCapability, ServerCapabilities, ServerInfo,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SymbolInformation,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TypeDefinitionProviderCapability, Url,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -186,6 +186,27 @@ impl LanguageServer for RephactorLanguageServer {
             .expect("document lock poisoned")
             .close(params);
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let invalidated = {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            params
+                .changes
+                .iter()
+                .filter(|change| index_cache.invalidate_document(&change.uri))
+                .count()
+        };
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "Rephactor watched file change invalidated {} project index(es)",
+                    invalidated
+                ),
+            )
+            .await;
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {

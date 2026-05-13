@@ -2020,6 +2020,14 @@ impl SymbolIndex {
 }
 
 impl ProjectIndexCache {
+    pub fn invalidate_document(&mut self, uri: &Url) -> bool {
+        let Some(project_root) = project_root_for_uri(uri) else {
+            return false;
+        };
+
+        self.indexes.remove(&project_root).is_some()
+    }
+
     fn status_for_project_root(&self, project_root: &Path) -> IndexCacheStatus {
         if self.indexes.contains_key(project_root) {
             IndexCacheStatus::Hit(project_root.to_path_buf())
@@ -4897,6 +4905,65 @@ mod tests {
         ));
         assert_eq!(second.skip_reason, None);
         assert_eq!(second.actions.len(), 1);
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn project_index_cache_invalidates_changed_project_files() {
+        let project_root = unique_project_root();
+        let src_dir = project_root.join("src");
+        fs::create_dir_all(&src_dir).expect("create source dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        )
+        .expect("write composer");
+
+        let service_path = src_dir.join("Service.php");
+        fs::write(
+            &service_path,
+            "<?php\nnamespace App;\nclass Service { public static function sync($first) {} }\n",
+        )
+        .expect("write service");
+        let caller_path = src_dir.join("Caller.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
+        let service_uri = Url::from_file_path(&service_path).expect("service uri");
+        let caller_text = "<?php\nnamespace App;\nService::sync($first, $second);\n";
+        let mut cache = ProjectIndexCache::default();
+
+        let first = analyze_code_actions_for_position_with_cache(
+            &caller_uri,
+            caller_text,
+            position(2, 10),
+            &HashMap::new(),
+            &mut cache,
+        );
+        assert_eq!(first.skip_reason, Some(SkipReason::UnsafeNamedArguments));
+
+        fs::write(
+            &service_path,
+            "<?php\nnamespace App;\nclass Service { public static function sync($first, $second) {} }\n",
+        )
+        .expect("update service");
+        let stale = analyze_code_actions_for_position_with_cache(
+            &caller_uri,
+            caller_text,
+            position(2, 10),
+            &HashMap::new(),
+            &mut cache,
+        );
+        assert_eq!(stale.skip_reason, Some(SkipReason::UnsafeNamedArguments));
+
+        assert!(cache.invalidate_document(&service_uri));
+        let refreshed = analyze_code_actions_for_position_with_cache(
+            &caller_uri,
+            caller_text,
+            position(2, 10),
+            &HashMap::new(),
+            &mut cache,
+        );
+        assert_eq!(refreshed.skip_reason, None);
 
         fs::remove_dir_all(project_root).expect("remove project root");
     }

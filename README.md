@@ -217,9 +217,9 @@ Rephactor codeAction file:///path/File.php:2739:28 -> 0 action(s) in 4ms (index 
 ```
 
 Project symbols are cached per Composer root after the first request. Open PHP
-documents still override cached disk symbols. Disk changes in files that are
-not open in the editor are picked up after restarting the language server; a
-file watcher is intentionally deferred.
+documents still override cached disk symbols. `workspace/didChangeWatchedFiles`
+notifications invalidate the matching Composer-root cache so disk changes in
+files that are not open in the editor are picked up on the next request.
 
 ## Supported Cases
 

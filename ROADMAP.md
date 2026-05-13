@@ -78,7 +78,7 @@
 - [x] Cache disk project indexes by Composer root.
 - [x] Overlay open document text on top of cached disk symbols.
 - [x] Log index cache hit/miss and code-action elapsed time.
-- [ ] Add file watching for disk changes outside open documents.
+- [x] Invalidate cached indexes for watched disk changes outside open documents.
 
 ## Phase 11: Primary LSP Baseline
 
