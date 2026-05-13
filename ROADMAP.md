@@ -136,6 +136,7 @@
 - [x] Implement returned-call return-type mismatch diagnostics for open files.
 - [x] Implement conservative argument-type mismatch diagnostics for open files.
 - [x] Implement assigned-variable argument-type mismatch diagnostics for open files.
+- [x] Implement returned-call argument-type mismatch diagnostics for open files.
 - [x] Implement conservative assignment-type mismatch diagnostics for open files.
 - [x] Implement PHPDoc `@var` assignment-type mismatch diagnostics for open files.
 - [ ] Implement broader type-flow semantic diagnostics beyond obvious assignments/arguments.

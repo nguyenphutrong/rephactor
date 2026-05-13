@@ -266,7 +266,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
                 diagnostics.extend(unknown_named_argument_diagnostics(text, &call, &signature));
                 diagnostics.extend(too_many_argument_diagnostics(text, &call, &signature));
                 diagnostics.extend(argument_type_mismatch_diagnostics(
-                    root, text, &imports, call_node, &call, &signature,
+                    root, text, &imports, &index, call_node, &call, &signature,
                 ));
             }
             Err(
@@ -2079,6 +2079,7 @@ fn argument_type_mismatch_diagnostics(
     root: Node,
     text: &str,
     imports: &ImportMap,
+    index: &SymbolIndex,
     call_node: Node,
     call: &CallInfo,
     signature: &Signature,
@@ -2106,6 +2107,7 @@ fn argument_type_mismatch_diagnostics(
                 text,
                 namespace.as_deref(),
                 imports,
+                index,
             )?;
             (expected != &actual).then(|| Diagnostic {
                 range: range_for_bytes(text, value_node.start_byte(), value_node.end_byte())
@@ -2499,12 +2501,13 @@ fn inferred_argument_expression_type(
     text: &str,
     namespace: Option<&str>,
     imports: &ImportMap,
+    index: &SymbolIndex,
 ) -> Option<ComparableReturnType> {
     let kind = expression.kind();
     if kind == "expression" {
         let mut cursor = expression.walk();
         let inner = expression.named_children(&mut cursor).next()?;
-        return inferred_argument_expression_type(root, inner, text, namespace, imports);
+        return inferred_argument_expression_type(root, inner, text, namespace, imports, index);
     }
     if kind == "variable_name" {
         let scope =
@@ -2523,7 +2526,13 @@ fn inferred_argument_expression_type(
     }
 
     inferred_return_expression_type(
-        expression, expression, expression, text, namespace, imports, None,
+        root,
+        expression,
+        expression,
+        text,
+        namespace,
+        imports,
+        Some(index),
     )
 }
 
