@@ -1137,6 +1137,38 @@ fn lsp_publishes_semantic_diagnostics_for_duplicate_declarations() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_unused_imports() {
+    let root = temp_project("unused-import-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nuse Domain\\CustomerRecord;\nuse Domain\\InvoiceRecord;\nfunction handle(CustomerRecord $customer) {}\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            .as_str()
+            .expect("diagnostic message")
+            .contains("unused import InvoiceRecord")
+            && diagnostic["severity"] == 2
+    }));
+    assert!(!diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            .as_str()
+            .expect("diagnostic message")
+            .contains("unused import CustomerRecord")
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_document_highlights_for_symbol_name() {
     let root = temp_project("document-highlight");
     let mut server = LspProcess::start(&root);

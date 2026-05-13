@@ -108,10 +108,11 @@
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement duplicate declaration diagnostics for open files.
+- [x] Implement unused-import diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
 - [x] Implement `textDocument/documentLink` for include/require paths.
 - [x] Implement syntax-tree `textDocument/selectionRange`.
 - [x] Implement unresolved type-annotation diagnostics for open files.
-- [ ] Implement broader semantic diagnostics for open files.
+- [ ] Implement broader type-flow semantic diagnostics for open files.

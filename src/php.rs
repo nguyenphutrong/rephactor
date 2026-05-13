@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeLens, Command, CompletionItem,
-    CompletionItemKind, CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentHighlight,
-    DocumentHighlightKind, DocumentLink, DocumentSymbol, DocumentSymbolResponse, FoldingRange,
-    FoldingRangeKind, GotoDefinitionResponse, Hover, HoverContents, InlayHint, InlayHintKind,
-    InlayHintLabel, Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel,
-    Position, Range, SelectionRange, SignatureHelp, SignatureInformation, SymbolInformation,
-    SymbolKind, TextEdit, Url, WorkspaceEdit,
+    CompletionItemKind, CompletionResponse, Diagnostic, DiagnosticSeverity, DiagnosticTag,
+    DocumentHighlight, DocumentHighlightKind, DocumentLink, DocumentSymbol, DocumentSymbolResponse,
+    FoldingRange, FoldingRangeKind, GotoDefinitionResponse, Hover, HoverContents, InlayHint,
+    InlayHintKind, InlayHintLabel, Location, MarkupContent, MarkupKind, ParameterInformation,
+    ParameterLabel, Position, Range, SelectionRange, SignatureHelp, SignatureInformation,
+    SymbolInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -308,6 +308,11 @@ pub fn analyze_diagnostics_for_document_with_cache(
     }
 
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
+    diagnostics.extend(unused_import_diagnostics(
+        root,
+        text,
+        &import_declarations(root, text),
+    ));
 
     diagnostics
 }
@@ -1521,6 +1526,39 @@ fn collect_duplicate_checked_declarations<'tree>(
     for child in node.named_children(&mut cursor) {
         collect_duplicate_checked_declarations(child, declarations);
     }
+}
+
+fn unused_import_diagnostics(
+    root: Node,
+    text: &str,
+    imports: &[ImportDeclaration],
+) -> Vec<Diagnostic> {
+    imports
+        .iter()
+        .filter(|import| !import.is_grouped && !import.has_alias)
+        .filter(|import| {
+            !class_name_is_used(
+                root,
+                text,
+                &import.alias,
+                import.start_byte,
+                import.end_byte,
+            )
+        })
+        .filter_map(|import| {
+            Some(Diagnostic {
+                range: range_for_bytes(text, import.start_byte, import.end_byte).ok()?,
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!("unused import {}", import.alias),
+                related_information: None,
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                data: None,
+            })
+        })
+        .collect()
 }
 
 fn selection_ranges_for_text(
