@@ -4060,11 +4060,78 @@ fn collect_phpdoc_type_annotation_diagnostics(
                 );
             }
         }
+
+        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@method") {
+            collect_phpdoc_method_type_diagnostics(
+                text,
+                imports,
+                index,
+                namespace.as_deref(),
+                &record,
+                diagnostics,
+            );
+        }
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_phpdoc_type_annotation_diagnostics(root, child, text, imports, index, diagnostics);
+    }
+}
+
+fn collect_phpdoc_method_type_diagnostics(
+    text: &str,
+    imports: &ImportMap,
+    index: &SymbolIndex,
+    namespace: Option<&str>,
+    record: &PhpDocTagLine,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(open) = record.text.find('(') else {
+        return;
+    };
+    let Some(close) = record.text.rfind(')') else {
+        return;
+    };
+    if close < open {
+        return;
+    }
+
+    let before_open = record.text[..open].split_whitespace().collect::<Vec<_>>();
+    if let Some(name_index) = before_open.iter().rposition(|token| *token != "static")
+        && let Some(type_name) = name_index
+            .checked_sub(1)
+            .and_then(|index| before_open.get(index))
+            .filter(|token| **token != "static")
+    {
+        maybe_push_unresolved_phpdoc_type_diagnostic(
+            text,
+            imports,
+            index,
+            namespace,
+            record,
+            type_name,
+            diagnostics,
+        );
+    }
+
+    for parameter in record.text[open + 1..close].split(',') {
+        let tokens = parameter.split_whitespace().collect::<Vec<_>>();
+        if tokens.len() < 2 {
+            continue;
+        }
+        let Some(type_name) = tokens.first() else {
+            continue;
+        };
+        maybe_push_unresolved_phpdoc_type_diagnostic(
+            text,
+            imports,
+            index,
+            namespace,
+            record,
+            type_name,
+            diagnostics,
+        );
     }
 }
 
