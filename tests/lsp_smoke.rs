@@ -3051,6 +3051,49 @@ fn lsp_publishes_semantic_diagnostics_for_phpdoc_relative_return_type_mismatch()
 }
 
 #[test]
+fn lsp_uses_nullable_relative_phpdoc_types_for_diagnostics() {
+    let root = temp_project("nullable-relative-phpdoc-type-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass BaseSender {}\nclass Invoice {}\n/** @property self|null $child */\nclass Sender extends BaseSender {\n    /** @param self|null $sender\n     * @return parent|null\n     */\n    public function pick($sender) { return new Invoice(); }\n    public function run() {\n        $this->child = null;\n        $this->child = new Invoice();\n        $this->pick(null);\n        $this->pick(new Invoice());\n        /** @var parent|null $base */\n        $base = new Invoice();\n    }\n}\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "return type mismatch: declared App\\BaseSender, returned App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $this->child: expected App\\Sender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for sender: expected App\\Sender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $base: expected App\\BaseSender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(!diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $this->child: expected App\\Sender, got null"
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_allows_phpdoc_generic_array_return_type_diagnostics() {
     let root = temp_project("phpdoc-generic-array-return-type-diagnostics");
     let mut server = LspProcess::start(&root);

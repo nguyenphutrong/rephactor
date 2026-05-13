@@ -7581,21 +7581,33 @@ fn qualify_class_phpdoc_type_name(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<String> {
-    let normalized = normalize_symbol_key(type_name);
+    let (type_name, allows_null) = supported_single_type_name(type_name)
+        .unwrap_or_else(|| (type_name.trim().to_string(), false));
+    let normalized = normalize_symbol_key(&type_name);
     if matches!(normalized.as_str(), "self" | "static") {
         let name_node = class_node.child_by_field_name("name")?;
-        return Some(qualify_name(node_text(name_node, text), namespace));
+        return Some(phpdoc_type_name_with_nullability(
+            qualify_name(node_text(name_node, text), namespace),
+            allows_null,
+        ));
     }
     if normalized == "parent" {
         return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
             .into_iter()
-            .next();
+            .next()
+            .map(|type_name| phpdoc_type_name_with_nullability(type_name, allows_null));
     }
-    if is_builtin_type_name(type_name) {
-        return Some(clean_name_text(type_name));
+    if is_builtin_type_name(&type_name) {
+        return Some(phpdoc_type_name_with_nullability(
+            clean_name_text(&type_name),
+            allows_null,
+        ));
     }
 
-    Some(qualify_type_name(type_name, namespace, imports))
+    Some(phpdoc_type_name_with_nullability(
+        qualify_type_name(&type_name, namespace, imports),
+        allows_null,
+    ))
 }
 
 struct PhpDocTagLine {
@@ -8751,15 +8763,25 @@ fn qualify_phpdoc_parameter_type_name(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> String {
-    qualify_parameter_type_name(type_name, declaration, text, namespace, imports).unwrap_or_else(
-        || {
-            if is_builtin_type_name(type_name) {
-                clean_name_text(type_name)
+    let (type_name, allows_null) = supported_single_type_name(type_name)
+        .unwrap_or_else(|| (type_name.trim().to_string(), false));
+    let qualified = qualify_parameter_type_name(&type_name, declaration, text, namespace, imports)
+        .unwrap_or_else(|| {
+            if is_builtin_type_name(&type_name) {
+                clean_name_text(&type_name)
             } else {
-                qualify_type_name(type_name, namespace, imports)
+                qualify_type_name(&type_name, namespace, imports)
             }
-        },
-    )
+        });
+    phpdoc_type_name_with_nullability(qualified, allows_null)
+}
+
+fn phpdoc_type_name_with_nullability(type_name: String, allows_null: bool) -> String {
+    if allows_null {
+        format!("{type_name}|null")
+    } else {
+        type_name
+    }
 }
 
 struct AssignmentTypeCollectionContext<'a, 'tree> {
@@ -8928,23 +8950,35 @@ fn qualify_phpdoc_local_type_name(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<String> {
-    let normalized = normalize_symbol_key(type_name);
+    let (type_name, allows_null) = supported_single_type_name(type_name)
+        .unwrap_or_else(|| (type_name.trim().to_string(), false));
+    let normalized = normalize_symbol_key(&type_name);
     if matches!(normalized.as_str(), "self" | "static") {
         let class_node = find_class_declaration_at_byte(root, byte_offset)?;
         let name_node = class_node.child_by_field_name("name")?;
-        return Some(qualify_name(node_text(name_node, text), namespace));
+        return Some(phpdoc_type_name_with_nullability(
+            qualify_name(node_text(name_node, text), namespace),
+            allows_null,
+        ));
     }
     if normalized == "parent" {
         let class_node = find_class_declaration_at_byte(root, byte_offset)?;
         return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
             .into_iter()
-            .next();
+            .next()
+            .map(|type_name| phpdoc_type_name_with_nullability(type_name, allows_null));
     }
-    if is_builtin_type_name(type_name) {
-        return Some(clean_name_text(type_name));
+    if is_builtin_type_name(&type_name) {
+        return Some(phpdoc_type_name_with_nullability(
+            clean_name_text(&type_name),
+            allows_null,
+        ));
     }
 
-    Some(qualify_type_name(type_name, namespace, imports))
+    Some(phpdoc_type_name_with_nullability(
+        qualify_type_name(&type_name, namespace, imports),
+        allows_null,
+    ))
 }
 
 fn phpdoc_var_type_token<'a>(tokens: &'a [&str]) -> Option<&'a str> {
