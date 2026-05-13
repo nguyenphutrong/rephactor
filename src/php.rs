@@ -5640,7 +5640,7 @@ fn index_class(
         mixins: phpdoc_mixins_before(text, node.start_byte(), namespace),
         ..ClassInfo::default()
     };
-    for signature in phpdoc_methods_before(text, node.start_byte(), namespace, imports) {
+    for signature in phpdoc_methods_before(node, text, node.start_byte(), namespace, imports) {
         class_info
             .methods
             .insert(normalize_method_key(&signature.name), signature);
@@ -7305,6 +7305,7 @@ fn phpdoc_mixins_before(text: &str, byte_offset: usize, namespace: Option<&str>)
 }
 
 fn phpdoc_methods_before(
+    class_node: Node,
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
@@ -7312,7 +7313,9 @@ fn phpdoc_methods_before(
 ) -> Vec<Signature> {
     phpdoc_tag_lines_before(text, byte_offset, "@method")
         .into_iter()
-        .filter_map(|method_text| phpdoc_method_signature(&method_text, namespace, imports))
+        .filter_map(|method_text| {
+            phpdoc_method_signature(&method_text, class_node, text, namespace, imports)
+        })
         .collect()
 }
 
@@ -7379,6 +7382,8 @@ fn phpdoc_readonly_properties_before(text: &str, byte_offset: usize) -> HashSet<
 
 fn phpdoc_method_signature(
     method_text: &str,
+    class_node: Node,
+    text: &str,
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<Signature> {
@@ -7395,7 +7400,9 @@ fn phpdoc_method_signature(
         .checked_sub(1)
         .and_then(|index| before_open.get(index))
         .filter(|token| **token != "static")
-        .map(|type_name| comparable_return_type(type_name, namespace, imports));
+        .and_then(|type_name| {
+            comparable_phpdoc_method_return_type(type_name, class_node, text, namespace, imports)
+        });
 
     let name = name.split_whitespace().next().unwrap_or(name).trim();
     if name.is_empty() {
@@ -7417,7 +7424,9 @@ fn phpdoc_method_signature(
         .collect::<Vec<_>>();
     let parameter_types = parameter_parts
         .iter()
-        .filter_map(|parameter| phpdoc_method_parameter_type(parameter, namespace, imports))
+        .filter_map(|parameter| {
+            phpdoc_method_parameter_type(parameter, class_node, text, namespace, imports)
+        })
         .collect::<Vec<_>>();
 
     Some(Signature {
@@ -7446,6 +7455,8 @@ fn phpdoc_method_parameter_name(parameter: &str) -> Option<String> {
 
 fn phpdoc_method_parameter_type(
     parameter: &str,
+    class_node: Node,
+    text: &str,
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<Option<ComparableReturnType>> {
@@ -7454,7 +7465,61 @@ fn phpdoc_method_parameter_type(
         return Some(None);
     }
     let type_name = tokens.first()?.trim();
-    Some(comparable_parameter_type(type_name, namespace, imports))
+    Some(comparable_phpdoc_method_parameter_type(
+        type_name, class_node, text, namespace, imports,
+    ))
+}
+
+fn comparable_phpdoc_method_return_type(
+    type_name: &str,
+    class_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let qualified =
+        qualify_class_phpdoc_type_name(type_name, class_node, text, namespace, imports)?;
+    Some(comparable_return_type(
+        &qualified,
+        None,
+        &ImportMap::default(),
+    ))
+}
+
+fn comparable_phpdoc_method_parameter_type(
+    type_name: &str,
+    class_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let qualified =
+        qualify_class_phpdoc_type_name(type_name, class_node, text, namespace, imports)?;
+    comparable_parameter_type(&qualified, None, &ImportMap::default())
+}
+
+fn qualify_class_phpdoc_type_name(
+    type_name: &str,
+    class_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<String> {
+    let normalized = normalize_symbol_key(type_name);
+    if matches!(normalized.as_str(), "self" | "static") {
+        let name_node = class_node.child_by_field_name("name")?;
+        return Some(qualify_name(node_text(name_node, text), namespace));
+    }
+    if normalized == "parent" {
+        return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
+            .into_iter()
+            .next();
+    }
+    if is_builtin_type_name(type_name) {
+        return Some(clean_name_text(type_name));
+    }
+
+    Some(qualify_type_name(type_name, namespace, imports))
 }
 
 struct PhpDocTagLine {

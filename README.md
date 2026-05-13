@@ -228,7 +228,8 @@ signature help, code actions, and conservative diagnostics. Class-level
 class-level `@property` annotations are indexed as magic instance properties for
 completion, hover, and definition lookup.
 PHPDoc `@method` parameter and return types are used for conservative argument
-diagnostics and resolved-call return-type propagation.
+diagnostics and resolved-call return-type propagation, including `self`,
+`static`, and direct `parent` inside the annotated class.
 Function-like PHPDoc `@param` annotations understand `self`, `static`, and
 direct `parent` inside class-like scopes. PHPDoc array and list generics such
 as `array<int,Foo>`, `list<Foo>`, and `Foo[]` are treated as conservative
@@ -459,7 +460,8 @@ files that are not open in the editor are picked up on the next request.
   resolution.
 - PHPDoc `@mixin ClassName` annotations for class instance method resolution.
 - PHPDoc `@method` annotations for class magic method resolution.
-- PHPDoc `@method` parameter and return types for conservative diagnostics.
+- PHPDoc `@method` parameter and return types for conservative diagnostics,
+  including `self`, `static`, and direct `parent`.
 - PHPDoc `@property` annotations for class magic property completion, hover,
   and definition lookup.
 - Namespaced same-file functions.

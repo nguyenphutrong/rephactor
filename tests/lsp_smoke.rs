@@ -4521,6 +4521,40 @@ fn lsp_uses_phpdoc_method_types_for_diagnostics() {
 }
 
 #[test]
+fn lsp_uses_phpdoc_method_self_static_parent_types_for_diagnostics() {
+    let root = temp_project("phpdoc-method-relative-type-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass BaseSender {}\nclass Invoice {}\n/** @method self make(static $sender, parent $base) */\nclass Sender extends BaseSender {}\nfunction takes_invoice(Invoice $invoice) {}\nfunction run(Sender $sender, BaseSender $base) {\n    $sender->make(new Invoice(), new Invoice());\n    takes_invoice($sender->make($sender, $base));\n}\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for sender: expected App\\Sender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for base: expected App\\BaseSender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for invoice: expected App\\Invoice, got App\\Sender"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_empty_for_unsupported_calls() {
     let root = temp_project("unsupported");
     let mut server = LspProcess::start(&root);
