@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use crate::document::DocumentStore;
-use crate::php::code_actions_for_position;
+use crate::php::code_actions_for_position_with_open_documents;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
@@ -90,9 +90,17 @@ impl LanguageServer for RephactorLanguageServer {
         let position = params.range.start;
         let actions = {
             let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
             documents
                 .get(&uri)
-                .map(|document| code_actions_for_position(&uri, &document.text, position))
+                .map(|document| {
+                    code_actions_for_position_with_open_documents(
+                        &uri,
+                        &document.text,
+                        position,
+                        &open_documents,
+                    )
+                })
                 .unwrap_or_default()
         };
 

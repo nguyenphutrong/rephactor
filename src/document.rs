@@ -49,6 +49,13 @@ impl DocumentStore {
     pub fn get(&self, uri: &Url) -> Option<&OpenDocument> {
         self.documents.get(uri)
     }
+
+    pub fn texts(&self) -> HashMap<Url, String> {
+        self.documents
+            .iter()
+            .map(|(uri, document)| (uri.clone(), document.text.clone()))
+            .collect()
+    }
 }
 
 impl OpenDocument {

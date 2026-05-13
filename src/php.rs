@@ -54,14 +54,19 @@ struct ArgumentInfo {
     is_unpacking: bool,
 }
 
-pub fn named_argument_code_action(uri: &Url, text: &str, position: Position) -> Option<CodeAction> {
+fn named_argument_code_action_with_open_documents(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+) -> Option<CodeAction> {
     let byte_offset = byte_offset_for_lsp_position(text, position)?;
     let tree = parse_php(text)?;
     let root = tree.root_node();
     let namespace = namespace_at_byte(root, text, byte_offset);
     let imports = ImportMap::from_root(root, text);
     let call = find_call_at_byte(root, text, byte_offset)?;
-    let index = SymbolIndex::for_document_and_project(uri, text);
+    let index = SymbolIndex::for_document_and_project(uri, text, open_documents);
     let signature = index.resolve(
         &call.target,
         root,
@@ -87,12 +92,13 @@ pub fn named_argument_code_action(uri: &Url, text: &str, position: Position) -> 
     })
 }
 
-pub fn code_actions_for_position(
+pub fn code_actions_for_position_with_open_documents(
     uri: &Url,
     text: &str,
     position: Position,
+    open_documents: &HashMap<Url, String>,
 ) -> Vec<CodeActionOrCommand> {
-    named_argument_code_action(uri, text, position)
+    named_argument_code_action_with_open_documents(uri, text, position, open_documents)
         .map(CodeActionOrCommand::CodeAction)
         .into_iter()
         .collect()
@@ -143,30 +149,35 @@ impl ImportMap {
 }
 
 impl SymbolIndex {
-    fn for_document_and_project(uri: &Url, text: &str) -> Self {
+    fn for_document_and_project(
+        uri: &Url,
+        text: &str,
+        open_documents: &HashMap<Url, String>,
+    ) -> Self {
         let mut index = Self::default();
 
         if let Ok(document_path) = uri.to_file_path()
             && let Some(project_root) = find_project_root(&document_path)
         {
-            index.index_project(&project_root, Some((&document_path, text)));
+            let open_project_documents = open_project_documents(open_documents);
+            index.index_project(&project_root, &open_project_documents);
         }
 
         index.index_text(text);
         index
     }
 
-    fn index_project(&mut self, project_root: &Path, open_document: Option<(&Path, &str)>) {
+    fn index_project(&mut self, project_root: &Path, open_documents: &HashMap<PathBuf, String>) {
         let Some(psr4_roots) = composer_psr4_roots(project_root) else {
             return;
         };
 
         for root in psr4_roots {
-            self.index_php_files(&root, open_document);
+            self.index_php_files(&root, open_documents);
         }
     }
 
-    fn index_php_files(&mut self, root: &Path, open_document: Option<(&Path, &str)>) {
+    fn index_php_files(&mut self, root: &Path, open_documents: &HashMap<PathBuf, String>) {
         let Ok(entries) = fs::read_dir(root) else {
             return;
         };
@@ -175,7 +186,7 @@ impl SymbolIndex {
             let path = entry.path();
 
             if path.is_dir() {
-                self.index_php_files(&path, open_document);
+                self.index_php_files(&path, open_documents);
                 continue;
             }
 
@@ -183,9 +194,7 @@ impl SymbolIndex {
                 continue;
             }
 
-            if let Some((open_path, open_text)) = open_document
-                && path == open_path
-            {
+            if let Some(open_text) = open_documents.get(&path) {
                 self.index_text(open_text);
                 continue;
             }
@@ -282,6 +291,17 @@ impl SymbolIndex {
 
         None
     }
+}
+
+fn open_project_documents(open_documents: &HashMap<Url, String>) -> HashMap<PathBuf, String> {
+    open_documents
+        .iter()
+        .filter_map(|(uri, text)| {
+            let path = uri.to_file_path().ok()?;
+            (path.extension().and_then(|extension| extension.to_str()) == Some("php"))
+                .then(|| (path, text.clone()))
+        })
+        .collect()
 }
 
 fn collect_imports(node: Node, text: &str, imports: &mut ImportMap) {
@@ -943,6 +963,10 @@ mod tests {
         Url::parse("file:///tmp/project/src/Example.php").expect("valid uri")
     }
 
+    fn named_argument_code_action(uri: &Url, text: &str, position: Position) -> Option<CodeAction> {
+        named_argument_code_action_with_open_documents(uri, text, position, &HashMap::new())
+    }
+
     fn position(line: u32, character: u32) -> Position {
         Position { line, character }
     }
@@ -1164,6 +1188,56 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nnamespace App;\nsend_invoice(invoice: $invoice, notify: true);\n"
+        );
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn open_project_document_overrides_disk_symbols() {
+        let project_root = unique_project_root();
+        let src_dir = project_root.join("src");
+        fs::create_dir_all(&src_dir).expect("create source dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        )
+        .expect("write composer");
+
+        let service_path = src_dir.join("Service.php");
+        fs::write(
+            &service_path,
+            "<?php\nnamespace App;\nclass Service { public static function sync($old) {} }\n",
+        )
+        .expect("write stale service");
+
+        let caller_path = src_dir.join("Caller.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
+        let service_uri = Url::from_file_path(&service_path).expect("service uri");
+        let caller_text = "<?php\nnamespace App;\nService::sync($first, $second);\n";
+        let open_service_text = "<?php\nnamespace App;\nclass Service { public static function sync($first, $second) {} }\n";
+        let open_documents = HashMap::from([(service_uri, open_service_text.to_string())]);
+
+        assert!(named_argument_code_action(&caller_uri, caller_text, position(2, 10)).is_none());
+
+        let action = named_argument_code_action_with_open_documents(
+            &caller_uri,
+            caller_text,
+            position(2, 10),
+            &open_documents,
+        )
+        .expect("code action from open service document");
+        let edits = action
+            .edit
+            .expect("workspace edit")
+            .changes
+            .expect("changes")
+            .remove(&caller_uri)
+            .expect("edits");
+
+        assert_eq!(
+            apply_edits(caller_text, &edits),
+            "<?php\nnamespace App;\nService::sync(first: $first, second: $second);\n"
         );
 
         fs::remove_dir_all(project_root).expect("remove project root");
