@@ -2752,7 +2752,13 @@ fn assignment_type_mismatches_for_declaration(
     };
     let namespace = namespace_at_byte(root, text, declaration.start_byte());
     let parameters = parameter_names(parameters_node, text);
-    let parameter_types = parameter_types(parameters_node, text, namespace.as_deref(), imports);
+    let parameter_types = declaration_signature_parameter_types(
+        declaration,
+        parameters_node,
+        text,
+        namespace.as_deref(),
+        imports,
+    );
     let expected_types = parameters
         .into_iter()
         .zip(parameter_types)
@@ -3997,7 +4003,13 @@ fn index_function(
     let signature = Signature {
         name: name.clone(),
         parameters: parameter_names(parameters_node, text),
-        parameter_types: parameter_types(parameters_node, text, namespace, imports),
+        parameter_types: declaration_signature_parameter_types(
+            node,
+            parameters_node,
+            text,
+            namespace,
+            imports,
+        ),
         return_type: declaration_signature_return_type(node, text, namespace, imports),
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: false,
@@ -4081,7 +4093,13 @@ fn index_method(
     let signature = Signature {
         name: method_name.clone(),
         parameters: parameter_names(parameters_node, text),
-        parameter_types: parameter_types(parameters_node, text, namespace, imports),
+        parameter_types: declaration_signature_parameter_types(
+            node,
+            parameters_node,
+            text,
+            namespace,
+            imports,
+        ),
         return_type: declaration_signature_return_type(node, text, namespace, imports),
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: method_is_abstract(node, text),
@@ -4385,6 +4403,32 @@ fn parameter_types(
     }
 
     types
+}
+
+fn declaration_signature_parameter_types(
+    declaration: Node,
+    parameters_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Vec<Option<ComparableReturnType>> {
+    let native_types = parameter_types(parameters_node, text, namespace, imports);
+    let phpdoc_types =
+        phpdoc_param_types_before(text, declaration.start_byte(), namespace, imports)
+            .into_iter()
+            .filter_map(|(variable_name, type_name)| {
+                comparable_parameter_type(&type_name, namespace, imports)
+                    .map(|return_type| (variable_name, return_type))
+            })
+            .collect::<HashMap<_, _>>();
+
+    parameter_names(parameters_node, text)
+        .into_iter()
+        .zip(native_types)
+        .map(|(parameter_name, native_type)| {
+            native_type.or_else(|| phpdoc_types.get(&format!("${parameter_name}")).cloned())
+        })
+        .collect()
 }
 
 fn comparable_parameter_type(

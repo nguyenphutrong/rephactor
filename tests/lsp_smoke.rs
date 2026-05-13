@@ -1582,6 +1582,30 @@ fn lsp_publishes_semantic_diagnostics_for_argument_type_mismatch() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_phpdoc_param_argument_type_mismatch() {
+    let root = temp_project("phpdoc-param-argument-type-mismatch-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\nclass Invoice {}\n/** @param Customer $customer */\nfunction send($customer) {}\nsend(new Invoice());\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for customer: expected App\\Customer, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_top_level_variable_argument_type_mismatch() {
     let root = temp_project("top-level-argument-type-mismatch-diagnostics");
     let mut server = LspProcess::start(&root);
@@ -1724,6 +1748,30 @@ fn lsp_publishes_semantic_diagnostics_for_assignment_type_mismatch() {
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "assignment type mismatch for $count: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_publishes_semantic_diagnostics_for_phpdoc_param_assignment_type_mismatch() {
+    let root = temp_project("phpdoc-param-assignment-type-mismatch-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\nclass Invoice {}\n/** @param Customer $customer */\nfunction handle($customer): void { $customer = new Invoice(); }\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $customer: expected App\\Customer, got App\\Invoice"
             && diagnostic["severity"] == 1
     }));
     std::fs::remove_dir_all(root).expect("remove temp root");

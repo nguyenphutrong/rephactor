@@ -199,8 +199,9 @@ expressions.
 
 PHPDoc Type V1 reads function-like `@param Type $variable` annotations and
 local `@var Type $variable` annotations, then feeds them into method resolution
-for completion, signature help, and code actions. Class-level `@method`
-annotations are indexed as magic methods for the same features.
+for completion, signature help, code actions, and conservative diagnostics.
+Class-level `@method` annotations are indexed as magic methods for the same
+features.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
@@ -313,6 +314,8 @@ files that are not open in the editor are picked up on the next request.
 - Conservative argument-type mismatch diagnostics for resolved calls with typed
   parameters and obvious literal, object-creation, or previously assigned
   variable arguments.
+- Conservative argument-type mismatch diagnostics for PHPDoc `@param`
+  parameter contracts.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments
   with declared return types.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments
@@ -327,6 +330,8 @@ files that are not open in the editor are picked up on the next request.
   reassigned from resolved calls with declared return types.
 - Conservative assignment-type mismatch diagnostics for typed parameters
   reassigned from local variable aliases of known types.
+- Conservative assignment-type mismatch diagnostics for PHPDoc `@param`
+  parameter contracts.
 - Conservative assignment-type mismatch diagnostics for local PHPDoc `@var`
   variables assigned obvious literal or object-creation values.
 - Conservative assignment-type mismatch diagnostics for local PHPDoc `@var`

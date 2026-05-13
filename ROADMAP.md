@@ -111,6 +111,7 @@
 - [x] Add direct thrown-exception tags to PHPDoc creation.
 - [x] Resolve local PHPDoc `@var` variable types.
 - [x] Resolve PHPDoc `@param` parameter types.
+- [x] Use PHPDoc `@param` parameter contracts in type mismatch diagnostics.
 - [x] Resolve PHPDoc `@mixin` methods for instance method resolution.
 - [x] Resolve PHPDoc `@method` magic methods.
 - [x] Implement parser diagnostics for open files.
