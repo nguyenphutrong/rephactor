@@ -8490,14 +8490,18 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "array_merge" => &["arrays"],
         "array_slice" => &["array", "offset", "length", "preserve_keys"],
         "array_values" => &["array"],
+        "basename" => &["path", "suffix"],
         "count" => &["value", "mode"],
+        "dirname" => &["path", "levels"],
         "explode" => &["separator", "string", "limit"],
+        "file_exists" => &["filename"],
         "implode" => &["separator", "array"],
         "in_array" => &["needle", "haystack", "strict"],
         "is_array" => &["value"],
         "json_decode" => &["json", "associative", "depth", "flags"],
         "json_encode" => &["value", "flags", "depth"],
         "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
+        "realpath" => &["path"],
         "str_contains" => &["haystack", "needle"],
         "str_ends_with" => &["haystack", "needle"],
         "str_starts_with" => &["haystack", "needle"],
@@ -8543,7 +8547,10 @@ fn internal_function_parameter_types(
         "array_merge" => &[Some("array")],
         "array_slice" => &[Some("array"), Some("int"), Some("int"), Some("bool")],
         "array_values" => &[Some("array")],
+        "basename" => &[Some("string"), Some("string")],
+        "dirname" => &[Some("string"), Some("int")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
+        "file_exists" => &[Some("string")],
         "implode" => &[Some("string"), Some("array")],
         "in_array" => &[None, Some("array"), Some("bool")],
         "is_array" => &[None],
@@ -8556,6 +8563,7 @@ fn internal_function_parameter_types(
             Some("int"),
             Some("int"),
         ],
+        "realpath" => &[Some("string")],
         "str_contains" => &[Some("string"), Some("string")],
         "str_ends_with" => &[Some("string"), Some("string")],
         "str_starts_with" => &[Some("string"), Some("string")],
@@ -8584,12 +8592,11 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
     let type_name = match normalized_name {
         "array_column" | "array_filter" | "array_keys" | "array_map" | "array_merge"
         | "array_slice" | "array_values" | "explode" => "array",
-        "array_key_exists" | "in_array" | "is_array" | "str_contains" | "str_ends_with"
-        | "str_starts_with" => "bool",
+        "array_key_exists" | "file_exists" | "in_array" | "is_array" | "str_contains"
+        | "str_ends_with" | "str_starts_with" => "bool",
         "count" | "preg_match" | "strlen" => "int",
-        "implode" | "json_encode" | "sprintf" | "strtolower" | "strtoupper" | "substr" | "trim" => {
-            "string"
-        }
+        "basename" | "dirname" | "implode" | "json_encode" | "realpath" | "sprintf"
+        | "strtolower" | "strtoupper" | "substr" | "trim" => "string",
         _ => return None,
     };
     comparable_parameter_type(type_name, None, &ImportMap::default())
@@ -8605,14 +8612,18 @@ fn internal_function_names() -> Vec<&'static str> {
         "array_merge",
         "array_slice",
         "array_values",
+        "basename",
         "count",
+        "dirname",
         "explode",
+        "file_exists",
         "implode",
         "in_array",
         "is_array",
         "json_decode",
         "json_encode",
         "preg_match",
+        "realpath",
         "str_contains",
         "str_ends_with",
         "str_starts_with",

@@ -1113,6 +1113,47 @@ fn lsp_returns_expanded_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_filesystem_internal_function_metadata() {
+    let root = temp_project("filesystem-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nfile_ex;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 7);
+
+    assert!(items.iter().any(|item| item["label"] == "file_exists"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nfile_exists([]);\ndirname('/tmp', 'bad');\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for filename: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for levels: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 2, 2).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("dirname($path, $levels)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/dirname)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_declaration_for_implemented_method() {
     let root = temp_project("method-declaration");
     let mut server = LspProcess::start(&root);
