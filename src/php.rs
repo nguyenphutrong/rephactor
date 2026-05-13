@@ -411,6 +411,28 @@ pub fn analyze_definition_for_position_with_cache(
     }
 }
 
+pub fn analyze_type_definition_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> DefinitionAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match type_definition_for_position_with_cache(uri, text, position, open_documents, cache) {
+        Ok(definition) => DefinitionAnalysis {
+            definition: Some(definition),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => DefinitionAnalysis {
+            definition: None,
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
 pub fn analyze_hover_for_position_with_cache(
     uri: &Url,
     text: &str,
@@ -746,6 +768,50 @@ fn definition_for_position_with_cache(
             &imports,
         )?;
         return location_response(signature.location.as_ref(), &open_paths);
+    }
+
+    let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let class_name = clean_name_text(node_text(name_node, text));
+    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+        return Err(SkipReason::UnresolvedCallable(class_name));
+    };
+
+    location_response(class_info.location.as_ref(), &open_paths)
+}
+
+fn type_definition_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<GotoDefinitionResponse, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let open_paths = open_project_documents(open_documents);
+
+    if let Some(variable) = find_variable_name_at_byte(root, text, byte_offset) {
+        let variable_types =
+            variable_types_at_byte(root, text, byte_offset, namespace.as_deref(), &imports);
+        let Some(class_name) = variable_types.get(&variable) else {
+            return Err(SkipReason::UnresolvedCallable(variable));
+        };
+        let Some(class_info) = index.resolve_class(class_name, namespace.as_deref(), &imports)
+        else {
+            return Err(SkipReason::UnresolvedCallable(class_name.clone()));
+        };
+        return location_response(class_info.location.as_ref(), &open_paths);
     }
 
     let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
@@ -2249,6 +2315,21 @@ fn find_name_reference_at_byte<'tree>(
     }
 
     Some(best)
+}
+
+fn find_variable_name_at_byte(node: Node, text: &str, byte_offset: usize) -> Option<String> {
+    if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
+        return None;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(variable) = find_variable_name_at_byte(child, text, byte_offset) {
+            return Some(variable);
+        }
+    }
+
+    (node.kind() == "variable_name").then(|| node_text(node, text).to_string())
 }
 
 fn find_smallest_call<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {

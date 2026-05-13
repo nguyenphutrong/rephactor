@@ -51,6 +51,10 @@ impl LspProcess {
             json!(true)
         );
         assert_eq!(
+            initialize["result"]["capabilities"]["typeDefinitionProvider"],
+            json!(true)
+        );
+        assert_eq!(
             initialize["result"]["capabilities"]["hoverProvider"],
             json!(true)
         );
@@ -167,6 +171,20 @@ impl LspProcess {
     fn definition(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
         let response = self.request(
             "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response
+            .get("result")
+            .filter(|result| !result.is_null())
+            .cloned()
+    }
+
+    fn type_definition(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
+        let response = self.request(
+            "textDocument/typeDefinition",
             json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character }
@@ -539,6 +557,26 @@ fn lsp_returns_hover_for_resolved_function_call() {
             .as_str()
             .expect("hover markdown")
             .contains("Send an invoice.")
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_type_definition_for_typed_variable() {
+    let root = temp_project("type-definition");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass CustomerRecord {}\nfunction handle(CustomerRecord $customer) { return $customer; }\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server
+        .type_definition(&uri, 2, 52)
+        .expect("type definition result");
+
+    assert_eq!(definition["uri"], uri);
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 6 })
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
