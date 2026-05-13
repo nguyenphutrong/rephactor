@@ -141,9 +141,10 @@ Signature Help V1 shows parameter names for resolved functions, static methods,
 constructors, and locally obvious instance methods. It intentionally returns no
 signature for unsupported or ambiguous calls instead of guessing.
 
-Go To Definition V1 navigates to resolved functions, classes, methods, static
-methods, constructors, traits, interfaces, and imports that are present in the
-project index. It returns no location for dynamic or ambiguous symbols.
+Go To Definition V1 navigates to resolved functions, constants, classes,
+methods, static methods, constructors, traits, interfaces, and imports that are
+present in the project index. It returns no location for dynamic or ambiguous
+symbols.
 
 Go To Declaration V1 navigates from a class method implementation to the
 matching interface or base-class method declaration when that relationship is

@@ -682,6 +682,24 @@ fn lsp_returns_definition_for_classmap_static_method() {
 }
 
 #[test]
+fn lsp_returns_definition_for_imported_constant() {
+    let root = temp_project("definition-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App\\Config;\nconst API_VERSION = '1';\nnamespace App\\Http;\nuse const App\\Config\\API_VERSION;\necho API_VERSION;\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server.definition(&uri, 5, 7).expect("definition result");
+
+    assert_eq!(definition["uri"], uri);
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 2, "character": 6 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_definition_for_dynamic_call() {
     let root = temp_project("definition-unsupported");
     let mut server = LspProcess::start(&root);

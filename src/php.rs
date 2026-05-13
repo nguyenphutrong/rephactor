@@ -1166,12 +1166,18 @@ fn definition_for_position_with_cache(
     let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
         return Err(SkipReason::NoSupportedCall);
     };
-    let class_name = clean_name_text(node_text(name_node, text));
-    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
-        return Err(SkipReason::UnresolvedCallable(class_name));
-    };
+    let symbol_name = clean_name_text(node_text(name_node, text));
+    if let Some(class_info) = index.resolve_class(&symbol_name, namespace.as_deref(), &imports) {
+        return location_response(class_info.location.as_ref(), &open_paths);
+    }
 
-    location_response(class_info.location.as_ref(), &open_paths)
+    if let Some(constant_info) =
+        index.resolve_constant(&symbol_name, namespace.as_deref(), &imports)
+    {
+        return location_response(constant_info.location.as_ref(), &open_paths);
+    }
+
+    Err(SkipReason::UnresolvedCallable(symbol_name))
 }
 
 fn declaration_for_position_with_cache(
