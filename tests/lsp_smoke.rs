@@ -1533,6 +1533,29 @@ fn lsp_returns_implement_interface_methods_code_action() {
 }
 
 #[test]
+fn lsp_returns_implement_abstract_methods_code_action() {
+    let root = temp_project("implement-abstract-action");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nabstract class BaseSender { abstract public function dispatch($invoice, $notify); }\nclass EmailSender extends BaseSender {}\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 2, 6);
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == "[Rephactor] Implement abstract methods")
+        .expect("implement abstract action");
+
+    assert_eq!(
+        insert_texts(action, &uri),
+        vec![
+            "\n    public function dispatch($invoice, $notify) {\n        throw new \\BadMethodCallException('Not implemented');\n    }\n"
+        ]
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_import_refactor_for_fully_qualified_class_name() {
     let root = temp_project("import-refactor");
     let mut server = LspProcess::start(&root);

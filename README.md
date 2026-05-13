@@ -190,6 +190,7 @@ trait, and method declarations.
 
 Implement Interface Methods V1 offers a code action on classes with directly
 implemented indexed interfaces and inserts stubs for missing interface methods.
+Implement Abstract Methods V1 does the same for direct abstract parent methods.
 
 PHPDoc creation V1 adds `@param` tags for function and method parameters and
 an `@return` tag when a non-void return type is declared. It also adds
@@ -286,6 +287,8 @@ files that are not open in the editor are picked up on the next request.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Code action to implement missing methods from directly implemented indexed
   interfaces.
+- Code action to implement missing methods from directly extended abstract
+  classes.
 - PHPDoc creation for function and method declarations with parameter and
   return tags, plus direct `throw new ExceptionClass(...)` throws tags.
 - Local PHPDoc `@var Type $variable` annotations for instance method

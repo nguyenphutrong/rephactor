@@ -23,6 +23,7 @@ struct Signature {
     name: String,
     parameters: Vec<String>,
     is_variadic: bool,
+    is_abstract: bool,
     location: Option<SourceLocation>,
     doc_summary: Option<String>,
 }
@@ -405,6 +406,12 @@ pub fn analyze_code_actions_for_position_with_cache(
 
     match implement_interface_methods_action_with_cache(uri, text, position, open_documents, cache)
     {
+        Ok(Some(action)) => actions.push(CodeActionOrCommand::CodeAction(action)),
+        Ok(None) => {}
+        Err(reason) if actions.is_empty() && skip_reason.is_none() => skip_reason = Some(reason),
+        Err(_) => {}
+    }
+    match implement_abstract_methods_action_with_cache(uri, text, position, open_documents, cache) {
         Ok(Some(action)) => actions.push(CodeActionOrCommand::CodeAction(action)),
         Ok(None) => {}
         Err(reason) if actions.is_empty() && skip_reason.is_none() => skip_reason = Some(reason),
@@ -916,11 +923,68 @@ fn implement_interface_methods_action_with_cache(
             start: position,
             end: position,
         },
-        interface_method_stubs(&missing, &indent),
+        method_stubs(&missing, &indent),
     );
 
     Ok(Some(code_action(
         "[Rephactor] Implement interface methods",
+        uri,
+        vec![edit],
+    )))
+}
+
+fn implement_abstract_methods_action_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<Option<CodeAction>, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let Some(class_node) = find_class_declaration_at_byte(root, byte_offset) else {
+        return Ok(None);
+    };
+    let Some(name_node) = class_node.child_by_field_name("name") else {
+        return Ok(None);
+    };
+    let Some(body) = class_node.child_by_field_name("body") else {
+        return Ok(None);
+    };
+
+    let namespace = namespace_at_byte(root, text, class_node.start_byte());
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let class_name = clean_name_text(node_text(name_node, text));
+    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+        return Ok(None);
+    };
+
+    let missing = missing_abstract_parent_methods(&index, class_info);
+    if missing.is_empty() {
+        return Ok(None);
+    }
+
+    let insert_byte = body.end_byte().saturating_sub(1);
+    let Some(position) = lsp_position_for_byte_offset(text, insert_byte) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let indent = format!("{}    ", line_indent_before(text, class_node.start_byte()));
+    let edit = TextEdit::new(
+        Range {
+            start: position,
+            end: position,
+        },
+        method_stubs(&missing, &indent),
+    );
+
+    Ok(Some(code_action(
+        "[Rephactor] Implement abstract methods",
         uri,
         vec![edit],
     )))
@@ -1239,7 +1303,31 @@ fn missing_interface_methods(index: &SymbolIndex, class_info: &ClassInfo) -> Vec
     missing
 }
 
-fn interface_method_stubs(signatures: &[Signature], indent: &str) -> String {
+fn missing_abstract_parent_methods(index: &SymbolIndex, class_info: &ClassInfo) -> Vec<Signature> {
+    let mut missing = Vec::new();
+    let mut seen = HashSet::new();
+
+    for parent_name in &class_info.parents {
+        let Some(parent_info) = index.classes.get(&normalize_symbol_key(parent_name)) else {
+            continue;
+        };
+
+        for (method_key, signature) in &parent_info.methods {
+            if !signature.is_abstract
+                || class_info.methods.contains_key(method_key)
+                || !seen.insert(method_key.clone())
+            {
+                continue;
+            }
+            missing.push(signature.clone());
+        }
+    }
+
+    missing.sort_by_key(|signature| signature.name.to_ascii_lowercase());
+    missing
+}
+
+fn method_stubs(signatures: &[Signature], indent: &str) -> String {
     let body_indent = format!("{indent}    ");
     signatures
         .iter()
@@ -2882,6 +2970,7 @@ fn index_function(
         name: name.clone(),
         parameters: parameter_names(parameters_node, text),
         is_variadic: parameters_node_has_variadic(parameters_node),
+        is_abstract: false,
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_summary_before(text, node.start_byte()),
     };
@@ -2955,6 +3044,7 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option
         name: method_name.clone(),
         parameters: parameter_names(parameters_node, text),
         is_variadic: parameters_node_has_variadic(parameters_node),
+        is_abstract: method_is_abstract(node, text),
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_summary_before(text, node.start_byte()),
     };
@@ -2966,6 +3056,10 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option
             .methods
             .insert(normalize_method_key(&method_name), signature);
     }
+}
+
+fn method_is_abstract(node: Node, text: &str) -> bool {
+    node.child_by_field_name("body").is_none() || node_text(node, text).contains("abstract")
 }
 
 fn collect_document_symbols(node: Node, text: &str) -> Result<Vec<DocumentSymbol>, SkipReason> {
@@ -4266,6 +4360,7 @@ fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
         name: name.to_string(),
         parameters,
         is_variadic,
+        is_abstract: false,
         location: None,
         doc_summary: None,
     })
@@ -5129,6 +5224,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
             .map(|parameter| parameter.to_string())
             .collect(),
         is_variadic: matches!(normalized_name.as_str(), "array_merge"),
+        is_abstract: false,
         location: None,
         doc_summary: Some(format!(
             "[PHP manual](https://www.php.net/{normalized_name})"
