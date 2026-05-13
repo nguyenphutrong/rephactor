@@ -1202,7 +1202,7 @@ fn lsp_returns_nested_document_symbols() {
     let root = temp_project("document-symbol");
     let mut server = LspProcess::start(&root);
     let file = root.join("example.php");
-    let text = "<?php\nnamespace App;\nfunction send_invoice($invoice) {}\nclass InvoiceSender { public function dispatch($invoice) {} }\n";
+    let text = "<?php\nnamespace App;\nconst API_VERSION = '1';\nfunction send_invoice($invoice) {}\nclass InvoiceSender { public function dispatch($invoice) {} }\n";
     let uri = server.open_php(&file, text);
 
     let symbols = server.document_symbols(&uri);
@@ -1212,6 +1212,7 @@ fn lsp_returns_nested_document_symbols() {
             .iter()
             .any(|symbol| symbol["name"] == "send_invoice")
     );
+    assert!(symbols.iter().any(|symbol| symbol["name"] == "API_VERSION"));
     let class_symbol = symbols
         .iter()
         .find(|symbol| symbol["name"] == "InvoiceSender")

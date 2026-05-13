@@ -4818,6 +4818,9 @@ fn collect_document_symbols(node: Node, text: &str) -> Result<Vec<DocumentSymbol
                     symbols.push(symbol);
                 }
             }
+            "const_declaration" => {
+                symbols.extend(constant_document_symbols(child, text)?);
+            }
             "class_declaration" => {
                 if let Some(symbol) = document_symbol(
                     child,
@@ -4850,6 +4853,33 @@ fn collect_document_symbols(node: Node, text: &str) -> Result<Vec<DocumentSymbol
             }
             _ => symbols.extend(collect_document_symbols(child, text)?),
         }
+    }
+
+    Ok(symbols)
+}
+
+#[allow(deprecated)]
+fn constant_document_symbols(node: Node, text: &str) -> Result<Vec<DocumentSymbol>, SkipReason> {
+    let mut symbols = Vec::new();
+    let mut cursor = node.walk();
+
+    for constant in node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "const_element")
+    {
+        let Some(name_node) = first_named_child_kind(constant, "name") else {
+            continue;
+        };
+        symbols.push(DocumentSymbol {
+            name: node_text(name_node, text).to_string(),
+            detail: None,
+            kind: SymbolKind::CONSTANT,
+            tags: None,
+            deprecated: None,
+            range: range_for_bytes(text, constant.start_byte(), constant.end_byte())?,
+            selection_range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())?,
+            children: None,
+        });
     }
 
     Ok(symbols)

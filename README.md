@@ -177,8 +177,8 @@ adds a `use` or `use const` declaration edit for unambiguous namespaced class
 and constant completions when the short name is not already imported or
 shadowed. It intentionally avoids snippets and fuzzy ranking.
 
-Document Symbol V1 returns functions, classes, interfaces, traits, and class
-methods for editor outline and breadcrumb UIs.
+Document Symbol V1 returns functions, constants, classes, interfaces, traits,
+and class methods for editor outline and breadcrumb UIs.
 
 Workspace Symbol V1 searches Composer-indexed functions, classes, and methods
 with deterministic case-insensitive, camel-case, and underscore-aware matching.
@@ -300,7 +300,8 @@ files that are not open in the editor are picked up on the next request.
 - Related instance method completions from indexed parents, interfaces, traits,
   and PHPDoc `@mixin` classes.
 - PHP keyword completions.
-- Document symbols for functions, class-like declarations, and methods.
+- Document symbols for functions, constants, class-like declarations, and
+  methods.
 - Workspace symbols for indexed functions, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
