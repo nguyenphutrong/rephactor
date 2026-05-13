@@ -133,4 +133,5 @@
 - [x] Implement unresolved type-annotation diagnostics for open files.
 - [x] Implement conservative return-type mismatch diagnostics for open files.
 - [x] Implement local-variable return-type mismatch diagnostics for open files.
-- [ ] Implement broader type-flow semantic diagnostics beyond local returns.
+- [x] Implement conservative argument-type mismatch diagnostics for open files.
+- [ ] Implement broader type-flow semantic diagnostics beyond local returns and obvious arguments.

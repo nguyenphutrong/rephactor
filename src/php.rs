@@ -23,6 +23,7 @@ const ACTION_TITLE: &str = "[Rephactor] Add names to arguments";
 struct Signature {
     name: String,
     parameters: Vec<String>,
+    parameter_types: Vec<Option<ComparableReturnType>>,
     is_variadic: bool,
     is_abstract: bool,
     location: Option<SourceLocation>,
@@ -263,6 +264,9 @@ pub fn analyze_diagnostics_for_document_with_cache(
                 diagnostics.extend(duplicate_named_argument_diagnostics(text, &call));
                 diagnostics.extend(unknown_named_argument_diagnostics(text, &call, &signature));
                 diagnostics.extend(too_many_argument_diagnostics(text, &call, &signature));
+                diagnostics.extend(argument_type_mismatch_diagnostics(
+                    root, text, &imports, call_node, &call, &signature,
+                ));
             }
             Err(
                 reason @ (SkipReason::UnresolvedCallable(_) | SkipReason::AmbiguousCallable(_)),
@@ -2067,6 +2071,109 @@ fn too_many_argument_diagnostics(
     }]
 }
 
+fn argument_type_mismatch_diagnostics(
+    root: Node,
+    text: &str,
+    imports: &ImportMap,
+    call_node: Node,
+    call: &CallInfo,
+    signature: &Signature,
+) -> Vec<Diagnostic> {
+    if signature.parameter_types.iter().all(Option::is_none) {
+        return Vec::new();
+    }
+
+    let namespace = namespace_at_byte(root, text, call_node.start_byte());
+    call.arguments
+        .iter()
+        .enumerate()
+        .filter_map(|(position, argument)| {
+            if argument.is_unpacking {
+                return None;
+            }
+            let parameter_index = parameter_index_for_argument(argument, position, signature)?;
+            let expected = signature.parameter_types.get(parameter_index)?.as_ref()?;
+            let argument_node =
+                find_argument_node_by_range(call_node, argument.start_byte, argument.end_byte)?;
+            let value_node = argument_value_node(argument_node)?;
+            let actual = inferred_argument_expression_type(
+                root,
+                value_node,
+                text,
+                namespace.as_deref(),
+                imports,
+            )?;
+            (expected != &actual).then(|| Diagnostic {
+                range: range_for_bytes(text, value_node.start_byte(), value_node.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!(
+                    "argument type mismatch for {}: expected {}, got {}",
+                    signature.parameters[parameter_index], expected.display, actual.display
+                ),
+                related_information: None,
+                tags: None,
+                data: None,
+            })
+        })
+        .collect()
+}
+
+fn parameter_index_for_argument(
+    argument: &ArgumentInfo,
+    position: usize,
+    signature: &Signature,
+) -> Option<usize> {
+    if let Some(name) = argument.name.as_deref() {
+        return signature
+            .parameters
+            .iter()
+            .position(|parameter| parameter == name);
+    }
+
+    (position < signature.parameters.len()).then_some(position)
+}
+
+fn find_argument_node_by_range<'tree>(
+    node: Node<'tree>,
+    start_byte: usize,
+    end_byte: usize,
+) -> Option<Node<'tree>> {
+    if node.start_byte() == start_byte && node.end_byte() == end_byte && node.kind() == "argument" {
+        return Some(node);
+    }
+    if start_byte < node.start_byte() || end_byte > node.end_byte() {
+        return None;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(argument) = find_argument_node_by_range(child, start_byte, end_byte) {
+            return Some(argument);
+        }
+    }
+
+    None
+}
+
+fn argument_value_node(argument_node: Node) -> Option<Node> {
+    let mut cursor = argument_node.walk();
+    let children = argument_node
+        .named_children(&mut cursor)
+        .collect::<Vec<_>>();
+    if children.is_empty() {
+        return None;
+    }
+    if children.first().is_some_and(|child| child.kind() == "name") {
+        return children.get(1).copied();
+    }
+
+    children.first().copied()
+}
+
 fn collect_function_like_declarations<'tree>(
     node: Node<'tree>,
     declarations: &mut Vec<Node<'tree>>,
@@ -2342,6 +2449,39 @@ fn inferred_assigned_return_type(
         return inferred_assigned_return_type(inner, text, namespace, imports);
     }
     if matches!(kind, "variable_name" | "assignment_expression") {
+        return None;
+    }
+
+    inferred_return_expression_type(expression, expression, text, namespace, imports)
+}
+
+fn inferred_argument_expression_type(
+    root: Node,
+    expression: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let kind = expression.kind();
+    if kind == "expression" {
+        let mut cursor = expression.walk();
+        let inner = expression.named_children(&mut cursor).next()?;
+        return inferred_argument_expression_type(root, inner, text, namespace, imports);
+    }
+    if kind == "variable_name" {
+        if let Some(declaration) =
+            find_function_like_declaration_at_byte(root, expression.start_byte())
+            && let Some(return_type) = local_variable_return_type_at_byte(
+                declaration,
+                text,
+                expression.start_byte(),
+                namespace,
+                imports,
+                node_text(expression, text),
+            )
+        {
+            return Some(return_type);
+        }
         return None;
     }
 
@@ -2885,8 +3025,10 @@ impl SymbolIndex {
         let Some(tree) = parse_php(text) else {
             return;
         };
+        let root = tree.root_node();
+        let imports = ImportMap::from_root(root, text);
 
-        index_children(self, tree.root_node(), text, path, None);
+        index_children(self, root, text, path, None, &imports);
     }
 
     fn add_function(&mut self, fqn: String, signature: Signature) {
@@ -3353,6 +3495,7 @@ fn index_children(
     text: &str,
     path: Option<&Path>,
     namespace: Option<String>,
+    imports: &ImportMap,
 ) {
     let mut cursor = node.walk();
     let mut active_namespace = namespace;
@@ -3366,18 +3509,32 @@ fn index_children(
                     .filter(|name| !name.is_empty());
 
                 if let Some(body) = child.child_by_field_name("body") {
-                    index_children(index, body, text, path, namespace_name);
+                    index_children(index, body, text, path, namespace_name, imports);
                 } else {
                     active_namespace = namespace_name;
                 }
             }
             "function_definition" => {
-                index_function(index, child, text, path, active_namespace.as_deref());
+                index_function(
+                    index,
+                    child,
+                    text,
+                    path,
+                    active_namespace.as_deref(),
+                    imports,
+                );
             }
             "class_declaration" | "interface_declaration" | "trait_declaration" => {
-                index_class(index, child, text, path, active_namespace.as_deref());
+                index_class(
+                    index,
+                    child,
+                    text,
+                    path,
+                    active_namespace.as_deref(),
+                    imports,
+                );
             }
-            _ => index_children(index, child, text, path, active_namespace.clone()),
+            _ => index_children(index, child, text, path, active_namespace.clone(), imports),
         }
     }
 }
@@ -3388,6 +3545,7 @@ fn index_function(
     text: &str,
     path: Option<&Path>,
     namespace: Option<&str>,
+    imports: &ImportMap,
 ) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
@@ -3400,6 +3558,7 @@ fn index_function(
     let signature = Signature {
         name: name.clone(),
         parameters: parameter_names(parameters_node, text),
+        parameter_types: parameter_types(parameters_node, text, namespace, imports),
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: false,
         location: source_location(path, name_node.start_byte()),
@@ -3414,6 +3573,7 @@ fn index_class(
     text: &str,
     path: Option<&Path>,
     namespace: Option<&str>,
+    imports: &ImportMap,
 ) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
@@ -3456,13 +3616,20 @@ fn index_class(
             continue;
         }
 
-        index_method(&mut class_info, child, text, path);
+        index_method(&mut class_info, child, text, path, namespace, imports);
     }
 
     index.add_class(fqn, class_info);
 }
 
-fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option<&Path>) {
+fn index_method(
+    class_info: &mut ClassInfo,
+    node: Node,
+    text: &str,
+    path: Option<&Path>,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
     };
@@ -3474,6 +3641,7 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option
     let signature = Signature {
         name: method_name.clone(),
         parameters: parameter_names(parameters_node, text),
+        parameter_types: parameter_types(parameters_node, text, namespace, imports),
         is_variadic: parameters_node_has_variadic(parameters_node),
         is_abstract: method_is_abstract(node, text),
         location: source_location(path, name_node.start_byte()),
@@ -3749,6 +3917,57 @@ fn parameter_names(parameters_node: Node, text: &str) -> Vec<String> {
     }
 
     parameters
+}
+
+fn parameter_types(
+    parameters_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Vec<Option<ComparableReturnType>> {
+    let mut types = Vec::new();
+    let mut cursor = parameters_node.walk();
+
+    for child in parameters_node.named_children(&mut cursor) {
+        if !matches!(
+            child.kind(),
+            "simple_parameter" | "variadic_parameter" | "property_promotion_parameter"
+        ) {
+            continue;
+        }
+
+        let declared_type = child
+            .child_by_field_name("type")
+            .and_then(|type_node| single_named_type(type_node, text))
+            .and_then(|type_name| comparable_parameter_type(&type_name, namespace, imports));
+        types.push(declared_type);
+    }
+
+    types
+}
+
+fn comparable_parameter_type(
+    type_name: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let normalized = normalize_return_type_name(type_name);
+    if matches!(
+        normalized.as_str(),
+        "callable"
+            | "iterable"
+            | "mixed"
+            | "never"
+            | "object"
+            | "parent"
+            | "self"
+            | "static"
+            | "void"
+    ) {
+        return None;
+    }
+
+    Some(comparable_return_type(type_name, namespace, imports))
 }
 
 fn parameters_node_has_variadic(parameters_node: Node) -> bool {
@@ -4790,6 +5009,7 @@ fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
     Some(Signature {
         name: name.to_string(),
         parameters,
+        parameter_types: Vec::new(),
         is_variadic,
         is_abstract: false,
         location: None,
@@ -5670,12 +5890,14 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         _ => return None,
     };
 
+    let parameters = parameters
+        .iter()
+        .map(|parameter| parameter.to_string())
+        .collect::<Vec<_>>();
     Some(Signature {
         name: name.to_string(),
-        parameters: parameters
-            .iter()
-            .map(|parameter| parameter.to_string())
-            .collect(),
+        parameter_types: vec![None; parameters.len()],
+        parameters,
         is_variadic: matches!(normalized_name.as_str(), "array_merge"),
         is_abstract: false,
         location: None,
