@@ -79,3 +79,12 @@
 - [x] Overlay open document text on top of cached disk symbols.
 - [x] Log index cache hit/miss and code-action elapsed time.
 - [ ] Add file watching for disk changes outside open documents.
+
+## Phase 11: Primary LSP Baseline
+
+- [x] Document Rephactor's primary PHP LSP direction.
+- [x] Implement `textDocument/signatureHelp` for resolved callables.
+- [ ] Implement `textDocument/definition`.
+- [ ] Implement import refactor code actions.
+- [ ] Implement hover for resolved symbols.
+- [ ] Implement deterministic completion V1.

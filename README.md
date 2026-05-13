@@ -1,8 +1,9 @@
 # Rephactor
 
-Rephactor is a companion PHP language server for semantic refactoring code
-actions. The first refactor is adding PHP 8 named argument identifiers to
-positional call arguments.
+Rephactor is a PHP language server focused on semantic refactoring and
+project-aware editor intelligence. It started as a companion server for a narrow
+PHP 8 named-arguments refactor and is evolving toward a primary PHP language
+server alternative.
 
 The intended editor setup is to keep a full PHP language server such as
 Intelephense or Phpactor for completion, diagnostics, hover, and navigation,
@@ -16,8 +17,9 @@ dispatch($order, true);
 dispatch(order: $order, notify: true);
 ```
 
-This project starts intentionally small. It should not become a full PHP
-language server until the named-arguments workflow is correct and verified.
+This project grows in small verified slices. The named-arguments workflow
+remains the correctness baseline while primary-LSP capabilities are added on top
+of the same resolver and project index.
 
 ## Initial Scope
 
@@ -27,12 +29,12 @@ language server until the named-arguments workflow is correct and verified.
   constructors.
 - Return `WorkspaceEdit` changes that insert `parameter_name: ` before
   positional arguments.
+- Provide `textDocument/signatureHelp` for resolved callables.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
 ## Non-goals
 
-- Replacing Intelephense, Phpactor, or PHP Tools.
 - Providing diagnostics, completion, hover, formatting, or navigation.
 - Converting dynamic calls before semantic resolution is robust.
 - Guessing parameter names from text when the callable cannot be resolved.
@@ -102,10 +104,14 @@ run Rephactor alongside it:
 }
 ```
 
-Rephactor currently provides one narrow refactor code action. It is titled
-`Add names to arguments` when multiple identifiers can be inserted. When only
-one positional argument is missing a name, the title names that identifier, for
-example `Add name identifier 'exchange_gift'`.
+Rephactor currently provides one refactor code action and Signature Help V1.
+The code action is titled `Add names to arguments` when multiple identifiers
+can be inserted. When only one positional argument is missing a name, the title
+names that identifier, for example `Add name identifier 'exchange_gift'`.
+
+Signature Help V1 shows parameter names for resolved functions, static methods,
+constructors, and locally obvious instance methods. It intentionally returns no
+signature for unsupported or ambiguous calls instead of guessing.
 
 Zed currently applies LSP code actions directly. It does not show a PHPStorm-
 style diff preview when moving through code action menu items; the aside popover
@@ -187,3 +193,5 @@ Deferred until V1 behavior is stable:
    prefixes were inserted.
 7. Put the cursor inside an unsupported call and verify that Zed logs include a
    concise no-action reason.
+8. Trigger signature help inside a supported call and verify that the active
+   parameter follows the cursor.

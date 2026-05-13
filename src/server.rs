@@ -2,13 +2,17 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use crate::document::DocumentStore;
-use crate::php::{ProjectIndexCache, analyze_code_actions_for_position_with_cache};
+use crate::php::{
+    ProjectIndexCache, analyze_code_actions_for_position_with_cache,
+    analyze_signature_help_for_position_with_cache,
+};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, InitializeParams, InitializeResult, MessageType, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -38,6 +42,11 @@ fn server_capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
             ..CodeActionOptions::default()
         })),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string(), ":".to_string()]),
+            retrigger_characters: Some(vec![",".to_string(), ":".to_string()]),
+            work_done_progress_options: Default::default(),
+        }),
         ..ServerCapabilities::default()
     }
 }
@@ -140,6 +149,64 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(Some(analysis.actions))
     }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_signature_help_for_position_with_cache(
+                &uri,
+                &document_text,
+                position,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::SignatureHelpAnalysis {
+                signature_help: None,
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+        let signature_count = analysis
+            .signature_help
+            .as_ref()
+            .map(|signature_help| signature_help.signatures.len())
+            .unwrap_or_default();
+
+        let mut log_message = format!(
+            "Rephactor signatureHelp {}:{}:{} -> {} signature(s) in {}ms ({})",
+            uri,
+            position.line,
+            position.character,
+            signature_count,
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if signature_count == 0
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(analysis.signature_help)
+    }
 }
 
 #[cfg(test)]
@@ -164,5 +231,6 @@ mod tests {
                 ..
             })) if kinds == vec![CodeActionKind::REFACTOR_REWRITE]
         ));
+        assert!(capabilities.signature_help_provider.is_some());
     }
 }

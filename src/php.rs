@@ -4,7 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, ParameterInformation, ParameterLabel,
+    Position, Range, SignatureHelp, SignatureInformation, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -41,6 +42,8 @@ struct SymbolIndex {
 struct CallInfo {
     target: CallTarget,
     arguments: Vec<ArgumentInfo>,
+    arguments_start_byte: usize,
+    arguments_end_byte: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +56,8 @@ enum CallTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ArgumentInfo {
+    start_byte: usize,
+    end_byte: usize,
     insert_byte: usize,
     name: Option<String>,
     is_unpacking: bool,
@@ -87,6 +92,13 @@ pub enum SkipReason {
 #[derive(Debug)]
 pub struct CodeActionAnalysis {
     pub actions: Vec<CodeActionOrCommand>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct SignatureHelpAnalysis {
+    pub signature_help: Option<SignatureHelp>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
 }
@@ -150,6 +162,28 @@ pub fn analyze_code_actions_for_position_with_cache(
     }
 }
 
+pub fn analyze_signature_help_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> SignatureHelpAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match signature_help_for_position_with_cache(uri, text, position, open_documents, cache) {
+        Ok(signature_help) => SignatureHelpAnalysis {
+            signature_help: Some(signature_help),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => SignatureHelpAnalysis {
+            signature_help: None,
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
 fn named_argument_code_action_with_cache(
     uri: &Url,
     text: &str,
@@ -206,6 +240,51 @@ fn named_argument_code_action_with_cache(
         disabled: None,
         data: None,
     }))
+}
+
+fn signature_help_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<SignatureHelp, SkipReason> {
+    if !document_supports_named_arguments(uri) {
+        return Err(SkipReason::PhpVersionBelow8);
+    }
+
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
+    let call = find_call_at_byte(root, text, byte_offset)?;
+
+    if call.arguments.iter().any(|argument| argument.is_unpacking) {
+        return Err(SkipReason::UnpackingArgument);
+    }
+
+    let index = cache.index_for_document(uri, text, open_documents);
+    let signature = index.resolve(
+        &call.target,
+        root,
+        text,
+        byte_offset,
+        namespace.as_deref(),
+        &imports,
+    )?;
+    let active_parameter = active_parameter_for_call(byte_offset, &call, &signature)?;
+
+    Ok(signature_help_for_call(
+        &call.target,
+        &signature,
+        active_parameter,
+    ))
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
@@ -920,7 +999,12 @@ fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
         _ => return Err(SkipReason::NoSupportedCall),
     };
 
-    Ok(CallInfo { target, arguments })
+    Ok(CallInfo {
+        target,
+        arguments,
+        arguments_start_byte: arguments_node.start_byte(),
+        arguments_end_byte: arguments_node.end_byte(),
+    })
 }
 
 fn find_arguments_node(node: Node) -> Option<Node> {
@@ -970,6 +1054,8 @@ fn argument_infos(arguments_node: Node, text: &str) -> Vec<ArgumentInfo> {
 
         let argument_text = node_text(child, text);
         arguments.push(ArgumentInfo {
+            start_byte: child.start_byte(),
+            end_byte: child.end_byte(),
             insert_byte: child.start_byte(),
             name: named_argument_name(child, text),
             is_unpacking: argument_text.trim_start().starts_with("..."),
@@ -1045,6 +1131,107 @@ fn action_title_for_edits(edits: &[TextEdit]) -> String {
     }
 
     ACTION_TITLE.to_string()
+}
+
+fn active_parameter_for_call(
+    byte_offset: usize,
+    call: &CallInfo,
+    signature: &Signature,
+) -> Result<u32, SkipReason> {
+    if signature.parameters.is_empty()
+        || byte_offset < call.arguments_start_byte
+        || byte_offset > call.arguments_end_byte
+    {
+        return Err(SkipReason::NoSupportedCall);
+    }
+
+    let Some(argument_index) = active_argument_index(byte_offset, call) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let Some(argument) = call.arguments.get(argument_index) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+
+    if let Some(name) = &argument.name {
+        return signature
+            .parameters
+            .iter()
+            .position(|parameter| parameter.eq_ignore_ascii_case(name))
+            .map(|index| index as u32)
+            .ok_or(SkipReason::UnsafeNamedArguments);
+    }
+
+    if argument_index >= signature.parameters.len() {
+        return Err(SkipReason::UnsafeNamedArguments);
+    }
+
+    Ok(argument_index as u32)
+}
+
+fn active_argument_index(byte_offset: usize, call: &CallInfo) -> Option<usize> {
+    if call.arguments.is_empty() {
+        return None;
+    }
+
+    for (index, argument) in call.arguments.iter().enumerate() {
+        if argument.start_byte <= byte_offset && byte_offset <= argument.end_byte {
+            return Some(index);
+        }
+
+        if byte_offset < argument.start_byte {
+            return Some(index);
+        }
+    }
+
+    Some(call.arguments.len().saturating_sub(1))
+}
+
+fn signature_help_for_call(
+    target: &CallTarget,
+    signature: &Signature,
+    active_parameter: u32,
+) -> SignatureHelp {
+    SignatureHelp {
+        signatures: vec![SignatureInformation {
+            label: signature_label(target, signature),
+            documentation: None,
+            parameters: Some(
+                signature
+                    .parameters
+                    .iter()
+                    .map(|parameter| ParameterInformation {
+                        label: ParameterLabel::Simple(format!("${parameter}")),
+                        documentation: None,
+                    })
+                    .collect(),
+            ),
+            active_parameter: Some(active_parameter),
+        }],
+        active_signature: Some(0),
+        active_parameter: Some(active_parameter),
+    }
+}
+
+fn signature_label(target: &CallTarget, signature: &Signature) -> String {
+    let parameters = signature
+        .parameters
+        .iter()
+        .map(|parameter| format!("${parameter}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    match target {
+        CallTarget::Function(name) => format!("{name}({parameters})"),
+        CallTarget::StaticMethod { class_name, method } => {
+            format!("{class_name}::{method}({parameters})")
+        }
+        CallTarget::Constructor { class_name } => {
+            format!("{class_name}::__construct({parameters})")
+        }
+        CallTarget::InstanceMethod { variable, method } => {
+            format!("{variable}->{method}({parameters})")
+        }
+    }
 }
 
 fn variable_types_at_byte(
@@ -1376,6 +1563,22 @@ mod tests {
         analyze_code_actions_for_position(uri, text, position, &HashMap::new()).skip_reason
     }
 
+    fn signature_help(text: &str, line: u32, character: u32) -> Option<SignatureHelp> {
+        let mut cache = ProjectIndexCache::default();
+        analyze_signature_help_for_position_with_cache(
+            &uri(),
+            text,
+            position(line, character),
+            &HashMap::new(),
+            &mut cache,
+        )
+        .signature_help
+    }
+
+    fn active_parameter(text: &str, line: u32, character: u32) -> Option<u32> {
+        signature_help(text, line, character).and_then(|help| help.active_parameter)
+    }
+
     fn position(line: u32, character: u32) -> Position {
         Position { line, character }
     }
@@ -1430,6 +1633,39 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(invoice: $invoice, notify: true);\n"
+        );
+    }
+
+    #[test]
+    fn returns_signature_help_for_same_file_function_call() {
+        let text =
+            "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+
+        let help = signature_help(text, 2, 22).expect("signature help");
+
+        assert_eq!(help.signatures.len(), 1);
+        assert_eq!(help.signatures[0].label, "send_invoice($invoice, $notify)");
+        assert_eq!(help.active_parameter, Some(1));
+    }
+
+    #[test]
+    fn signature_help_uses_named_argument_parameter_index() {
+        let text = "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(notify: true, invoice: $invoice);\n";
+
+        assert_eq!(active_parameter(text, 2, 17), Some(1));
+        assert_eq!(active_parameter(text, 2, 31), Some(0));
+    }
+
+    #[test]
+    fn signature_help_maps_partial_named_argument_positionally() {
+        let text = "<?php\nclass customer_supplier { public static function accumulatePoints($shop_id, $grand_total, $exchange_gift = null) {} }\ncustomer_supplier::accumulatePoints(\n    shop_id: $shop_id,\n    grand_total: $request->grand_total,\n    $request->exchange_gift,\n);\n";
+
+        let help = signature_help(text, 5, 14).expect("signature help");
+
+        assert_eq!(help.active_parameter, Some(2));
+        assert_eq!(
+            help.signatures[0].label,
+            "customer_supplier::accumulatePoints($shop_id, $grand_total, $exchange_gift)"
         );
     }
 

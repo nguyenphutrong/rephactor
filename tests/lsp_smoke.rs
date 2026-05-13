@@ -42,6 +42,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["codeActionProvider"]["codeActionKinds"],
             json!(["refactor.rewrite"])
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["signatureHelpProvider"]["triggerCharacters"],
+            json!(["(", ",", ":"])
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -110,6 +114,20 @@ impl LspProcess {
             .as_array()
             .expect("code action array")
             .clone()
+    }
+
+    fn signature_help(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
+        let response = self.request(
+            "textDocument/signatureHelp",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response
+            .get("result")
+            .filter(|result| !result.is_null())
+            .cloned()
     }
 
     fn send(&mut self, message: Value) {
@@ -182,6 +200,60 @@ fn insert_texts(action: &Value, uri: &str) -> Vec<String> {
         .iter()
         .map(|edit| edit["newText"].as_str().expect("insert text").to_string())
         .collect()
+}
+
+#[test]
+fn lsp_returns_signature_help_for_open_document() {
+    let root = temp_project("signature-same-file");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text =
+        "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+    let uri = server.open_php(&file, text);
+
+    let help = server
+        .signature_help(&uri, 2, 22)
+        .expect("signature help result");
+
+    assert_eq!(
+        help["signatures"][0]["label"],
+        "send_invoice($invoice, $notify)"
+    );
+    assert_eq!(help["activeSignature"], 0);
+    assert_eq!(help["activeParameter"], 1);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_signature_help_for_grouped_import_static_method() {
+    let root = temp_project("signature-grouped-import");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App\\Http;\nuse App\\Models\\{customer_supplier};\nnamespace App\\Models;\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id) {} }\nnamespace App\\Http;\ncustomer_supplier::accumulatePoints($shop_id, $promotion_id);\n";
+    let uri = server.open_php(&file, text);
+
+    let help = server
+        .signature_help(&uri, 6, 45)
+        .expect("signature help result");
+
+    assert_eq!(
+        help["signatures"][0]["label"],
+        "customer_supplier::accumulatePoints($shop_id, $promotion_id)"
+    );
+    assert_eq!(help["activeParameter"], 1);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_null_signature_help_for_dynamic_call() {
+    let root = temp_project("signature-unsupported");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction send_invoice($invoice, $notify) {}\n$fn($invoice, true);\n";
+    let uri = server.open_php(&file, text);
+
+    assert!(server.signature_help(&uri, 2, 5).is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
 #[test]
