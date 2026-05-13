@@ -50,7 +50,7 @@ enum CallTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ArgumentInfo {
     insert_byte: usize,
-    is_named: bool,
+    name: Option<String>,
     is_unpacking: bool,
 }
 
@@ -668,7 +668,7 @@ fn argument_infos(arguments_node: Node, text: &str) -> Vec<ArgumentInfo> {
         let argument_text = node_text(child, text);
         arguments.push(ArgumentInfo {
             insert_byte: child.start_byte(),
-            is_named: is_named_argument(child, text),
+            name: named_argument_name(child, text),
             is_unpacking: argument_text.trim_start().starts_with("..."),
         });
     }
@@ -676,27 +676,24 @@ fn argument_infos(arguments_node: Node, text: &str) -> Vec<ArgumentInfo> {
     arguments
 }
 
-fn is_named_argument(argument_node: Node, text: &str) -> bool {
+fn named_argument_name(argument_node: Node, text: &str) -> Option<String> {
     let mut cursor = argument_node.walk();
     let mut children = argument_node.named_children(&mut cursor);
-    let Some(first_child) = children.next() else {
-        return false;
-    };
+    let first_child = children.next()?;
 
     if first_child.kind() != "name" {
-        return false;
+        return None;
     }
 
     let after_name = &text[first_child.end_byte()..argument_node.end_byte()];
-    after_name.trim_start().starts_with(':')
+    after_name
+        .trim_start()
+        .starts_with(':')
+        .then(|| clean_name_text(node_text(first_child, text)))
 }
 
 fn edits_for_call(text: &str, call: &CallInfo, signature: &Signature) -> Option<Vec<TextEdit>> {
-    if call
-        .arguments
-        .iter()
-        .any(|argument| argument.is_named || argument.is_unpacking)
-    {
+    if call.arguments.iter().any(|argument| argument.is_unpacking) {
         return None;
     }
 
@@ -707,6 +704,13 @@ fn edits_for_call(text: &str, call: &CallInfo, signature: &Signature) -> Option<
     let mut edits = Vec::new();
 
     for (argument, parameter_name) in call.arguments.iter().zip(signature.parameters.iter()) {
+        if let Some(argument_name) = &argument.name {
+            if !argument_name.eq_ignore_ascii_case(parameter_name) {
+                return None;
+            }
+            continue;
+        }
+
         let position = lsp_position_for_byte_offset(text, argument.insert_byte)?;
         edits.push(TextEdit::new(
             Range {
@@ -717,7 +721,7 @@ fn edits_for_call(text: &str, call: &CallInfo, signature: &Signature) -> Option<
         ));
     }
 
-    Some(edits)
+    (!edits.is_empty()).then_some(edits)
 }
 
 fn variable_types_at_byte(
@@ -1166,10 +1170,43 @@ mod tests {
     }
 
     #[test]
-    fn skips_calls_with_existing_named_arguments() {
-        let text = "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(invoice: $invoice, true);\n";
+    fn skips_calls_when_all_arguments_are_named() {
+        let text = "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(invoice: $invoice, notify: true);\n";
 
         assert!(named_argument_code_action(&uri(), text, position(2, 5)).is_none());
+    }
+
+    #[test]
+    fn converts_missing_argument_names_in_partially_named_call() {
+        let text = "<?php\nfunction send_invoice($invoice, $notify, $priority) {}\nsend_invoice(invoice: $invoice, notify: true, $priority);\n";
+
+        let edits = action_edits(text, 2, 45);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nfunction send_invoice($invoice, $notify, $priority) {}\nsend_invoice(invoice: $invoice, notify: true, priority: $priority);\n"
+        );
+    }
+
+    #[test]
+    fn converts_single_missing_name_after_named_static_arguments() {
+        let text = "<?php\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id, $customer_id, $is_update_transaction, $customer_used_point, $pay, $product, $multipay_methods, $order_id, $extra_discount, $grand_total, $exchange_gift = null) {} }\ncustomer_supplier::accumulatePoints(\n    shop_id: $shop_id,\n    promotion_id: $order->promotion_id,\n    customer_id: $customer_id,\n    is_update_transaction: $is_update_transaction,\n    customer_used_point: $item['customer_used_point'] ?? 0,\n    pay: $request->pay,\n    product: $request->product,\n    multipay_methods: $multipay_methods,\n    order_id: $order->id,\n    extra_discount: $request->extra_discount,\n    grand_total: $request->grand_total,\n    $request->exchange_gift,\n);\n";
+
+        let edits = action_edits(text, 14, 5);
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "exchange_gift: ");
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id, $customer_id, $is_update_transaction, $customer_used_point, $pay, $product, $multipay_methods, $order_id, $extra_discount, $grand_total, $exchange_gift = null) {} }\ncustomer_supplier::accumulatePoints(\n    shop_id: $shop_id,\n    promotion_id: $order->promotion_id,\n    customer_id: $customer_id,\n    is_update_transaction: $is_update_transaction,\n    customer_used_point: $item['customer_used_point'] ?? 0,\n    pay: $request->pay,\n    product: $request->product,\n    multipay_methods: $multipay_methods,\n    order_id: $order->id,\n    extra_discount: $request->extra_discount,\n    grand_total: $request->grand_total,\n    exchange_gift: $request->exchange_gift,\n);\n"
+        );
+    }
+
+    #[test]
+    fn skips_partially_named_calls_when_existing_names_do_not_match_position() {
+        let text = "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(notify: true, $invoice);\n";
+
+        assert!(named_argument_code_action(&uri(), text, position(2, 25)).is_none());
     }
 
     #[test]
