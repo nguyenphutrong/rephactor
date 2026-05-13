@@ -214,6 +214,8 @@ PHPDoc-declared return type conflicts with a directly returned scalar literal,
 array literal, or object creation expression, including local variables assigned
 one of those obvious values before return, resolved calls with declared return
 types, and variables assigned from those calls.
+Nullable native `?Type` declarations accept `null` for these conservative
+checks.
 Resolved calls also report conservative argument type mismatches when typed
 parameters receive obvious literal or object-creation arguments, including
 variables assigned obvious values earlier in the same local or top-level scope
@@ -307,6 +309,7 @@ files that are not open in the editor are picked up on the next request.
   before return.
 - Conservative return-type mismatch diagnostics for PHPDoc `@return`
   declarations.
+- Nullable native return-type diagnostics that accept `null` for `?Type`.
 - Conservative return-type mismatch diagnostics for returned resolved calls with
   declared return types.
 - Conservative return-type mismatch diagnostics for variables assigned from
@@ -316,6 +319,7 @@ files that are not open in the editor are picked up on the next request.
   variable arguments.
 - Conservative argument-type mismatch diagnostics for PHPDoc `@param`
   parameter contracts.
+- Nullable native parameter diagnostics that accept `null` for `?Type`.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments
   with declared return types.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments

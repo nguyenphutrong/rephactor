@@ -2111,7 +2111,7 @@ fn argument_type_mismatch_diagnostics(
                 imports,
                 index,
             )?;
-            (expected != &actual).then(|| Diagnostic {
+            (!types_compatible(expected, &actual)).then(|| Diagnostic {
                 range: range_for_bytes(text, value_node.start_byte(), value_node.end_byte())
                     .unwrap_or_else(|_| Range::default()),
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -2237,13 +2237,16 @@ fn return_type_mismatches_for_declaration(
     let namespace = namespace_at_byte(root, text, declaration.start_byte());
     let declared = declaration
         .child_by_field_name("return_type")
-        .and_then(|node| single_named_type(node, text))
-        .and_then(|return_type| {
-            (!matches!(
-                normalize_return_type_name(&return_type).as_str(),
+        .and_then(|type_node| {
+            let return_type = single_named_type(type_node, text)?;
+            let (normalized_type_name, _) = nullable_type_name(&return_type);
+            let mut declared = (!matches!(
+                normalize_return_type_name(normalized_type_name).as_str(),
                 "mixed" | "never"
             ))
-            .then(|| comparable_return_type(&return_type, namespace.as_deref(), imports))
+            .then(|| comparable_return_type(&return_type, namespace.as_deref(), imports))?;
+            declared.allows_null = declared.allows_null || type_node_allows_null(type_node, text);
+            Some(declared)
         })
         .or_else(|| {
             phpdoc_return_type_before(
@@ -2272,7 +2275,7 @@ fn return_type_mismatches_for_declaration(
                 imports,
                 Some(index),
             )?;
-            (declared != actual).then(|| Diagnostic {
+            (!types_compatible(&declared, &actual)).then(|| Diagnostic {
                 range: range_for_bytes(text, expression.start_byte(), expression.end_byte())
                     .unwrap_or_else(|_| Range::default()),
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -2295,6 +2298,7 @@ fn return_type_mismatches_for_declaration(
 struct ComparableReturnType {
     key: String,
     display: String,
+    allows_null: bool,
 }
 
 fn comparable_return_type(
@@ -2302,11 +2306,13 @@ fn comparable_return_type(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> ComparableReturnType {
+    let (type_name, allows_null) = nullable_type_name(type_name);
     let normalized = normalize_return_type_name(type_name);
     if let Some(key) = scalar_return_type_key(&normalized) {
         return ComparableReturnType {
             key: key.to_string(),
             display: normalized,
+            allows_null,
         };
     }
 
@@ -2314,7 +2320,20 @@ fn comparable_return_type(
     ComparableReturnType {
         key: format!("class:{}", normalize_symbol_key(&qualified)),
         display: qualified,
+        allows_null,
     }
+}
+
+fn types_compatible(expected: &ComparableReturnType, actual: &ComparableReturnType) -> bool {
+    expected.key == actual.key || (expected.allows_null && actual.key == "scalar:null")
+}
+
+fn nullable_type_name(type_name: &str) -> (&str, bool) {
+    let type_name = type_name.trim();
+    type_name
+        .strip_prefix('?')
+        .map(|inner| (inner.trim(), true))
+        .unwrap_or((type_name, false))
 }
 
 fn inferred_return_expression_type(
@@ -2362,12 +2381,14 @@ fn inferred_return_expression_type(
         return Some(ComparableReturnType {
             key: format!("scalar:{key}"),
             display: key.to_string(),
+            allows_null: false,
         });
     }
     if kind == "array_creation_expression" {
         return Some(ComparableReturnType {
             key: "scalar:array".to_string(),
             display: "array".to_string(),
+            allows_null: false,
         });
     }
     if kind == "object_creation_expression"
@@ -2853,7 +2874,7 @@ fn collect_assignment_type_mismatches(
         });
         if let Some(expected) = expected
             && let Some(actual) = actual
-            && expected != actual
+            && !types_compatible(&expected, &actual)
         {
             diagnostics.push(Diagnostic {
                 range: range_for_bytes(context.text, right.start_byte(), right.end_byte())
@@ -4395,10 +4416,9 @@ fn parameter_types(
             continue;
         }
 
-        let declared_type = child
-            .child_by_field_name("type")
-            .and_then(|type_node| single_named_type(type_node, text))
-            .and_then(|type_name| comparable_parameter_type(&type_name, namespace, imports));
+        let declared_type = child.child_by_field_name("type").and_then(|type_node| {
+            comparable_parameter_type_node(type_node, text, namespace, imports)
+        });
         types.push(declared_type);
     }
 
@@ -4436,7 +4456,8 @@ fn comparable_parameter_type(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<ComparableReturnType> {
-    let normalized = normalize_return_type_name(type_name);
+    let (normalized_type_name, _) = nullable_type_name(type_name);
+    let normalized = normalize_return_type_name(normalized_type_name);
     if matches!(
         normalized.as_str(),
         "callable"
@@ -4455,6 +4476,22 @@ fn comparable_parameter_type(
     Some(comparable_return_type(type_name, namespace, imports))
 }
 
+fn comparable_parameter_type_node(
+    type_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let type_name = single_named_type(type_node, text)?;
+    let mut comparable = comparable_parameter_type(&type_name, namespace, imports)?;
+    comparable.allows_null = comparable.allows_null || type_node_allows_null(type_node, text);
+    Some(comparable)
+}
+
+fn type_node_allows_null(type_node: Node, text: &str) -> bool {
+    node_text(type_node, text).trim_start().starts_with('?')
+}
+
 fn declaration_signature_return_type(
     declaration: Node,
     text: &str,
@@ -4463,8 +4500,7 @@ fn declaration_signature_return_type(
 ) -> Option<ComparableReturnType> {
     declaration
         .child_by_field_name("return_type")
-        .and_then(|type_node| single_named_type(type_node, text))
-        .and_then(|type_name| comparable_parameter_type(&type_name, namespace, imports))
+        .and_then(|type_node| comparable_parameter_type_node(type_node, text, namespace, imports))
         .or_else(|| phpdoc_return_type_before(text, declaration.start_byte(), namespace, imports))
 }
 
