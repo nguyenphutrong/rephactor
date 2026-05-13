@@ -227,6 +227,8 @@ variables assigned obvious values earlier in the same local or top-level scope
 and variables assigned from resolved calls with declared return types. Those
 known local variable types are propagated through simple variable-to-variable
 assignments in the same forward scope.
+Native `self`, `static`, and direct `parent` parameter contracts are resolved
+for these checks inside class-like scopes.
 Direct resolved-call arguments with declared return types are checked too.
 PHPDoc `@return` annotations are used as declared return types for these
 resolved-call checks.
@@ -323,6 +325,8 @@ files that are not open in the editor are picked up on the next request.
 - Conservative argument-type mismatch diagnostics for resolved calls with typed
   parameters and obvious literal, object-creation, or previously assigned
   variable arguments.
+- Conservative argument-type mismatch diagnostics for native `self`, `static`,
+  and direct `parent` parameter contracts.
 - Conservative argument-type mismatch diagnostics for PHPDoc `@param`
   parameter contracts.
 - Nullable native and PHPDoc parameter diagnostics that accept `null` for

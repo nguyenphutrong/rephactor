@@ -1682,6 +1682,30 @@ fn lsp_publishes_semantic_diagnostics_for_argument_type_mismatch() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_self_parameter_argument_type_mismatch() {
+    let root = temp_project("self-parameter-argument-type-mismatch-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Invoice {}\nclass Sender { public function accept(self $sender) {} }\n$sender = new Sender();\n$sender->accept(new Invoice());\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for sender: expected App\\Sender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_internal_function_argument_type_mismatch() {
     let root = temp_project("internal-function-argument-type-mismatch-diagnostics");
     let mut server = LspProcess::start(&root);

@@ -4495,6 +4495,7 @@ fn parameter_names(parameters_node: Node, text: &str) -> Vec<String> {
 }
 
 fn parameter_types(
+    declaration: Node,
     parameters_node: Node,
     text: &str,
     namespace: Option<&str>,
@@ -4512,7 +4513,13 @@ fn parameter_types(
         }
 
         let declared_type = child.child_by_field_name("type").and_then(|type_node| {
-            comparable_parameter_type_node(type_node, text, namespace, imports)
+            comparable_declaration_parameter_type_node(
+                declaration,
+                type_node,
+                text,
+                namespace,
+                imports,
+            )
         });
         types.push(declared_type);
     }
@@ -4527,7 +4534,7 @@ fn declaration_signature_parameter_types(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Vec<Option<ComparableReturnType>> {
-    let native_types = parameter_types(parameters_node, text, namespace, imports);
+    let native_types = parameter_types(declaration, parameters_node, text, namespace, imports);
     let phpdoc_types =
         phpdoc_param_types_before(text, declaration.start_byte(), namespace, imports)
             .into_iter()
@@ -4580,6 +4587,21 @@ fn comparable_parameter_type_node(
     imports: &ImportMap,
 ) -> Option<ComparableReturnType> {
     let (type_name, allows_null) = single_named_type_with_nullability(type_node, text)?;
+    let mut comparable = comparable_parameter_type(&type_name, namespace, imports)?;
+    comparable.allows_null = comparable.allows_null || allows_null;
+    Some(comparable)
+}
+
+fn comparable_declaration_parameter_type_node(
+    declaration: Node,
+    type_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let (type_name, allows_null) = single_named_type_with_nullability(type_node, text)?;
+    let type_name = qualify_parameter_type_name(&type_name, declaration, text, namespace, imports)
+        .unwrap_or(type_name);
     let mut comparable = comparable_parameter_type(&type_name, namespace, imports)?;
     comparable.allows_null = comparable.allows_null || allows_null;
     Some(comparable)
@@ -6204,6 +6226,9 @@ fn qualify_parameter_type_name(
         return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
             .into_iter()
             .next();
+    }
+    if is_builtin_type_name(type_name) {
+        return None;
     }
 
     Some(qualify_type_name(type_name, namespace, imports))
