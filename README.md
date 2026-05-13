@@ -233,8 +233,8 @@ as `array<int,Foo>`, `list<Foo>`, and `Foo[]` are treated as conservative
 `array` contracts for mismatch diagnostics.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
-callable diagnostics, unresolved type-annotation diagnostics, and duplicate
-function/class-like declaration diagnostics for open documents. It also reports
+callable diagnostics, unresolved native and PHPDoc type-annotation diagnostics,
+and duplicate function/class-like declaration diagnostics for open documents. It also reports
 duplicate method, property, and class-constant diagnostics inside class-like
 declarations, duplicate parameter diagnostics, duplicate/unknown named-argument
 diagnostics for resolved calls, too-many-argument diagnostics for resolved
@@ -355,6 +355,8 @@ files that are not open in the editor are picked up on the next request.
 - Parse diagnostics for open PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Unresolved type-annotation diagnostics for open PHP documents.
+- Unresolved PHPDoc `@param` and `@return` type diagnostics for open PHP
+  documents.
 - Duplicate function and class-like declaration diagnostics for open PHP
   documents.
 - Duplicate method diagnostics for open PHP documents.

@@ -356,6 +356,9 @@ pub fn analyze_diagnostics_for_document_with_cache(
         });
     }
 
+    diagnostics.extend(phpdoc_type_annotation_diagnostics(
+        root, text, &imports, &index,
+    ));
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
     diagnostics.extend(duplicate_method_diagnostics(root, text));
     diagnostics.extend(duplicate_property_diagnostics(root, text));
@@ -3967,6 +3970,105 @@ fn collect_named_type_nodes<'tree>(node: Node<'tree>, type_nodes: &mut Vec<Node<
     for child in node.named_children(&mut cursor) {
         collect_named_type_nodes(child, type_nodes);
     }
+}
+
+fn phpdoc_type_annotation_diagnostics(
+    root: Node,
+    text: &str,
+    imports: &ImportMap,
+    index: &SymbolIndex,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    collect_phpdoc_type_annotation_diagnostics(root, root, text, imports, index, &mut diagnostics);
+    diagnostics
+}
+
+fn collect_phpdoc_type_annotation_diagnostics(
+    root: Node,
+    node: Node,
+    text: &str,
+    imports: &ImportMap,
+    index: &SymbolIndex,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if matches!(node.kind(), "function_definition" | "method_declaration") {
+        let namespace = namespace_at_byte(root, text, node.start_byte());
+        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@param") {
+            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+            if let Some((type_name, _)) = phpdoc_var_tokens(&tokens) {
+                maybe_push_unresolved_phpdoc_type_diagnostic(
+                    text,
+                    imports,
+                    index,
+                    namespace.as_deref(),
+                    &record,
+                    type_name,
+                    diagnostics,
+                );
+            }
+        }
+
+        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@return") {
+            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+            if let Some(type_name) = phpdoc_var_type_token(&tokens) {
+                maybe_push_unresolved_phpdoc_type_diagnostic(
+                    text,
+                    imports,
+                    index,
+                    namespace.as_deref(),
+                    &record,
+                    type_name,
+                    diagnostics,
+                );
+            }
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_phpdoc_type_annotation_diagnostics(root, child, text, imports, index, diagnostics);
+    }
+}
+
+fn maybe_push_unresolved_phpdoc_type_diagnostic(
+    text: &str,
+    imports: &ImportMap,
+    index: &SymbolIndex,
+    namespace: Option<&str>,
+    record: &PhpDocTagLine,
+    type_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some((type_name, _)) = supported_single_type_name(type_name) else {
+        return;
+    };
+    if is_builtin_type_name(&type_name) {
+        return;
+    }
+    if index
+        .resolve_class(&type_name, namespace, imports)
+        .is_some()
+    {
+        return;
+    }
+
+    let type_offset = record.raw.find(type_name.as_str()).unwrap_or_default();
+    diagnostics.push(Diagnostic {
+        range: range_for_bytes(
+            text,
+            record.start_byte + type_offset,
+            record.start_byte + type_offset + type_name.len(),
+        )
+        .unwrap_or_else(|_| Range::default()),
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: None,
+        code_description: None,
+        source: Some("rephactor".to_string()),
+        message: format!("unresolved PHPDoc type {type_name}"),
+        related_information: None,
+        tags: None,
+        data: None,
+    });
 }
 
 fn is_builtin_type_name(name: &str) -> bool {
