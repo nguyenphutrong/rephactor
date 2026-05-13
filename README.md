@@ -63,6 +63,19 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 ## Zed Setup
 
+Zed compiles dev extensions to Wasm. Make sure Zed sees the Rustup toolchain
+before Homebrew Rust, then install the Wasm target:
+
+```sh
+rustup target add wasm32-wasip2
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo check --manifest-path zed-extension/Cargo.toml --target wasm32-wasip2
+```
+
+If `which cargo` prints `/opt/homebrew/bin/cargo`, move `$HOME/.cargo/bin`
+earlier in your shell `PATH`. Otherwise Zed may fail to install the dev
+extension with `can't find crate for core` for `wasm32-wasip2`.
+
 Install the local extension from `zed-extension/` with Zed's
 `zed: install dev extension` command.
 
