@@ -2,7 +2,7 @@ id = "rephactor"
 name = "Rephactor"
 version = "0.0.1"
 schema_version = 1
-authors = ["Rephactor contributors"]
+authors = ["Trong Nguyen"]
 description = "Zed integration for the Rephactor PHP language server"
 repository = "https://github.com/nguyenphutrong/rephactor"
 
