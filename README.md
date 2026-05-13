@@ -195,7 +195,8 @@ expressions.
 
 PHPDoc Type V1 reads function-like `@param Type $variable` annotations and
 local `@var Type $variable` annotations, then feeds them into method resolution
-for completion, signature help, and code actions.
+for completion, signature help, and code actions. Class-level `@method`
+annotations are indexed as magic methods for the same features.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
@@ -283,6 +284,7 @@ files that are not open in the editor are picked up on the next request.
 - Function-like PHPDoc `@param Type $variable` annotations for instance method
   resolution.
 - PHPDoc `@mixin ClassName` annotations for class instance method resolution.
+- PHPDoc `@method` annotations for class magic method resolution.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.

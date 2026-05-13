@@ -110,6 +110,7 @@
 - [x] Resolve local PHPDoc `@var` variable types.
 - [x] Resolve PHPDoc `@param` parameter types.
 - [x] Resolve PHPDoc `@mixin` methods for instance method resolution.
+- [x] Resolve PHPDoc `@method` magic methods.
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement duplicate declaration diagnostics for open files.

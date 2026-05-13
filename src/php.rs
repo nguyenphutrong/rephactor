@@ -2753,6 +2753,11 @@ fn index_class(
         mixins: phpdoc_mixins_before(text, node.start_byte(), namespace),
         ..ClassInfo::default()
     };
+    for signature in phpdoc_methods_before(text, node.start_byte()) {
+        class_info
+            .methods
+            .insert(normalize_method_key(&signature.name), signature);
+    }
     let mut cursor = body.walk();
 
     for child in body.named_children(&mut cursor) {
@@ -4024,6 +4029,91 @@ fn phpdoc_mixins_before(text: &str, byte_offset: usize, namespace: Option<&str>)
             } else {
                 Some(qualify_name(mixin, namespace))
             }
+        })
+        .collect()
+}
+
+fn phpdoc_methods_before(text: &str, byte_offset: usize) -> Vec<Signature> {
+    phpdoc_tag_lines_before(text, byte_offset, "@method")
+        .into_iter()
+        .filter_map(|method_text| phpdoc_method_signature(&method_text))
+        .collect()
+}
+
+fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
+    let open = method_text.find('(')?;
+    let close = method_text.rfind(')')?;
+    if close < open {
+        return None;
+    }
+
+    let name = method_text[..open]
+        .split_whitespace()
+        .rev()
+        .find(|token| *token != "static")?
+        .trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let parameter_text = &method_text[open + 1..close];
+    let is_variadic = parameter_text.contains("...");
+    let parameters = parameter_text
+        .split(',')
+        .filter_map(|parameter| {
+            let parameter = parameter.trim();
+            if parameter.is_empty() {
+                return None;
+            }
+            parameter
+                .split_whitespace()
+                .last()
+                .map(|name| {
+                    name.trim_start_matches("...")
+                        .trim_start_matches('$')
+                        .to_string()
+                })
+                .filter(|name| !name.is_empty())
+        })
+        .collect::<Vec<_>>();
+
+    Some(Signature {
+        name: name.to_string(),
+        parameters,
+        is_variadic,
+        location: None,
+        doc_summary: None,
+    })
+}
+
+fn phpdoc_tag_lines_before(text: &str, byte_offset: usize, tag: &str) -> Vec<String> {
+    let Some(before) = text.get(..byte_offset) else {
+        return Vec::new();
+    };
+    let Some(comment_start) = before.rfind("/**") else {
+        return Vec::new();
+    };
+    let Some(between) = before.get(comment_start..) else {
+        return Vec::new();
+    };
+    let Some(comment_end) = between.rfind("*/") else {
+        return Vec::new();
+    };
+    if comment_start + comment_end + 2 < before.trim_end().len() {
+        return Vec::new();
+    }
+
+    between
+        .lines()
+        .filter_map(|line| {
+            let line = line
+                .trim()
+                .trim_start_matches("/**")
+                .trim_start_matches('*')
+                .trim_end_matches("*/")
+                .trim();
+            let tag_offset = line.find(tag)?;
+            Some(line[tag_offset + tag.len()..].trim().to_string())
         })
         .collect()
 }
