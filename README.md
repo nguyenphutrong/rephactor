@@ -35,6 +35,7 @@ of the same resolver and project index.
 - Provide `textDocument/hover` for resolved symbols.
 - Provide deterministic `textDocument/completion` for basic symbols.
 - Provide `textDocument/documentSymbol` for outline and breadcrumbs.
+- Provide `workspace/symbol` for Composer-indexed project symbols.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
@@ -111,7 +112,7 @@ run Rephactor alongside it:
 
 Rephactor currently provides named-argument and class-import refactor code
 actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1, and
-Document Symbol V1.
+Document Symbol V1, and Workspace Symbol V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -136,6 +137,9 @@ It intentionally avoids snippets and fuzzy ranking.
 
 Document Symbol V1 returns functions, classes, interfaces, traits, and class
 methods for editor outline and breadcrumb UIs.
+
+Workspace Symbol V1 searches Composer-indexed functions, classes, and methods
+with deterministic case-insensitive matching.
 
 Import refactors support adding an import for a resolvable fully-qualified
 class name, shortening that usage, sorting simple class imports, and removing
@@ -164,6 +168,7 @@ file watcher is intentionally deferred.
 - Basic class, function, static method, and locally obvious instance method
   completions.
 - Document symbols for functions, class-like declarations, and methods.
+- Workspace symbols for indexed functions, classes, and methods.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class

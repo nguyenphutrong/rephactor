@@ -7,7 +7,8 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
     CompletionResponse, DocumentSymbol, DocumentSymbolResponse, GotoDefinitionResponse, Hover,
     HoverContents, Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel,
-    Position, Range, SignatureHelp, SignatureInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
+    Position, Range, SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit,
+    Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -152,6 +153,13 @@ pub struct CompletionAnalysis {
 pub struct DocumentSymbolAnalysis {
     pub symbols: Option<DocumentSymbolResponse>,
     pub skip_reason: Option<SkipReason>,
+}
+
+#[derive(Debug)]
+pub struct WorkspaceSymbolAnalysis {
+    pub symbols: Vec<SymbolInformation>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
 }
 
 enum CodeActionOutcome {
@@ -324,6 +332,31 @@ pub fn analyze_document_symbols(text: &str) -> DocumentSymbolAnalysis {
             symbols: None,
             skip_reason: Some(reason),
         },
+    }
+}
+
+pub fn analyze_workspace_symbols(
+    root_uri: Option<&Url>,
+    query: &str,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> WorkspaceSymbolAnalysis {
+    let Some(project_root) = root_uri.and_then(project_root_from_workspace_uri) else {
+        return WorkspaceSymbolAnalysis {
+            symbols: Vec::new(),
+            skip_reason: Some(SkipReason::NoSupportedCall),
+            index_cache_status: IndexCacheStatus::NoProject,
+        };
+    };
+    let index_cache_status = cache.status_for_project_root(&project_root);
+    let index = cache.index_for_project_root(&project_root, open_documents);
+    let open_paths = open_project_documents(open_documents);
+    let symbols = workspace_symbols_for_index(&index, query, &open_paths);
+
+    WorkspaceSymbolAnalysis {
+        skip_reason: symbols.is_empty().then_some(SkipReason::NoEdits),
+        symbols,
+        index_cache_status,
     }
 }
 
@@ -882,16 +915,38 @@ impl SymbolIndex {
 }
 
 impl ProjectIndexCache {
+    fn status_for_project_root(&self, project_root: &Path) -> IndexCacheStatus {
+        if self.indexes.contains_key(project_root) {
+            IndexCacheStatus::Hit(project_root.to_path_buf())
+        } else {
+            IndexCacheStatus::Miss(project_root.to_path_buf())
+        }
+    }
+
     fn status_for_document(&self, uri: &Url) -> IndexCacheStatus {
         let Some(project_root) = project_root_for_uri(uri) else {
             return IndexCacheStatus::NoProject;
         };
 
-        if self.indexes.contains_key(&project_root) {
-            IndexCacheStatus::Hit(project_root)
-        } else {
-            IndexCacheStatus::Miss(project_root)
+        self.status_for_project_root(&project_root)
+    }
+
+    fn index_for_project_root(
+        &mut self,
+        project_root: &Path,
+        open_documents: &HashMap<Url, String>,
+    ) -> SymbolIndex {
+        let disk_index = self
+            .indexes
+            .entry(project_root.to_path_buf())
+            .or_insert_with(|| SymbolIndex::for_project(project_root));
+        let mut index = disk_index.clone();
+
+        for (path, open_text) in open_project_documents(open_documents) {
+            index.index_text_at_path(&open_text, Some(&path));
         }
+
+        index
     }
 
     fn index_for_document(
@@ -907,15 +962,7 @@ impl ProjectIndexCache {
             return index;
         };
 
-        let disk_index = self
-            .indexes
-            .entry(project_root.clone())
-            .or_insert_with(|| SymbolIndex::for_project(&project_root));
-        let mut index = disk_index.clone();
-
-        for (path, open_text) in open_project_documents(open_documents) {
-            index.index_text_at_path(&open_text, Some(&path));
-        }
+        let mut index = self.index_for_project_root(&project_root, open_documents);
 
         let path = uri.to_file_path().ok();
         index.index_text_at_path(text, path.as_deref());
@@ -1361,6 +1408,108 @@ fn document_symbol(
         selection_range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())?,
         children,
     }))
+}
+
+fn workspace_symbols_for_index(
+    index: &SymbolIndex,
+    query: &str,
+    open_documents: &HashMap<PathBuf, String>,
+) -> Vec<SymbolInformation> {
+    let mut symbols = Vec::new();
+
+    for signatures in index.functions.values() {
+        for signature in signatures {
+            if workspace_query_matches(&signature.name, query)
+                && let Some(symbol) = symbol_information(
+                    signature.name.clone(),
+                    SymbolKind::FUNCTION,
+                    signature.location.as_ref(),
+                    None,
+                    open_documents,
+                )
+            {
+                symbols.push(symbol);
+            }
+        }
+    }
+
+    for class_info in index.classes.values() {
+        if workspace_query_matches(&class_info.fqn, query)
+            && let Some(symbol) = symbol_information(
+                class_info.fqn.clone(),
+                SymbolKind::CLASS,
+                class_info.location.as_ref(),
+                None,
+                open_documents,
+            )
+        {
+            symbols.push(symbol);
+        }
+
+        for method in class_info.methods.values() {
+            let method_label = format!("{}::{}", class_info.fqn, method.name);
+            if workspace_query_matches(&method_label, query)
+                && let Some(symbol) = symbol_information(
+                    method_label,
+                    SymbolKind::METHOD,
+                    method.location.as_ref(),
+                    Some(class_info.fqn.clone()),
+                    open_documents,
+                )
+            {
+                symbols.push(symbol);
+            }
+        }
+    }
+
+    symbols.sort_by_key(|symbol| symbol.name.to_ascii_lowercase());
+    symbols
+}
+
+#[allow(deprecated)]
+fn symbol_information(
+    name: String,
+    kind: SymbolKind,
+    location: Option<&SourceLocation>,
+    container_name: Option<String>,
+    open_documents: &HashMap<PathBuf, String>,
+) -> Option<SymbolInformation> {
+    Some(SymbolInformation {
+        name,
+        kind,
+        tags: None,
+        deprecated: None,
+        location: location_for_source(location?, open_documents)?,
+        container_name,
+    })
+}
+
+fn location_for_source(
+    location: &SourceLocation,
+    open_documents: &HashMap<PathBuf, String>,
+) -> Option<Location> {
+    let uri = Url::from_file_path(&location.path).ok()?;
+    let text = open_documents
+        .get(&location.path)
+        .cloned()
+        .or_else(|| fs::read_to_string(&location.path).ok())?;
+    let position = lsp_position_for_byte_offset(&text, location.byte_offset)?;
+
+    Some(Location::new(
+        uri,
+        Range {
+            start: position,
+            end: position,
+        },
+    ))
+}
+
+fn workspace_query_matches(name: &str, query: &str) -> bool {
+    let query = query.trim();
+    query.is_empty()
+        || name
+            .to_ascii_lowercase()
+            .contains(&query.to_ascii_lowercase())
 }
 
 fn class_like_names_from_direct_child(
@@ -2421,6 +2570,15 @@ fn project_root_for_uri(uri: &Url) -> Option<PathBuf> {
     uri.to_file_path()
         .ok()
         .and_then(|document_path| find_project_root(&document_path))
+}
+
+fn project_root_from_workspace_uri(uri: &Url) -> Option<PathBuf> {
+    let path = uri.to_file_path().ok()?;
+    if path.join("composer.json").is_file() {
+        Some(path)
+    } else {
+        find_project_root(&path)
+    }
 }
 
 fn document_supports_named_arguments(uri: &Url) -> bool {

@@ -6,7 +6,7 @@ use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
     analyze_document_symbols, analyze_hover_for_position_with_cache,
-    analyze_signature_help_for_position_with_cache,
+    analyze_signature_help_for_position_with_cache, analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -16,7 +16,8 @@ use tower_lsp::lsp_types::{
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, MessageType,
     OneOf, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+    SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -24,6 +25,7 @@ pub struct RephactorLanguageServer {
     client: Client,
     documents: Arc<RwLock<DocumentStore>>,
     index_cache: Arc<RwLock<ProjectIndexCache>>,
+    root_uri: Arc<RwLock<Option<Url>>>,
 }
 
 impl RephactorLanguageServer {
@@ -32,6 +34,7 @@ impl RephactorLanguageServer {
             client,
             documents: Arc::new(RwLock::new(DocumentStore::default())),
             index_cache: Arc::new(RwLock::new(ProjectIndexCache::default())),
+            root_uri: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -64,13 +67,15 @@ fn server_capabilities() -> ServerCapabilities {
             ..CompletionOptions::default()
         }),
         document_symbol_provider: Some(OneOf::Left(true)),
+        workspace_symbol_provider: Some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for RephactorLanguageServer {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        *self.root_uri.write().expect("root uri lock poisoned") = params.root_uri;
         Ok(InitializeResult {
             capabilities: server_capabilities(),
             server_info: Some(ServerInfo {
@@ -445,6 +450,52 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(analysis.symbols)
     }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let started_at = Instant::now();
+        let root_uri = self
+            .root_uri
+            .read()
+            .expect("root uri lock poisoned")
+            .clone();
+        let open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.texts()
+        };
+        let analysis = {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_workspace_symbols(
+                root_uri.as_ref(),
+                &params.query,
+                &open_documents,
+                &mut index_cache,
+            )
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor workspaceSymbol '{}' -> {} symbol(s) in {}ms ({})",
+            params.query,
+            analysis.symbols.len(),
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if analysis.symbols.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(Some(analysis.symbols))
+    }
 }
 
 #[cfg(test)]
@@ -478,6 +529,10 @@ mod tests {
         assert!(capabilities.completion_provider.is_some());
         assert_eq!(
             capabilities.document_symbol_provider,
+            Some(OneOf::Left(true))
+        );
+        assert_eq!(
+            capabilities.workspace_symbol_provider,
             Some(OneOf::Left(true))
         );
     }

@@ -62,6 +62,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["documentSymbolProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["workspaceSymbolProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -198,6 +202,19 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("document symbol array")
+            .clone()
+    }
+
+    fn workspace_symbols(&mut self, query: &str) -> Vec<Value> {
+        let response = self.request(
+            "workspace/symbol",
+            json!({
+                "query": query
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("workspace symbol array")
             .clone()
     }
 
@@ -499,6 +516,44 @@ fn lsp_returns_nested_document_symbols() {
             .expect("class children")
             .iter()
             .any(|symbol| symbol["name"] == "dispatch")
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_workspace_symbols_from_composer_project() {
+    let root = temp_project("workspace-symbol");
+    let src_dir = root.join("src");
+    std::fs::create_dir_all(&src_dir).expect("create source dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let service_path = src_dir.join("InvoiceSender.php");
+    std::fs::write(
+        &service_path,
+        "<?php\nnamespace App;\nfunction send_invoice($invoice) {}\nclass InvoiceSender { public function dispatch($invoice) {} }\n",
+    )
+    .expect("write service");
+    let mut server = LspProcess::start(&root);
+
+    let symbols = server.workspace_symbols("Invoice");
+
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["name"] == "App\\InvoiceSender")
+    );
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["name"] == "App\\InvoiceSender::dispatch")
+    );
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["location"]["uri"] == file_uri(&service_path))
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

@@ -92,6 +92,6 @@
 ## Phase 12: Intelephense Parity Foundations
 
 - [x] Implement `textDocument/documentSymbol`.
-- [ ] Implement `workspace/symbol`.
+- [x] Implement `workspace/symbol`.
 - [ ] Implement `textDocument/references`.
 - [ ] Implement diagnostics for open files.
