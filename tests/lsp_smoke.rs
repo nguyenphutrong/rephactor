@@ -1202,7 +1202,7 @@ fn lsp_returns_nested_document_symbols() {
     let root = temp_project("document-symbol");
     let mut server = LspProcess::start(&root);
     let file = root.join("example.php");
-    let text = "<?php\nnamespace App;\nconst API_VERSION = '1';\nfunction send_invoice($invoice) {}\nclass InvoiceSender { public function dispatch($invoice) {} }\n";
+    let text = "<?php\nnamespace App;\nconst API_VERSION = '1';\nfunction send_invoice($invoice) {}\nclass InvoiceSender { const DEFAULT_CHANNEL = 'mail'; private string $channel; public function dispatch($invoice) {} }\n";
     let uri = server.open_php(&file, text);
 
     let symbols = server.document_symbols(&uri);
@@ -1223,6 +1223,20 @@ fn lsp_returns_nested_document_symbols() {
             .expect("class children")
             .iter()
             .any(|symbol| symbol["name"] == "dispatch")
+    );
+    assert!(
+        class_symbol["children"]
+            .as_array()
+            .expect("class children")
+            .iter()
+            .any(|symbol| symbol["name"] == "DEFAULT_CHANNEL")
+    );
+    assert!(
+        class_symbol["children"]
+            .as_array()
+            .expect("class children")
+            .iter()
+            .any(|symbol| symbol["name"] == "$channel")
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

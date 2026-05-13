@@ -4896,14 +4896,50 @@ fn class_member_symbols(
     let mut cursor = body.walk();
 
     for child in body.named_children(&mut cursor) {
-        if child.kind() == "method_declaration"
-            && let Some(symbol) = document_symbol(child, text, SymbolKind::METHOD, None)?
-        {
-            members.push(symbol);
+        match child.kind() {
+            "const_declaration" => {
+                members.extend(constant_document_symbols(child, text)?);
+            }
+            "property_declaration" => {
+                members.extend(property_document_symbols(child, text)?);
+            }
+            "method_declaration" => {
+                if let Some(symbol) = document_symbol(child, text, SymbolKind::METHOD, None)? {
+                    members.push(symbol);
+                }
+            }
+            _ => {}
         }
     }
 
     Ok((!members.is_empty()).then_some(members))
+}
+
+#[allow(deprecated)]
+fn property_document_symbols(node: Node, text: &str) -> Result<Vec<DocumentSymbol>, SkipReason> {
+    let mut symbols = Vec::new();
+    let mut cursor = node.walk();
+
+    for property in node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "property_element")
+    {
+        let Some(name_node) = property.child_by_field_name("name") else {
+            continue;
+        };
+        symbols.push(DocumentSymbol {
+            name: node_text(name_node, text).to_string(),
+            detail: None,
+            kind: SymbolKind::PROPERTY,
+            tags: None,
+            deprecated: None,
+            range: range_for_bytes(text, property.start_byte(), property.end_byte())?,
+            selection_range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())?,
+            children: None,
+        });
+    }
+
+    Ok(symbols)
 }
 
 #[allow(deprecated)]
