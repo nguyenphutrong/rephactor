@@ -281,7 +281,7 @@ impl SymbolIndex {
             }
         }
 
-        None
+        internal_function_signature(name)
     }
 
     fn resolve_class(
@@ -1133,6 +1133,35 @@ fn normalize_method_key(name: &str) -> String {
     name.to_ascii_lowercase()
 }
 
+fn internal_function_signature(name: &str) -> Option<Signature> {
+    let parameters = match normalize_symbol_key(name).as_str() {
+        "array_filter" => &["array", "callback", "mode"][..],
+        "array_key_exists" => &["key", "array"],
+        "array_map" => &["callback", "array", "arrays"],
+        "array_merge" => &["arrays"],
+        "count" => &["value", "mode"],
+        "explode" => &["separator", "string", "limit"],
+        "implode" => &["separator", "array"],
+        "in_array" => &["needle", "haystack", "strict"],
+        "is_array" => &["value"],
+        "json_decode" => &["json", "associative", "depth", "flags"],
+        "json_encode" => &["value", "flags", "depth"],
+        "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
+        "str_contains" => &["haystack", "needle"],
+        "str_replace" => &["search", "replace", "subject", "count"],
+        "strlen" => &["string"],
+        "trim" => &["string", "characters"],
+        _ => return None,
+    };
+
+    Some(Signature {
+        parameters: parameters
+            .iter()
+            .map(|parameter| parameter.to_string())
+            .collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1200,6 +1229,18 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(invoice: $invoice, notify: true);\n"
+        );
+    }
+
+    #[test]
+    fn converts_seeded_php_internal_function_call() {
+        let text = "<?php\nstr_replace($search, $replace, $subject);\n";
+
+        let edits = action_edits(text, 1, 5);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nstr_replace(search: $search, replace: $replace, subject: $subject);\n"
         );
     }
 

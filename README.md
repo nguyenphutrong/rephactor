@@ -120,6 +120,8 @@ only expands long action titles.
   parameter or `$var = new ClassName(...)`.
 - Project symbols under Composer `autoload.psr-4` roots.
 - Project symbols under Composer `autoload.classmap` files or directories.
+- A small seed set of PHP internal functions, such as `str_replace`,
+  `json_encode`, `preg_match`, and `in_array`.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.
 - Projects without a Composer PHP version constraint, or projects whose
@@ -134,7 +136,7 @@ Rephactor returns no action instead of guessing for:
 - calls whose existing named arguments do not match the resolved signature
 - ambiguous symbols
 - unknown parameter names
-- PHP internal functions
+- PHP internal functions outside the seeded stub set
 - Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols
@@ -154,7 +156,7 @@ Current release posture:
 Deferred until V1 behavior is stable:
 
 - prebuilt macOS, Linux, and Windows binaries
-- PHP internal stubs
+- full PHP internal stubs
 - PHPStan/Psalm metadata
 
 ## Manual Acceptance

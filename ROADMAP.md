@@ -55,7 +55,7 @@
 
 ## Phase 7: Broader PHP Semantics
 
-- Add PHP internal function stubs.
+- [x] Add an initial seed set of PHP internal function stubs.
 - [x] Handle Composer classmaps.
 - Consider PHPStan/Psalm metadata for type resolution.
 - [x] Add configuration for project PHP version.
