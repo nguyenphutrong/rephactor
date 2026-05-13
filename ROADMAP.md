@@ -95,4 +95,5 @@
 - [x] Implement `workspace/symbol`.
 - [x] Implement `textDocument/references`.
 - [x] Implement parser diagnostics for open files.
+- [x] Implement `textDocument/documentHighlight`.
 - [ ] Implement semantic diagnostics for open files.

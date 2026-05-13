@@ -5,20 +5,21 @@ use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
-    analyze_document_symbols, analyze_hover_for_position_with_cache, analyze_parse_diagnostics,
-    analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
-    analyze_workspace_symbols,
+    analyze_document_highlights, analyze_document_symbols, analyze_hover_for_position_with_cache,
+    analyze_parse_diagnostics, analyze_references_for_position_with_cache,
+    analyze_signature_help_for_position_with_cache, analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
-    MessageType, OneOf, ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp,
-    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url, WorkspaceSymbolParams,
+    DocumentHighlight, DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, Location, MessageType, OneOf, ReferenceParams,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -86,6 +87,7 @@ fn server_capabilities() -> ServerCapabilities {
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
+        document_highlight_provider: Some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -574,6 +576,50 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(Some(analysis.locations))
     }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let started_at = Instant::now();
+        let document_text = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).map(|document| document.text.clone())
+        };
+
+        let analysis = if let Some(document_text) = document_text {
+            analyze_document_highlights(&document_text, position)
+        } else {
+            crate::php::DocumentHighlightAnalysis {
+                highlights: Vec::new(),
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+            }
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor documentHighlight {}:{}:{} -> {} highlight(s) in {}ms",
+            uri,
+            position.line,
+            position.character,
+            analysis.highlights.len(),
+            elapsed.as_millis()
+        );
+        if analysis.highlights.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(Some(analysis.highlights))
+    }
 }
 
 #[cfg(test)]
@@ -614,5 +660,9 @@ mod tests {
             Some(OneOf::Left(true))
         );
         assert_eq!(capabilities.references_provider, Some(OneOf::Left(true)));
+        assert_eq!(
+            capabilities.document_highlight_provider,
+            Some(OneOf::Left(true))
+        );
     }
 }

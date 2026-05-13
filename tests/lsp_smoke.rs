@@ -70,6 +70,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["referencesProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["documentHighlightProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -240,6 +244,20 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("references array")
+            .clone()
+    }
+
+    fn document_highlights(&mut self, uri: &str, line: u32, character: u32) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/documentHighlight",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("document highlights array")
             .clone()
     }
 
@@ -649,6 +667,23 @@ fn lsp_publishes_parse_diagnostics_for_open_document() {
             .expect("diagnostics array")
             .is_empty()
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_document_highlights_for_symbol_name() {
+    let root = temp_project("document-highlight");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction send_invoice($invoice) {}\nsend_invoice($first);\nsend_invoice($second);\n",
+    );
+
+    let highlights = server.document_highlights(&uri, 2, 5);
+
+    assert_eq!(highlights.len(), 3);
+    assert!(highlights.iter().all(|highlight| highlight["kind"] == 1));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

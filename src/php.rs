@@ -5,10 +5,11 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
-    CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentSymbol, DocumentSymbolResponse,
-    GotoDefinitionResponse, Hover, HoverContents, Location, MarkupContent, MarkupKind,
-    ParameterInformation, ParameterLabel, Position, Range, SignatureHelp, SignatureInformation,
-    SymbolInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
+    CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentHighlight, DocumentHighlightKind,
+    DocumentSymbol, DocumentSymbolResponse, GotoDefinitionResponse, Hover, HoverContents, Location,
+    MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
+    SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url,
+    WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -167,6 +168,12 @@ pub struct ReferencesAnalysis {
     pub locations: Vec<Location>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct DocumentHighlightAnalysis {
+    pub highlights: Vec<DocumentHighlight>,
+    pub skip_reason: Option<SkipReason>,
 }
 
 pub fn analyze_parse_diagnostics(text: &str) -> Vec<Diagnostic> {
@@ -398,6 +405,19 @@ pub fn analyze_references_for_position_with_cache(
             locations: Vec::new(),
             skip_reason: Some(reason),
             index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_document_highlights(text: &str, position: Position) -> DocumentHighlightAnalysis {
+    match document_highlights_for_position(text, position) {
+        Ok(highlights) => DocumentHighlightAnalysis {
+            skip_reason: highlights.is_empty().then_some(SkipReason::NoEdits),
+            highlights,
+        },
+        Err(reason) => DocumentHighlightAnalysis {
+            highlights: Vec::new(),
+            skip_reason: Some(reason),
         },
     }
 }
@@ -779,6 +799,41 @@ fn references_for_position(
         )
     });
     Ok(locations)
+}
+
+fn document_highlights_for_position(
+    text: &str,
+    position: Position,
+) -> Result<Vec<DocumentHighlight>, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let Some(name_node) = find_reference_name_at_byte(root, text, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let search_name = clean_reference_name(node_text(name_node, text));
+    if search_name.is_empty() {
+        return Err(SkipReason::NoSupportedCall);
+    }
+
+    let mut names = Vec::new();
+    collect_name_nodes(root, &mut names);
+    let mut highlights = Vec::new();
+
+    for name in names {
+        if clean_reference_name(node_text(name, text)).eq_ignore_ascii_case(&search_name) {
+            highlights.push(DocumentHighlight {
+                range: range_for_bytes(text, name.start_byte(), name.end_byte())?,
+                kind: Some(DocumentHighlightKind::TEXT),
+            });
+        }
+    }
+
+    Ok(highlights)
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
