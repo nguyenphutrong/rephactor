@@ -1663,6 +1663,7 @@ fn include_literal_target(
     let node_text = node_text(node, text);
     let quote_index = node_text.find(['"', '\''])?;
     let quote = node_text.as_bytes()[quote_index] as char;
+    let before_quote = node_text.get(..quote_index)?;
     let rest = node_text.get(quote_index + 1..)?;
     let end_quote = rest.find(quote)?;
     let relative = rest.get(..end_quote)?;
@@ -1672,7 +1673,12 @@ fn include_literal_target(
 
     let start_byte = node.start_byte() + quote_index + 1;
     let end_byte = start_byte + relative.len();
-    Some((base_dir.join(relative), start_byte, end_byte))
+    let target = if before_quote.contains("__DIR__") {
+        base_dir.join(relative.trim_start_matches(['/', '\\']))
+    } else {
+        base_dir.join(relative)
+    };
+    Some((target, start_byte, end_byte))
 }
 
 fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> {

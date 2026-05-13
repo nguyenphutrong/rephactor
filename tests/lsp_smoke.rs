@@ -2660,6 +2660,24 @@ fn lsp_returns_document_links_for_require_paths() {
 }
 
 #[test]
+fn lsp_returns_document_links_for_dir_concatenated_require_paths() {
+    let root = temp_project("document-links-dir");
+    let mut server = LspProcess::start(&root);
+    let lib_dir = root.join("lib");
+    std::fs::create_dir_all(&lib_dir).expect("create lib dir");
+    let target = lib_dir.join("helpers.php");
+    std::fs::write(&target, "<?php\nfunction helper() {}\n").expect("write helper");
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nrequire_once __DIR__ . '/lib/helpers.php';\n");
+
+    let links = server.document_links(&uri);
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["target"], file_uri(&target));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_formats_trailing_whitespace_and_final_newline() {
     let root = temp_project("formatting-whitespace");
     let mut server = LspProcess::start(&root);
