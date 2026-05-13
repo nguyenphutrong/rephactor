@@ -87,6 +87,7 @@
 - [x] Implement `textDocument/definition`.
 - [x] Implement import refactor code actions.
 - [x] Implement hover for resolved symbols.
+- [x] Link seeded PHP internal function hovers to the PHP manual.
 - [x] Implement deterministic completion V1.
 - [x] Implement PHP keyword completion.
 - [x] Add conservative auto-import edits for class completions.

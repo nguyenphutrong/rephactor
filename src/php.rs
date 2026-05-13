@@ -4495,7 +4495,8 @@ fn normalize_method_key(name: &str) -> String {
 }
 
 fn internal_function_signature(name: &str) -> Option<Signature> {
-    let parameters = match normalize_symbol_key(name).as_str() {
+    let normalized_name = normalize_symbol_key(name);
+    let parameters = match normalized_name.as_str() {
         "array_filter" => &["array", "callback", "mode"][..],
         "array_key_exists" => &["key", "array"],
         "array_map" => &["callback", "array", "arrays"],
@@ -4522,7 +4523,9 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
             .map(|parameter| parameter.to_string())
             .collect(),
         location: None,
-        doc_summary: None,
+        doc_summary: Some(format!(
+            "[PHP manual](https://www.php.net/{normalized_name})"
+        )),
     })
 }
 

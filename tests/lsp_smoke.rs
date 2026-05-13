@@ -669,6 +669,22 @@ fn lsp_returns_type_definition_for_typed_variable() {
 }
 
 #[test]
+fn lsp_returns_php_manual_link_for_internal_function_hover() {
+    let root = temp_project("hover-internal-function");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nstr_replace($search, $replace, $subject);\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 1, 5).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("str_replace($search, $replace, $subject, $count)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/str_replace)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_declaration_for_implemented_method() {
     let root = temp_project("method-declaration");
     let mut server = LspProcess::start(&root);

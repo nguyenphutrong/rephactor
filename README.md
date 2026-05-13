@@ -157,8 +157,9 @@ Go To Implementation V1 returns indexed classes that directly or transitively
 extend or implement the class/interface under the cursor.
 
 Hover V1 shows a concise PHP signature or class FQN, source location, and the
-nearest PHPDoc summary when available. It intentionally avoids full PHPDoc
-rendering and returns no hover for ambiguous or dynamic symbols.
+nearest PHPDoc summary when available. Hover for seeded PHP internal functions
+links to the official PHP manual. It intentionally avoids full PHPDoc rendering
+and returns no hover for ambiguous or dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
 matches for indexed class names, indexed project functions, seeded PHP internal
@@ -274,7 +275,7 @@ files that are not open in the editor are picked up on the next request.
 - Project symbols under Composer `autoload.psr-4` roots.
 - Project symbols under Composer `autoload.classmap` files or directories.
 - A small seed set of PHP internal functions, such as `str_replace`,
-  `json_encode`, `preg_match`, and `in_array`.
+  `json_encode`, `preg_match`, and `in_array`, with PHP manual links in hover.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.
 - Projects without a Composer PHP version constraint, or projects whose
