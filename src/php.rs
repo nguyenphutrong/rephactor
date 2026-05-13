@@ -56,6 +56,7 @@ struct ClassConstantInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ClassPropertyInfo {
     name: String,
+    location: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1192,6 +1193,26 @@ fn definition_for_position_with_cache(
         return location_response(constant_info.location.as_ref(), &open_paths);
     }
 
+    if let Some((variable, property_name)) = instance_property_reference_context(text, byte_offset)
+    {
+        let variable_types = variable_types_at_byte(
+            root,
+            text,
+            byte_offset,
+            namespace.as_deref(),
+            &imports,
+            Some(&index),
+        );
+        if let Some(class_name) = variable_types.get(&variable)
+            && let Some(class_info) =
+                index.resolve_class(class_name, namespace.as_deref(), &imports)
+            && let Some((_, property_info)) =
+                resolve_class_property_info(&index, class_info, &property_name)
+        {
+            return location_response(property_info.location.as_ref(), &open_paths);
+        }
+    }
+
     let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
         return Err(SkipReason::NoSupportedCall);
     };
@@ -1546,6 +1567,30 @@ fn hover_for_position_with_cache(
             constant_info.location.as_ref(),
             None,
         ));
+    }
+
+    if let Some((variable, property_name)) = instance_property_reference_context(text, byte_offset)
+    {
+        let variable_types = variable_types_at_byte(
+            root,
+            text,
+            byte_offset,
+            namespace.as_deref(),
+            &imports,
+            Some(&index),
+        );
+        if let Some(class_name) = variable_types.get(&variable)
+            && let Some(class_info) =
+                index.resolve_class(class_name, namespace.as_deref(), &imports)
+            && let Some((owner, property_info)) =
+                resolve_class_property_info(&index, class_info, &property_name)
+        {
+            return Ok(hover_from_parts(
+                format!("property {}::${}", owner.fqn, property_info.name),
+                property_info.location.as_ref(),
+                None,
+            ));
+        }
     }
 
     let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
@@ -4937,7 +4982,7 @@ fn index_class(
         if child.kind() == "property_declaration" {
             class_info
                 .properties
-                .extend(class_property_infos(child, text));
+                .extend(class_property_infos(child, text, path));
             continue;
         }
 
@@ -4970,7 +5015,7 @@ fn class_constant_infos(node: Node, text: &str, path: Option<&Path>) -> Vec<Clas
     constants
 }
 
-fn class_property_infos(node: Node, text: &str) -> Vec<ClassPropertyInfo> {
+fn class_property_infos(node: Node, text: &str, path: Option<&Path>) -> Vec<ClassPropertyInfo> {
     let mut properties = Vec::new();
     let mut cursor = node.walk();
 
@@ -4983,6 +5028,7 @@ fn class_property_infos(node: Node, text: &str) -> Vec<ClassPropertyInfo> {
                 name: node_text(name_node, text)
                     .trim_start_matches('$')
                     .to_string(),
+                location: source_location(path, name_node.start_byte()),
             });
         }
     }
@@ -6875,6 +6921,34 @@ fn instance_method_completion_context(text: &str, byte_offset: usize) -> Option<
         .then(|| (variable, completion_prefix(text, byte_offset)))
 }
 
+fn instance_property_reference_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
+    let (property_start, property_end) = identifier_bounds_at_byte(text, byte_offset)?;
+    if property_start < 2 || text.get(property_start.saturating_sub(2)..property_start)? != "->" {
+        return None;
+    }
+
+    let next = text.get(property_end..)?.trim_start().chars().next();
+    if next == Some('(') {
+        return None;
+    }
+
+    let variable_end = property_start - 2;
+    let variable_start = text
+        .get(..variable_end)?
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!(is_identifier_character(character) || character == '$'))
+                .then_some(index + character.len_utf8())
+        })
+        .unwrap_or(0);
+    let variable = text.get(variable_start..variable_end)?.trim();
+    let property_name = text.get(property_start..property_end)?.trim();
+
+    (variable.starts_with('$') && !property_name.is_empty())
+        .then(|| (variable.to_string(), property_name.to_string()))
+}
+
 fn class_completion_items(
     text: &str,
     root: Node,
@@ -7217,6 +7291,59 @@ fn resolve_class_constant_info_inner<'a>(
         if let Some(related_info) = index.classes.get(&normalize_symbol_key(related_name))
             && let Some(resolved) =
                 resolve_class_constant_info_inner(index, related_info, constant_name, visited)
+        {
+            return Some(resolved);
+        }
+    }
+
+    None
+}
+
+fn class_property_info<'a>(
+    class_info: &'a ClassInfo,
+    property_name: &str,
+) -> Option<&'a ClassPropertyInfo> {
+    class_info
+        .properties
+        .iter()
+        .find(|property| property.name.eq_ignore_ascii_case(property_name))
+}
+
+fn resolve_class_property_info<'a>(
+    index: &'a SymbolIndex,
+    class_info: &'a ClassInfo,
+    property_name: &str,
+) -> Option<(&'a ClassInfo, &'a ClassPropertyInfo)> {
+    let mut visited = Vec::new();
+    resolve_class_property_info_inner(index, class_info, property_name, &mut visited)
+}
+
+fn resolve_class_property_info_inner<'a>(
+    index: &'a SymbolIndex,
+    class_info: &'a ClassInfo,
+    property_name: &str,
+    visited: &mut Vec<String>,
+) -> Option<(&'a ClassInfo, &'a ClassPropertyInfo)> {
+    let class_key = normalize_symbol_key(&class_info.fqn);
+    if visited.contains(&class_key) {
+        return None;
+    }
+    visited.push(class_key);
+
+    if let Some(property_info) = class_property_info(class_info, property_name) {
+        return Some((class_info, property_info));
+    }
+
+    for related_name in class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+        .chain(class_info.traits.iter())
+        .chain(class_info.mixins.iter())
+    {
+        if let Some(related_info) = index.classes.get(&normalize_symbol_key(related_name))
+            && let Some(resolved) =
+                resolve_class_property_info_inner(index, related_info, property_name, visited)
         {
             return Some(resolved);
         }

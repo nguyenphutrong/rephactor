@@ -758,6 +758,30 @@ fn lsp_returns_definition_for_static_scope_class_constants() {
 }
 
 #[test]
+fn lsp_returns_definition_for_instance_properties() {
+    let root = temp_project("definition-instance-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseSender { protected $queue; }\nclass Sender extends BaseSender { private $transport; }\nfunction run(Sender $sender) {\n    echo $sender->transport;\n    echo $sender->queue;\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let own_definition = server.definition(&uri, 4, 22).expect("own definition");
+    let inherited_definition = server
+        .definition(&uri, 5, 20)
+        .expect("inherited definition");
+
+    assert_eq!(
+        own_definition["range"]["start"],
+        json!({ "line": 2, "character": 42 })
+    );
+    assert_eq!(
+        inherited_definition["range"]["start"],
+        json!({ "line": 1, "character": 29 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_definition_for_dynamic_call() {
     let root = temp_project("definition-unsupported");
     let mut server = LspProcess::start(&root);
@@ -855,6 +879,28 @@ fn lsp_returns_hover_for_static_scope_class_constants() {
 
     assert!(self_markdown.contains("const CustomerRecord::STATUS_PAID"));
     assert!(parent_markdown.contains("const BaseRecord::STATUS_OPEN"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_hover_for_instance_properties() {
+    let root = temp_project("hover-instance-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseSender { protected $queue; }\nclass Sender extends BaseSender { private $transport; }\nfunction run(Sender $sender) {\n    echo $sender->transport;\n    echo $sender->queue;\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let own_hover = server.hover(&uri, 4, 22).expect("own hover");
+    let inherited_hover = server.hover(&uri, 5, 20).expect("inherited hover");
+    let own_markdown = own_hover["contents"]["value"]
+        .as_str()
+        .expect("own hover markdown");
+    let inherited_markdown = inherited_hover["contents"]["value"]
+        .as_str()
+        .expect("inherited hover markdown");
+
+    assert!(own_markdown.contains("property Sender::$transport"));
+    assert!(inherited_markdown.contains("property BaseSender::$queue"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
