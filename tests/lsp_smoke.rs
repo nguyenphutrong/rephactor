@@ -1116,6 +1116,32 @@ fn lsp_returns_hover_for_internal_constant() {
 }
 
 #[test]
+fn lsp_returns_php_manual_link_for_internal_class_hover() {
+    let root = temp_project("hover-internal-class");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnew DateTimeImmutable();\nfunction handle(Throwable $error) {}\n";
+    let uri = server.open_php(&file, text);
+
+    let class_hover = server.hover(&uri, 1, 8).expect("class hover result");
+    let class_markdown = class_hover["contents"]["value"]
+        .as_str()
+        .expect("class hover markdown");
+
+    assert!(class_markdown.contains("class DateTimeImmutable"));
+    assert!(class_markdown.contains("[PHP manual](https://www.php.net/datetimeimmutable)"));
+
+    let interface_hover = server.hover(&uri, 2, 17).expect("interface hover result");
+    let interface_markdown = interface_hover["contents"]["value"]
+        .as_str()
+        .expect("interface hover markdown");
+
+    assert!(interface_markdown.contains("interface Throwable"));
+    assert!(interface_markdown.contains("[PHP manual](https://www.php.net/throwable)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_expanded_internal_function_metadata() {
     let root = temp_project("expanded-internal-functions");
     let mut server = LspProcess::start(&root);

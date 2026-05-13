@@ -1654,11 +1654,29 @@ fn hover_for_position_with_cache(
         return Err(SkipReason::NoSupportedCall);
     };
     let symbol_name = clean_name_text(node_text(name_node, text));
+
     if let Some(class_info) = index.resolve_class(&symbol_name, namespace.as_deref(), &imports) {
         return Ok(hover_from_parts(
             format!("class {}", class_info.fqn),
             class_info.location.as_ref(),
             class_info.doc_summary.as_deref(),
+        ));
+    }
+
+    if let Some((canonical_name, kind)) = internal_class_symbol(&symbol_name) {
+        let symbol_kind = if kind == CompletionItemKind::INTERFACE {
+            "interface"
+        } else {
+            "class"
+        };
+        let manual = format!(
+            "[PHP manual](https://www.php.net/{})",
+            canonical_name.to_ascii_lowercase()
+        );
+        return Ok(hover_from_parts(
+            format!("{symbol_kind} {canonical_name}"),
+            None,
+            Some(&manual),
         ));
     }
 
@@ -9674,6 +9692,12 @@ fn internal_class_symbols() -> Vec<(&'static str, CompletionItemKind)> {
         ("ValueError", CompletionItemKind::CLASS),
         ("stdClass", CompletionItemKind::CLASS),
     ]
+}
+
+fn internal_class_symbol(name: &str) -> Option<(&'static str, CompletionItemKind)> {
+    internal_class_symbols()
+        .into_iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
 }
 
 fn php_keywords() -> Vec<&'static str> {
