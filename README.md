@@ -72,6 +72,12 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cargo check --manifest-path zed-extension/Cargo.toml --target wasm32-wasip2
 ```
 
+The repository also includes the same check as a script:
+
+```sh
+scripts/check-zed-extension.sh
+```
+
 If `which cargo` prints `/opt/homebrew/bin/cargo`, move `$HOME/.cargo/bin`
 earlier in your shell `PATH`. Otherwise Zed may fail to install the dev
 extension with `can't find crate for core` for `wasm32-wasip2`.
@@ -92,8 +98,10 @@ run Rephactor alongside it:
 }
 ```
 
-Rephactor currently provides only one refactor code action:
-`Add names to arguments`.
+Rephactor currently provides one narrow refactor code action. It is titled
+`Add names to arguments` when multiple identifiers can be inserted. When only
+one positional argument is missing a name, the title names that identifier, for
+example `Add name identifier 'exchange_gift'`.
 
 Zed currently applies LSP code actions directly. It does not show a PHPStorm-
 style diff preview when moving through code action menu items; the aside popover
@@ -120,8 +128,7 @@ Rephactor returns no action instead of guessing for:
 - calls whose existing named arguments do not match the resolved signature
 - ambiguous symbols
 - unknown parameter names
-- inherited methods, interfaces, traits, PHP internal functions, or Composer
-  classmaps
+- PHP internal functions or Composer classmaps
 
 ## Manual Acceptance
 
@@ -131,5 +138,5 @@ Rephactor returns no action instead of guessing for:
 4. Keep Intelephense or Phpactor enabled and add `rephactor` to the PHP
    `language_servers` list.
 5. Put the cursor inside a supported call expression and run code actions.
-6. Apply `Add names to arguments` and verify that only `parameter_name: `
+6. Apply the Rephactor code action and verify that only `parameter_name: `
    prefixes were inserted.

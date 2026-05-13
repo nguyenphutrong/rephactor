@@ -79,12 +79,13 @@ fn named_argument_code_action_with_open_documents(
         &imports,
     )?;
     let edits = edits_for_call(text, &call, &signature)?;
+    let title = action_title_for_edits(&edits);
 
     let mut changes = HashMap::new();
     changes.insert(uri.clone(), edits);
 
     Some(CodeAction {
-        title: ACTION_TITLE.to_string(),
+        title,
         kind: Some(CodeActionKind::REFACTOR_REWRITE),
         diagnostics: None,
         edit: Some(WorkspaceEdit::new(changes)),
@@ -835,6 +836,16 @@ fn edits_for_call(text: &str, call: &CallInfo, signature: &Signature) -> Option<
     (!edits.is_empty()).then_some(edits)
 }
 
+fn action_title_for_edits(edits: &[TextEdit]) -> String {
+    if edits.len() == 1
+        && let Some(parameter_name) = edits[0].new_text.strip_suffix(": ")
+    {
+        return format!("Add name identifier '{parameter_name}'");
+    }
+
+    ACTION_TITLE.to_string()
+}
+
 fn variable_types_at_byte(
     root: Node,
     text: &str,
@@ -1434,8 +1445,16 @@ mod tests {
     fn converts_single_missing_name_after_named_static_arguments() {
         let text = "<?php\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id, $customer_id, $is_update_transaction, $customer_used_point, $pay, $product, $multipay_methods, $order_id, $extra_discount, $grand_total, $exchange_gift = null) {} }\ncustomer_supplier::accumulatePoints(\n    shop_id: $shop_id,\n    promotion_id: $order->promotion_id,\n    customer_id: $customer_id,\n    is_update_transaction: $is_update_transaction,\n    customer_used_point: $item['customer_used_point'] ?? 0,\n    pay: $request->pay,\n    product: $request->product,\n    multipay_methods: $multipay_methods,\n    order_id: $order->id,\n    extra_discount: $request->extra_discount,\n    grand_total: $request->grand_total,\n    $request->exchange_gift,\n);\n";
 
-        let edits = action_edits(text, 14, 5);
+        let action = named_argument_code_action(&uri(), text, position(14, 5)).expect("action");
+        let edits = action
+            .edit
+            .expect("workspace edit")
+            .changes
+            .expect("changes")
+            .remove(&uri())
+            .expect("edits");
 
+        assert_eq!(action.title, "Add name identifier 'exchange_gift'");
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "exchange_gift: ");
         assert_eq!(
