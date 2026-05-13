@@ -648,6 +648,23 @@ fn lsp_returns_signature_help_for_internal_constructor() {
 }
 
 #[test]
+fn lsp_returns_signature_help_for_internal_instance_method() {
+    let root = temp_project("signature-internal-instance-method");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\n$date = new DateTimeImmutable('now');\n$date->format('Y-m-d');\n";
+    let uri = server.open_php(&file, text);
+
+    let help = server
+        .signature_help(&uri, 2, 15)
+        .expect("signature help result");
+
+    assert_eq!(help["signatures"][0]["label"], "$date->format($format)");
+    assert_eq!(help["activeParameter"], 0);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_definition_for_same_file_function_call() {
     let root = temp_project("definition-same-file");
     let mut server = LspProcess::start(&root);

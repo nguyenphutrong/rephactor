@@ -5042,10 +5042,14 @@ impl SymbolIndex {
     ) -> Result<Signature, SkipReason> {
         match target {
             CallTarget::Function(name) => self.resolve_function(name, namespace, imports),
-            CallTarget::StaticMethod { class_name, method } => self
-                .resolve_class(class_name, namespace, imports)
-                .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
-                .and_then(|class_info| self.resolve_method(class_info, method, target)),
+            CallTarget::StaticMethod { class_name, method } => {
+                if let Some(class_info) = self.resolve_class(class_name, namespace, imports) {
+                    return self.resolve_method(class_info, method, target);
+                }
+
+                self.resolve_internal_method(class_name, method, namespace, imports)
+                    .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+            }
             CallTarget::Constructor { class_name } => {
                 if let Some(class_info) = self.resolve_class(class_name, namespace, imports) {
                     return class_info
@@ -5063,9 +5067,12 @@ impl SymbolIndex {
                 let class_name = variable_types
                     .get(variable)
                     .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))?;
-                self.resolve_class(class_name, namespace, imports)
+                if let Some(class_info) = self.resolve_class(class_name, namespace, imports) {
+                    return self.resolve_method(class_info, method, target);
+                }
+
+                self.resolve_internal_method(class_name, method, namespace, imports)
                     .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
-                    .and_then(|class_info| self.resolve_method(class_info, method, target))
             }
         }
     }
@@ -5078,6 +5085,22 @@ impl SymbolIndex {
     ) -> Option<Signature> {
         for candidate in imports.resolve_class_name(class_name, namespace) {
             if let Some(signature) = internal_constructor_signature(&candidate) {
+                return Some(signature);
+            }
+        }
+
+        None
+    }
+
+    fn resolve_internal_method(
+        &self,
+        class_name: &str,
+        method: &str,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> Option<Signature> {
+        for candidate in imports.resolve_class_name(class_name, namespace) {
+            if let Some(signature) = internal_method_signature(&candidate, method) {
                 return Some(signature);
             }
         }
@@ -9329,6 +9352,52 @@ fn internal_constructor_signature(class_name: &str) -> Option<Signature> {
         doc_summary: Some(format!(
             "[PHP manual](https://www.php.net/{})",
             canonical_name.to_ascii_lowercase()
+        )),
+    })
+}
+
+fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature> {
+    let normalized_class = normalize_symbol_key(class_name);
+    let normalized_method = normalize_method_key(method);
+    let (canonical_class, canonical_method, parameters, return_type) =
+        match (normalized_class.as_str(), normalized_method.as_str()) {
+            ("datetime" | "datetimeimmutable" | "datetimeinterface", "format") => (
+                last_name_segment(class_name),
+                "format",
+                &["format"][..],
+                Some("string"),
+            ),
+            ("datetime" | "datetimeimmutable" | "datetimeinterface", "gettimestamp") => (
+                last_name_segment(class_name),
+                "getTimestamp",
+                &[][..],
+                Some("int"),
+            ),
+            ("datetime" | "datetimeimmutable", "modify") => (
+                last_name_segment(class_name),
+                "modify",
+                &["modifier"][..],
+                None,
+            ),
+            _ => return None,
+        };
+
+    Some(Signature {
+        name: format!("{canonical_class}::{canonical_method}"),
+        parameters: parameters
+            .iter()
+            .map(|parameter| parameter.to_string())
+            .collect(),
+        parameter_types: vec![None; parameters.len()],
+        return_type: return_type
+            .map(|type_name| comparable_return_type(type_name, None, &ImportMap::default())),
+        is_variadic: false,
+        is_abstract: false,
+        location: None,
+        doc_summary: Some(format!(
+            "[PHP manual](https://www.php.net/{}.{})",
+            normalized_class.replace('\\', "."),
+            normalized_method
         )),
     })
 }

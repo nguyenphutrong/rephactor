@@ -139,8 +139,8 @@ name, the title names that identifier, for example
 
 Signature Help V1 shows parameter names for resolved functions, static methods,
 constructors, seeded PHP internal constructors, and locally obvious instance
-methods. It intentionally returns no signature for unsupported or ambiguous
-calls instead of guessing.
+methods, including a small seeded set of PHP internal methods. It intentionally
+returns no signature for unsupported or ambiguous calls instead of guessing.
 
 Go To Definition V1 navigates to resolved functions, constants, class constants
 declared on indexed classes or related parents/interfaces/traits, including
