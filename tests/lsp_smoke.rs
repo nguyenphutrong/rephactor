@@ -3763,6 +3763,35 @@ fn lsp_publishes_semantic_diagnostics_for_phpdoc_write_property_assignment_type_
 }
 
 #[test]
+fn lsp_uses_phpdoc_property_self_static_parent_types_for_diagnostics() {
+    let root = temp_project("phpdoc-property-relative-type-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass BaseSender {}\nclass Invoice {}\n/**\n * @property self $child\n * @property-write parent $base\n */\nclass Sender extends BaseSender {\n    public function set() {\n        $this->child = new Invoice();\n        $this->base = new Invoice();\n    }\n}\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $this->child: expected App\\Sender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "assignment type mismatch for $this->base: expected App\\BaseSender, got App\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_document_highlights_for_symbol_name() {
     let root = temp_project("document-highlight");
     let mut server = LspProcess::start(&root);

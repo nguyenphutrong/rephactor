@@ -234,6 +234,8 @@ Function-like PHPDoc `@param` annotations understand `self`, `static`, and
 direct `parent` inside class-like scopes. PHPDoc array and list generics such
 as `array<int,Foo>`, `list<Foo>`, and `Foo[]` are treated as conservative
 `array` contracts for mismatch diagnostics.
+Class-level PHPDoc magic property annotations also understand `self`, `static`,
+and direct `parent` for conservative property assignment/type-definition flows.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved native and PHPDoc type-annotation diagnostics,
@@ -464,6 +466,8 @@ files that are not open in the editor are picked up on the next request.
   including `self`, `static`, and direct `parent`.
 - PHPDoc `@property` annotations for class magic property completion, hover,
   and definition lookup.
+- PHPDoc `@property`/`@property-write` relative `self`, `static`, and direct
+  `parent` types for conservative property assignment diagnostics.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.

@@ -3686,6 +3686,7 @@ fn property_type_in_class_with_phpdoc_tags(
     }
 
     phpdoc_property_types_before(
+        class_node,
         text,
         class_node.start_byte(),
         namespace,
@@ -7346,6 +7347,7 @@ fn phpdoc_properties_before(
 }
 
 fn phpdoc_property_types_before(
+    class_node: Node,
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
@@ -7359,13 +7361,27 @@ fn phpdoc_property_types_before(
             let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) else {
                 continue;
             };
-            let Some(expected) = comparable_parameter_type(type_name, namespace, imports) else {
+            let Some(expected) = comparable_class_phpdoc_property_type(
+                type_name, class_node, text, namespace, imports,
+            ) else {
                 continue;
             };
             types.insert(variable_name.trim_start_matches('$').to_string(), expected);
         }
     }
     types
+}
+
+fn comparable_class_phpdoc_property_type(
+    type_name: &str,
+    class_node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let qualified =
+        qualify_class_phpdoc_type_name(type_name, class_node, text, namespace, imports)?;
+    comparable_parameter_type(&qualified, None, &ImportMap::default())
 }
 
 fn phpdoc_readonly_properties_before(text: &str, byte_offset: usize) -> HashSet<String> {
