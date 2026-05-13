@@ -2371,13 +2371,28 @@ fn inferred_return_expression_type(
         ));
     }
     if kind == "variable_name" {
-        return local_variable_return_type_at_byte(
+        if let Some(return_type) = local_variable_return_type_at_byte(
             declaration,
             text,
             expression.start_byte(),
             namespace,
             imports,
             node_text(expression, text),
+        ) {
+            return Some(return_type);
+        }
+        let call_assignment_context = CallAssignmentInference {
+            root,
+            text,
+            byte_offset: expression.start_byte(),
+            namespace,
+            imports,
+            index: index?,
+        };
+        return local_variable_call_return_type_at_byte(
+            declaration,
+            node_text(expression, text),
+            &call_assignment_context,
         );
     }
     if matches!(
