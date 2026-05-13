@@ -51,7 +51,7 @@
 - [x] Add local Zed extension packaging or documented command setup.
 - [x] Verify Zed shows and applies the code action.
 - [x] Add a repeatable Zed extension Wasm check.
-- [ ] Add end-to-end fixture or smoke test that exercises LSP JSON-RPC.
+- [x] Add end-to-end fixture or smoke test that exercises LSP JSON-RPC.
 
 ## Phase 7: Broader PHP Semantics
 
