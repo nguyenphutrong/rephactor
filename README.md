@@ -263,9 +263,10 @@ and local `@var` PHPDoc annotations are used as assignment type contracts for
 the same conservative checks, including assignments from resolved calls with
 declared return types. Typed `$this->property` assignments are checked against
 native property declarations and class-level PHPDoc `@property` annotations in
-the containing class for the same conservative assignment flows. Broader static
-analysis is still deferred until the type model
-is stronger.
+the containing class for the same conservative assignment flows. PHPDoc
+`@property-write` annotations also provide writable assignment contracts, while
+`@property-read` annotations report read-only assignment diagnostics. Broader
+static analysis is still deferred until the type model is stronger.
 
 Document Highlight V1 highlights exact matching AST names and PHP keywords in
 the current document.
@@ -412,7 +413,9 @@ files that are not open in the editor are picked up on the next request.
   variables assigned from resolved calls with declared return types.
 - Conservative assignment-type mismatch diagnostics for `$this->property`
   assignments when the containing class has a native property type or PHPDoc
-  `@property` type.
+  `@property`/`@property-write` type.
+- Read-only assignment diagnostics for class-level PHPDoc `@property-read`
+  properties.
 - Same-file document highlights for exact AST name and PHP keyword matches.
 - Folding ranges for PHP blocks, imports, heredoc/nowdoc strings, comments, and
   custom `#region`/`#endregion` regions.

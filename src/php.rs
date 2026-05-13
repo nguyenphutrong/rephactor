@@ -3389,6 +3389,20 @@ fn collect_assignment_type_mismatches(
     {
         let assignment_namespace = namespace_at_byte(context.root, context.text, node.start_byte());
         let assignment_namespace = assignment_namespace.as_deref();
+        if let Some(property_name) = readonly_phpdoc_property_assignment_name(left, context.text) {
+            diagnostics.push(Diagnostic {
+                range: range_for_bytes(context.text, left.start_byte(), left.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!("assignment to read-only PHPDoc property $this->{property_name}"),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
         let expected = expected_assignment_type_for_left(left, context, assignment_namespace);
         if let Some(expected) = expected
             && let Some(actual) = inferred_assigned_return_type(
@@ -3467,6 +3481,26 @@ fn expected_assignment_type_for_left(
     None
 }
 
+fn readonly_phpdoc_property_assignment_name(left: Node, text: &str) -> Option<String> {
+    let object = left.child_by_field_name("object")?;
+    if object.kind() != "variable_name" || node_text(object, text) != "$this" {
+        return None;
+    }
+
+    let property = left.child_by_field_name("name")?;
+    if !matches!(property.kind(), "name" | "variable_name") {
+        return None;
+    }
+
+    let property_name = clean_name_text(node_text(property, text))
+        .trim_start_matches('$')
+        .to_string();
+    let class_node = containing_class_like_declaration(left)?;
+    phpdoc_readonly_properties_before(text, class_node.start_byte())
+        .contains(&property_name)
+        .then_some(property_name)
+}
+
 fn property_assignment_type(
     left: Node,
     text: &str,
@@ -3528,7 +3562,7 @@ fn property_type_in_class(
         }
     }
 
-    phpdoc_property_types_before(text, class_node.start_byte(), namespace, imports)
+    phpdoc_writable_property_types_before(text, class_node.start_byte(), namespace, imports)
         .remove(property_name)
 }
 
@@ -6970,14 +7004,14 @@ fn phpdoc_properties_before(
         .collect()
 }
 
-fn phpdoc_property_types_before(
+fn phpdoc_writable_property_types_before(
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> HashMap<String, ComparableReturnType> {
     let mut types = HashMap::new();
-    for tag in ["@property", "@property-read", "@property-write"] {
+    for tag in ["@property", "@property-write"] {
         for record in phpdoc_tag_line_records_before(text, byte_offset, tag) {
             let tokens = record.text.split_whitespace().collect::<Vec<_>>();
             let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) else {
@@ -6990,6 +7024,18 @@ fn phpdoc_property_types_before(
         }
     }
     types
+}
+
+fn phpdoc_readonly_properties_before(text: &str, byte_offset: usize) -> HashSet<String> {
+    phpdoc_tag_line_records_before(text, byte_offset, "@property-read")
+        .into_iter()
+        .filter_map(|record| {
+            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+            let (_, variable_name) = phpdoc_var_tokens(&tokens)?;
+            let name = variable_name.trim_start_matches('$').to_string();
+            (!name.is_empty()).then_some(name)
+        })
+        .collect()
 }
 
 fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
