@@ -111,6 +111,18 @@ Zed currently applies LSP code actions directly. It does not show a PHPStorm-
 style diff preview when moving through code action menu items; the aside popover
 only expands long action titles.
 
+When Rephactor returns no action, it logs the reason through the LSP client.
+In Zed logs, look for lines like:
+
+```text
+Rephactor codeAction file:///path/File.php:2739:28 -> 0 action(s) in 4ms (index cache hit /path): unresolved callable customer_supplier::accumulatePoints
+```
+
+Project symbols are cached per Composer root after the first request. Open PHP
+documents still override cached disk symbols. Disk changes in files that are
+not open in the editor are picked up after restarting the language server; a
+file watcher is intentionally deferred.
+
 ## Supported Cases
 
 - Same-file functions.
@@ -173,3 +185,5 @@ Deferred until V1 behavior is stable:
 5. Put the cursor inside a supported call expression and run code actions.
 6. Apply the Rephactor code action and verify that only `parameter_name: `
    prefixes were inserted.
+7. Put the cursor inside an unsupported call and verify that Zed logs include a
+   concise no-action reason.

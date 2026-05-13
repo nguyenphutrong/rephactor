@@ -66,3 +66,16 @@
 - [x] Add release binaries for macOS, Linux, and Windows.
 - [x] Publish installation instructions.
 - [x] Document known unsupported cases.
+
+## Phase 9: Real-Project Reliability
+
+- [x] Add skip-reason logging for no-action code action requests.
+- [x] Expand JSON-RPC smoke fixtures for real supported and unsupported cases.
+- [x] Keep unsupported cases as empty LSP action lists.
+
+## Phase 10: Index Performance
+
+- [x] Cache disk project indexes by Composer root.
+- [x] Overlay open document text on top of cached disk symbols.
+- [x] Log index cache hit/miss and code-action elapsed time.
+- [ ] Add file watching for disk changes outside open documents.

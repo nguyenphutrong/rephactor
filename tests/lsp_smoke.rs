@@ -1,16 +1,20 @@
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
+use tower_lsp::lsp_types::Url;
 
 struct LspProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<std::process::ChildStdout>,
+    next_id: i64,
 }
 
 impl LspProcess {
-    fn start() -> Self {
+    fn start(root: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_rephactor"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -20,12 +24,92 @@ impl LspProcess {
 
         let stdin = child.stdin.take().expect("child stdin");
         let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
-
-        Self {
+        let mut server = Self {
             child,
             stdin,
             stdout,
-        }
+            next_id: 1,
+        };
+        let initialize = server.request(
+            "initialize",
+            json!({
+                "processId": null,
+                "rootUri": file_uri(root),
+                "capabilities": {}
+            }),
+        );
+        assert_eq!(
+            initialize["result"]["capabilities"]["codeActionProvider"]["codeActionKinds"],
+            json!(["refactor.rewrite"])
+        );
+        server.notify("initialized", json!({}));
+        server
+    }
+
+    fn notify(&mut self, method: &str, params: Value) {
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        }));
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Value {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params
+        }));
+        self.read_response(id)
+    }
+
+    fn shutdown(&mut self) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "shutdown"
+        }));
+        let _ = self.read_response(id);
+        self.notify("exit", Value::Null);
+    }
+
+    fn open_php(&mut self, path: &Path, text: &str) -> String {
+        let uri = file_uri(path);
+        self.notify(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": "php",
+                    "version": 1,
+                    "text": text
+                }
+            }),
+        );
+        uri
+    }
+
+    fn code_actions(&mut self, uri: &str, line: u32, character: u32) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": {
+                    "start": { "line": line, "character": character },
+                    "end": { "line": line, "character": character }
+                },
+                "context": { "diagnostics": [] }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("code action array")
+            .clone()
     }
 
     fn send(&mut self, message: Value) {
@@ -71,94 +155,170 @@ impl LspProcess {
 
 impl Drop for LspProcess {
     fn drop(&mut self) {
+        self.shutdown();
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
 
+fn file_uri(path: &Path) -> String {
+    Url::from_file_path(path).expect("file uri").to_string()
+}
+
+fn temp_project(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rephactor-lsp-{name}-{nanos}"));
+    std::fs::create_dir_all(&root).expect("create temp root");
+    root
+}
+
+fn insert_texts(action: &Value, uri: &str) -> Vec<String> {
+    action["edit"]["changes"][uri]
+        .as_array()
+        .expect("workspace edits for open document")
+        .iter()
+        .map(|edit| edit["newText"].as_str().expect("insert text").to_string())
+        .collect()
+}
+
 #[test]
 fn lsp_returns_named_argument_code_action_for_open_document() {
-    let mut server = LspProcess::start();
-    let root = std::env::temp_dir().join(format!("rephactor-lsp-smoke-{}", std::process::id()));
-    std::fs::create_dir_all(&root).expect("create temp root");
-
+    let root = temp_project("same-file");
+    let mut server = LspProcess::start(&root);
     let file = root.join("example.php");
-    let uri = format!("file://{}", file.display());
     let text =
         "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+    let uri = server.open_php(&file, text);
 
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "processId": null,
-            "rootUri": format!("file://{}", root.display()),
-            "capabilities": {}
-        }
-    }));
-    let initialize = server.read_response(1);
-    assert_eq!(
-        initialize["result"]["capabilities"]["codeActionProvider"]["codeActionKinds"],
-        json!(["refactor.rewrite"])
-    );
+    let actions = server.code_actions(&uri, 2, 5);
 
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "method": "initialized",
-        "params": {}
-    }));
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "method": "textDocument/didOpen",
-        "params": {
-            "textDocument": {
-                "uri": uri,
-                "languageId": "php",
-                "version": 1,
-                "text": text
-            }
-        }
-    }));
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "textDocument/codeAction",
-        "params": {
-            "textDocument": { "uri": uri },
-            "range": {
-                "start": { "line": 2, "character": 5 },
-                "end": { "line": 2, "character": 5 }
-            },
-            "context": { "diagnostics": [] }
-        }
-    }));
-
-    let code_action = server.read_response(2);
-    let actions = code_action["result"].as_array().expect("code action array");
     assert_eq!(actions.len(), 1);
     assert_eq!(actions[0]["title"], "Add names to arguments");
     assert_eq!(actions[0]["kind"], "refactor.rewrite");
+    assert_eq!(
+        insert_texts(&actions[0], &uri),
+        vec!["invoice: ", "notify: "]
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
 
-    let changes = actions[0]["edit"]["changes"][&uri]
-        .as_array()
-        .expect("workspace edits for open document");
-    let inserted: Vec<_> = changes
-        .iter()
-        .map(|edit| edit["newText"].as_str().expect("insert text"))
-        .collect();
-    assert_eq!(inserted, vec!["invoice: ", "notify: "]);
+#[test]
+fn lsp_handles_grouped_import_static_method() {
+    let root = temp_project("grouped-import");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App\\Http;\nuse App\\Models\\{customer_supplier};\nnamespace App\\Models;\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id) {} }\nnamespace App\\Http;\ncustomer_supplier::accumulatePoints($shop_id, $promotion_id);\n";
+    let uri = server.open_php(&file, text);
 
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "shutdown"
-    }));
-    let shutdown = server.read_response(3);
-    assert!(shutdown.get("error").is_none());
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "method": "exit",
-        "params": null
-    }));
+    let actions = server.code_actions(&uri, 6, 35);
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(
+        insert_texts(&actions[0], &uri),
+        vec!["shop_id: ", "promotion_id: "]
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_handles_partial_named_argument() {
+    let root = temp_project("partial-named");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass customer_supplier { public static function accumulatePoints($shop_id, $grand_total, $exchange_gift = null) {} }\ncustomer_supplier::accumulatePoints(\n    shop_id: $shop_id,\n    grand_total: $request->grand_total,\n    $request->exchange_gift,\n);\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 5, 5);
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0]["title"], "Add name identifier 'exchange_gift'");
+    assert_eq!(insert_texts(&actions[0], &uri), vec!["exchange_gift: "]);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_resolves_classmap_symbol() {
+    let root = temp_project("classmap");
+    let legacy_dir = root.join("legacy");
+    let app_dir = root.join("app");
+    std::fs::create_dir_all(&legacy_dir).expect("create legacy dir");
+    std::fs::create_dir_all(&app_dir).expect("create app dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"classmap":["legacy/CustomerSupplier.php"]}}"#,
+    )
+    .expect("write composer");
+    std::fs::write(
+        legacy_dir.join("CustomerSupplier.php"),
+        "<?php\nnamespace Legacy;\nclass CustomerSupplier { public static function sync($shop_id, $customer_id) {} }\n",
+    )
+    .expect("write classmap class");
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(
+        &app_dir.join("Caller.php"),
+        "<?php\nnamespace App;\nuse Legacy\\CustomerSupplier;\nCustomerSupplier::sync($shop_id, $customer_id);\n",
+    );
+
+    let actions = server.code_actions(&uri, 3, 25);
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(
+        insert_texts(&actions[0], &uri),
+        vec!["shop_id: ", "customer_id: "]
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_resolves_inherited_method() {
+    let root = temp_project("inherited");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\ninterface Sender { public function dispatch($invoice, $notify); }\nclass InvoiceSender implements Sender {}\nfunction run(InvoiceSender $sender, $invoice) {\n    $sender->dispatch($invoice, true);\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 4, 15);
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(
+        insert_texts(&actions[0], &uri),
+        vec!["invoice: ", "notify: "]
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_empty_for_unsupported_calls() {
+    let root = temp_project("unsupported");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, ...$flags);\n$fn($invoice, true);\n";
+    let uri = server.open_php(&file, text);
+
+    assert!(server.code_actions(&uri, 2, 5).is_empty());
+    assert!(server.code_actions(&uri, 3, 2).is_empty());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_empty_when_project_allows_php_7() {
+    let root = temp_project("php7");
+    let src_dir = root.join("src");
+    std::fs::create_dir_all(&src_dir).expect("create src dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"require":{"php":"^7.4"},"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(
+        &src_dir.join("Caller.php"),
+        "<?php\nnamespace App;\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n",
+    );
+
+    assert!(server.code_actions(&uri, 3, 5).is_empty());
+    std::fs::remove_dir_all(root).expect("remove temp root");
 }

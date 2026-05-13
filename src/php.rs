@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,7 +31,7 @@ struct ImportMap {
     classes: HashMap<String, String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct SymbolIndex {
     functions: HashMap<String, Vec<Signature>>,
     classes: HashMap<String, ClassInfo>,
@@ -57,38 +58,145 @@ struct ArgumentInfo {
     is_unpacking: bool,
 }
 
-fn named_argument_code_action_with_open_documents(
+#[derive(Debug, Clone, Default)]
+pub struct ProjectIndexCache {
+    indexes: HashMap<PathBuf, SymbolIndex>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexCacheStatus {
+    Hit(PathBuf),
+    Miss(PathBuf),
+    NoProject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkipReason {
+    PhpVersionBelow8,
+    InvalidCursorPosition,
+    ParseError,
+    NoSupportedCall,
+    UnsupportedDynamicCall,
+    UnpackingArgument,
+    UnsafeNamedArguments,
+    UnresolvedCallable(String),
+    AmbiguousCallable(String),
+    NoEdits,
+}
+
+#[derive(Debug)]
+pub struct CodeActionAnalysis {
+    pub actions: Vec<CodeActionOrCommand>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+enum CodeActionOutcome {
+    Action(Box<CodeAction>),
+    NoAction(SkipReason),
+}
+
+impl fmt::Display for SkipReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PhpVersionBelow8 => write!(formatter, "project allows PHP below 8.0"),
+            Self::InvalidCursorPosition => write!(formatter, "invalid cursor position"),
+            Self::ParseError => write!(formatter, "PHP parse error"),
+            Self::NoSupportedCall => write!(formatter, "no supported call at cursor"),
+            Self::UnsupportedDynamicCall => write!(formatter, "unsupported dynamic call target"),
+            Self::UnpackingArgument => write!(formatter, "call contains unpacking argument"),
+            Self::UnsafeNamedArguments => write!(formatter, "existing named arguments are unsafe"),
+            Self::UnresolvedCallable(callable) => {
+                write!(formatter, "unresolved callable {callable}")
+            }
+            Self::AmbiguousCallable(callable) => {
+                write!(formatter, "ambiguous callable {callable}")
+            }
+            Self::NoEdits => write!(formatter, "no positional arguments need names"),
+        }
+    }
+}
+
+#[cfg(test)]
+pub fn analyze_code_actions_for_position(
     uri: &Url,
     text: &str,
     position: Position,
     open_documents: &HashMap<Url, String>,
-) -> Option<CodeAction> {
+) -> CodeActionAnalysis {
+    let mut cache = ProjectIndexCache::default();
+    analyze_code_actions_for_position_with_cache(uri, text, position, open_documents, &mut cache)
+}
+
+pub fn analyze_code_actions_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> CodeActionAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match named_argument_code_action_with_cache(uri, text, position, open_documents, cache) {
+        CodeActionOutcome::Action(action) => CodeActionAnalysis {
+            actions: vec![CodeActionOrCommand::CodeAction(*action)],
+            skip_reason: None,
+            index_cache_status,
+        },
+        CodeActionOutcome::NoAction(reason) => CodeActionAnalysis {
+            actions: Vec::new(),
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
+fn named_argument_code_action_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> CodeActionOutcome {
     if !document_supports_named_arguments(uri) {
-        return None;
+        return CodeActionOutcome::NoAction(SkipReason::PhpVersionBelow8);
     }
 
-    let byte_offset = byte_offset_for_lsp_position(text, position)?;
-    let tree = parse_php(text)?;
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return CodeActionOutcome::NoAction(SkipReason::InvalidCursorPosition);
+    };
+
+    let Some(tree) = parse_php(text) else {
+        return CodeActionOutcome::NoAction(SkipReason::ParseError);
+    };
     let root = tree.root_node();
     let namespace = namespace_at_byte(root, text, byte_offset);
     let imports = ImportMap::from_root(root, text);
-    let call = find_call_at_byte(root, text, byte_offset)?;
-    let index = SymbolIndex::for_document_and_project(uri, text, open_documents);
-    let signature = index.resolve(
+    let call = match find_call_at_byte(root, text, byte_offset) {
+        Ok(call) => call,
+        Err(reason) => return CodeActionOutcome::NoAction(reason),
+    };
+    let index = cache.index_for_document(uri, text, open_documents);
+    let signature = match index.resolve(
         &call.target,
         root,
         text,
         byte_offset,
         namespace.as_deref(),
         &imports,
-    )?;
-    let edits = edits_for_call(text, &call, &signature)?;
+    ) {
+        Ok(signature) => signature,
+        Err(reason) => return CodeActionOutcome::NoAction(reason),
+    };
+    let edits = match edits_for_call(text, &call, &signature) {
+        Ok(edits) => edits,
+        Err(reason) => return CodeActionOutcome::NoAction(reason),
+    };
     let title = action_title_for_edits(&edits);
 
     let mut changes = HashMap::new();
     changes.insert(uri.clone(), edits);
 
-    Some(CodeAction {
+    CodeActionOutcome::Action(Box::new(CodeAction {
         title,
         kind: Some(CodeActionKind::REFACTOR_REWRITE),
         diagnostics: None,
@@ -97,19 +205,7 @@ fn named_argument_code_action_with_open_documents(
         is_preferred: Some(true),
         disabled: None,
         data: None,
-    })
-}
-
-pub fn code_actions_for_position_with_open_documents(
-    uri: &Url,
-    text: &str,
-    position: Position,
-    open_documents: &HashMap<Url, String>,
-) -> Vec<CodeActionOrCommand> {
-    named_argument_code_action_with_open_documents(uri, text, position, open_documents)
-        .map(CodeActionOrCommand::CodeAction)
-        .into_iter()
-        .collect()
+    }))
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
@@ -157,21 +253,9 @@ impl ImportMap {
 }
 
 impl SymbolIndex {
-    fn for_document_and_project(
-        uri: &Url,
-        text: &str,
-        open_documents: &HashMap<Url, String>,
-    ) -> Self {
+    fn for_project(project_root: &Path) -> Self {
         let mut index = Self::default();
-
-        if let Ok(document_path) = uri.to_file_path()
-            && let Some(project_root) = find_project_root(&document_path)
-        {
-            let open_project_documents = open_project_documents(open_documents);
-            index.index_project(&project_root, &open_project_documents);
-        }
-
-        index.index_text(text);
+        index.index_project(project_root, &HashMap::new());
         index
     }
 
@@ -232,13 +316,8 @@ impl SymbolIndex {
     }
 
     fn add_function(&mut self, fqn: String, signature: Signature) {
-        let signatures = self
-            .functions
-            .entry(normalize_symbol_key(&fqn))
-            .or_default();
-        if !signatures.contains(&signature) {
-            signatures.push(signature);
-        }
+        self.functions
+            .insert(normalize_symbol_key(&fqn), vec![signature]);
     }
 
     fn add_class(&mut self, fqn: String, class_info: ClassInfo) {
@@ -253,35 +332,52 @@ impl SymbolIndex {
         byte_offset: usize,
         namespace: Option<&str>,
         imports: &ImportMap,
-    ) -> Option<Signature> {
+    ) -> Result<Signature, SkipReason> {
         match target {
             CallTarget::Function(name) => self.resolve_function(name, namespace),
             CallTarget::StaticMethod { class_name, method } => self
                 .resolve_class(class_name, namespace, imports)
-                .and_then(|class_info| self.resolve_method(class_info, method)),
+                .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+                .and_then(|class_info| self.resolve_method(class_info, method, target)),
             CallTarget::Constructor { class_name } => self
                 .resolve_class(class_name, namespace, imports)
-                .and_then(|class_info| class_info.constructor.clone()),
+                .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+                .and_then(|class_info| {
+                    class_info
+                        .constructor
+                        .clone()
+                        .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+                }),
             CallTarget::InstanceMethod { variable, method } => {
                 let variable_types =
                     variable_types_at_byte(root, text, byte_offset, namespace, imports);
-                let class_name = variable_types.get(variable)?;
+                let class_name = variable_types
+                    .get(variable)
+                    .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))?;
                 self.resolve_class(class_name, namespace, imports)
-                    .and_then(|class_info| self.resolve_method(class_info, method))
+                    .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+                    .and_then(|class_info| self.resolve_method(class_info, method, target))
             }
         }
     }
 
-    fn resolve_function(&self, name: &str, namespace: Option<&str>) -> Option<Signature> {
+    fn resolve_function(
+        &self,
+        name: &str,
+        namespace: Option<&str>,
+    ) -> Result<Signature, SkipReason> {
         for candidate in name_candidates(name, namespace) {
-            if let Some(signatures) = self.functions.get(&normalize_symbol_key(&candidate))
-                && signatures.len() == 1
-            {
-                return signatures.first().cloned();
+            if let Some(signatures) = self.functions.get(&normalize_symbol_key(&candidate)) {
+                return if signatures.len() == 1 {
+                    Ok(signatures.first().expect("signature exists").clone())
+                } else {
+                    Err(SkipReason::AmbiguousCallable(name.to_string()))
+                };
             }
         }
 
         internal_function_signature(name)
+            .ok_or_else(|| SkipReason::UnresolvedCallable(name.to_string()))
     }
 
     fn resolve_class(
@@ -299,10 +395,15 @@ impl SymbolIndex {
         None
     }
 
-    fn resolve_method(&self, class_info: &ClassInfo, method: &str) -> Option<Signature> {
+    fn resolve_method(
+        &self,
+        class_info: &ClassInfo,
+        method: &str,
+        target: &CallTarget,
+    ) -> Result<Signature, SkipReason> {
         let method_key = normalize_method_key(method);
         if let Some(signature) = class_info.methods.get(&method_key) {
-            return Some(signature.clone());
+            return Ok(signature.clone());
         }
 
         let mut signatures = Vec::new();
@@ -322,7 +423,11 @@ impl SymbolIndex {
             );
         }
 
-        (signatures.len() == 1).then(|| signatures.remove(0))
+        match signatures.len() {
+            0 => Err(SkipReason::UnresolvedCallable(target.describe())),
+            1 => Ok(signatures.remove(0)),
+            _ => Err(SkipReason::AmbiguousCallable(target.describe())),
+        }
     }
 
     fn collect_related_method_signatures(
@@ -355,6 +460,67 @@ impl SymbolIndex {
             .chain(class_info.traits.iter())
         {
             self.collect_related_method_signatures(related_name, method_key, visited, signatures);
+        }
+    }
+}
+
+impl ProjectIndexCache {
+    fn status_for_document(&self, uri: &Url) -> IndexCacheStatus {
+        let Some(project_root) = project_root_for_uri(uri) else {
+            return IndexCacheStatus::NoProject;
+        };
+
+        if self.indexes.contains_key(&project_root) {
+            IndexCacheStatus::Hit(project_root)
+        } else {
+            IndexCacheStatus::Miss(project_root)
+        }
+    }
+
+    fn index_for_document(
+        &mut self,
+        uri: &Url,
+        text: &str,
+        open_documents: &HashMap<Url, String>,
+    ) -> SymbolIndex {
+        let Some(project_root) = project_root_for_uri(uri) else {
+            let mut index = SymbolIndex::default();
+            index.index_text(text);
+            return index;
+        };
+
+        let disk_index = self
+            .indexes
+            .entry(project_root.clone())
+            .or_insert_with(|| SymbolIndex::for_project(&project_root));
+        let mut index = disk_index.clone();
+
+        for open_text in open_project_documents(open_documents).values() {
+            index.index_text(open_text);
+        }
+
+        index.index_text(text);
+        index
+    }
+}
+
+impl fmt::Display for IndexCacheStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Hit(path) => write!(formatter, "index cache hit {}", path.display()),
+            Self::Miss(path) => write!(formatter, "index cache miss {}", path.display()),
+            Self::NoProject => write!(formatter, "no project index"),
+        }
+    }
+}
+
+impl CallTarget {
+    fn describe(&self) -> String {
+        match self {
+            Self::Function(name) => name.clone(),
+            Self::StaticMethod { class_name, method } => format!("{class_name}::{method}"),
+            Self::Constructor { class_name } => format!("new {class_name}"),
+            Self::InstanceMethod { variable, method } => format!("{variable}->{method}"),
         }
     }
 }
@@ -657,29 +823,27 @@ fn namespace_at_byte(root: Node, text: &str, byte_offset: usize) -> Option<Strin
     active_namespace
 }
 
-fn find_call_at_byte(root: Node, text: &str, byte_offset: usize) -> Option<CallInfo> {
-    find_smallest_call(root, text, byte_offset).and_then(|node| call_info(node, text))
+fn find_call_at_byte(root: Node, text: &str, byte_offset: usize) -> Result<CallInfo, SkipReason> {
+    let Some(node) = find_smallest_call(root, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+
+    call_info(node, text)
 }
 
-fn find_smallest_call<'tree>(
-    node: Node<'tree>,
-    text: &str,
-    byte_offset: usize,
-) -> Option<Node<'tree>> {
+fn find_smallest_call<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {
     if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
         return None;
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        if let Some(found) = find_smallest_call(child, text, byte_offset) {
+        if let Some(found) = find_smallest_call(child, byte_offset) {
             return Some(found);
         }
     }
 
-    is_supported_call_kind(node.kind())
-        .then_some(node)
-        .filter(|call| call_info(*call, text).is_some())
+    is_supported_call_kind(node.kind()).then_some(node)
 }
 
 fn is_supported_call_kind(kind: &str) -> bool {
@@ -692,57 +856,71 @@ fn is_supported_call_kind(kind: &str) -> bool {
     )
 }
 
-fn call_info(node: Node, text: &str) -> Option<CallInfo> {
-    let arguments_node = find_arguments_node(node)?;
+fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
+    let Some(arguments_node) = find_arguments_node(node) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
     let arguments = argument_infos(arguments_node, text);
 
     if arguments.is_empty() {
-        return None;
+        return Err(SkipReason::NoEdits);
     }
 
     let target = match node.kind() {
         "function_call_expression" => {
-            let function_node = node.child_by_field_name("function")?;
+            let Some(function_node) = node.child_by_field_name("function") else {
+                return Err(SkipReason::UnsupportedDynamicCall);
+            };
             if !is_name_node(function_node) {
-                return None;
+                return Err(SkipReason::UnsupportedDynamicCall);
             }
             CallTarget::Function(clean_name_text(node_text(function_node, text)))
         }
         "scoped_call_expression" => {
-            let scope_node = node.child_by_field_name("scope")?;
+            let Some(scope_node) = node.child_by_field_name("scope") else {
+                return Err(SkipReason::UnsupportedDynamicCall);
+            };
             if !is_name_node(scope_node) {
-                return None;
+                return Err(SkipReason::UnsupportedDynamicCall);
             }
-            let method = member_name_for_call(node, text)?;
+            let Some(method) = member_name_for_call(node, text) else {
+                return Err(SkipReason::UnsupportedDynamicCall);
+            };
             CallTarget::StaticMethod {
                 class_name: clean_name_text(node_text(scope_node, text)),
                 method,
             }
         }
         "member_call_expression" => {
-            let object_node = node.child_by_field_name("object")?;
+            let Some(object_node) = node.child_by_field_name("object") else {
+                return Err(SkipReason::UnsupportedDynamicCall);
+            };
             if object_node.kind() != "variable_name" {
-                return None;
+                return Err(SkipReason::UnsupportedDynamicCall);
             }
-            let method = member_name_for_call(node, text)?;
+            let Some(method) = member_name_for_call(node, text) else {
+                return Err(SkipReason::UnsupportedDynamicCall);
+            };
             CallTarget::InstanceMethod {
                 variable: node_text(object_node, text).to_string(),
                 method,
             }
         }
         "object_creation_expression" => {
-            let class_node = class_name_for_object_creation(node)?;
+            let Some(class_node) = class_name_for_object_creation(node) else {
+                return Err(SkipReason::UnsupportedDynamicCall);
+            };
             if !is_name_node(class_node) {
-                return None;
+                return Err(SkipReason::UnsupportedDynamicCall);
             }
             CallTarget::Constructor {
                 class_name: clean_name_text(node_text(class_node, text)),
             }
         }
-        _ => return None,
+        _ => return Err(SkipReason::NoSupportedCall),
     };
 
-    Some(CallInfo { target, arguments })
+    Ok(CallInfo { target, arguments })
 }
 
 fn find_arguments_node(node: Node) -> Option<Node> {
@@ -817,13 +995,17 @@ fn named_argument_name(argument_node: Node, text: &str) -> Option<String> {
         .then(|| clean_name_text(node_text(first_child, text)))
 }
 
-fn edits_for_call(text: &str, call: &CallInfo, signature: &Signature) -> Option<Vec<TextEdit>> {
+fn edits_for_call(
+    text: &str,
+    call: &CallInfo,
+    signature: &Signature,
+) -> Result<Vec<TextEdit>, SkipReason> {
     if call.arguments.iter().any(|argument| argument.is_unpacking) {
-        return None;
+        return Err(SkipReason::UnpackingArgument);
     }
 
     if call.arguments.len() > signature.parameters.len() || call.arguments.is_empty() {
-        return None;
+        return Err(SkipReason::UnsafeNamedArguments);
     }
 
     let mut edits = Vec::new();
@@ -831,12 +1013,14 @@ fn edits_for_call(text: &str, call: &CallInfo, signature: &Signature) -> Option<
     for (argument, parameter_name) in call.arguments.iter().zip(signature.parameters.iter()) {
         if let Some(argument_name) = &argument.name {
             if !argument_name.eq_ignore_ascii_case(parameter_name) {
-                return None;
+                return Err(SkipReason::UnsafeNamedArguments);
             }
             continue;
         }
 
-        let position = lsp_position_for_byte_offset(text, argument.insert_byte)?;
+        let Some(position) = lsp_position_for_byte_offset(text, argument.insert_byte) else {
+            return Err(SkipReason::InvalidCursorPosition);
+        };
         edits.push(TextEdit::new(
             Range {
                 start: position,
@@ -846,7 +1030,11 @@ fn edits_for_call(text: &str, call: &CallInfo, signature: &Signature) -> Option<
         ));
     }
 
-    (!edits.is_empty()).then_some(edits)
+    if edits.is_empty() {
+        Err(SkipReason::NoEdits)
+    } else {
+        Ok(edits)
+    }
 }
 
 fn action_title_for_edits(edits: &[TextEdit]) -> String {
@@ -985,11 +1173,14 @@ fn find_project_root(document_path: &Path) -> Option<PathBuf> {
     None
 }
 
+fn project_root_for_uri(uri: &Url) -> Option<PathBuf> {
+    uri.to_file_path()
+        .ok()
+        .and_then(|document_path| find_project_root(&document_path))
+}
+
 fn document_supports_named_arguments(uri: &Url) -> bool {
-    let Ok(document_path) = uri.to_file_path() else {
-        return true;
-    };
-    let Some(project_root) = find_project_root(&document_path) else {
+    let Some(project_root) = project_root_for_uri(uri) else {
         return true;
     };
 
@@ -1172,7 +1363,17 @@ mod tests {
     }
 
     fn named_argument_code_action(uri: &Url, text: &str, position: Position) -> Option<CodeAction> {
-        named_argument_code_action_with_open_documents(uri, text, position, &HashMap::new())
+        analyze_code_actions_for_position(uri, text, position, &HashMap::new())
+            .actions
+            .into_iter()
+            .find_map(|action| match action {
+                CodeActionOrCommand::CodeAction(action) => Some(action),
+                CodeActionOrCommand::Command(_) => None,
+            })
+    }
+
+    fn skip_reason(uri: &Url, text: &str, position: Position) -> Option<SkipReason> {
+        analyze_code_actions_for_position(uri, text, position, &HashMap::new()).skip_reason
     }
 
     fn position(line: u32, character: u32) -> Position {
@@ -1417,6 +1618,12 @@ mod tests {
         let text = "<?php\ninterface FirstSender { public function dispatch($invoice); }\ninterface SecondSender { public function dispatch($invoice, $notify); }\nclass InvoiceSender implements FirstSender, SecondSender {}\n$sender = new InvoiceSender();\n$sender->dispatch($invoice, true);\n";
 
         assert!(named_argument_code_action(&uri(), text, position(5, 15)).is_none());
+        assert_eq!(
+            skip_reason(&uri(), text, position(5, 15)),
+            Some(SkipReason::AmbiguousCallable(
+                "$sender->dispatch".to_string()
+            ))
+        );
     }
 
     #[test]
@@ -1522,12 +1729,18 @@ mod tests {
 
         assert!(named_argument_code_action(&caller_uri, caller_text, position(2, 10)).is_none());
 
-        let action = named_argument_code_action_with_open_documents(
+        let action = analyze_code_actions_for_position(
             &caller_uri,
             caller_text,
             position(2, 10),
             &open_documents,
         )
+        .actions
+        .into_iter()
+        .find_map(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => Some(action),
+            CodeActionOrCommand::Command(_) => None,
+        })
         .expect("code action from open service document");
         let edits = action
             .edit
@@ -1541,6 +1754,66 @@ mod tests {
             apply_edits(caller_text, &edits),
             "<?php\nnamespace App;\nService::sync(first: $first, second: $second);\n"
         );
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn project_index_cache_reuses_disk_symbols_and_applies_open_overrides() {
+        let project_root = unique_project_root();
+        let src_dir = project_root.join("src");
+        fs::create_dir_all(&src_dir).expect("create source dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        )
+        .expect("write composer");
+
+        let service_path = src_dir.join("Service.php");
+        fs::write(
+            &service_path,
+            "<?php\nnamespace App;\nclass Service { public static function sync($first) {} }\n",
+        )
+        .expect("write service");
+
+        let caller_path = src_dir.join("Caller.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
+        let service_uri = Url::from_file_path(&service_path).expect("service uri");
+        let caller_text = "<?php\nnamespace App;\nService::sync($first, $second);\n";
+        let mut cache = ProjectIndexCache::default();
+
+        let first = analyze_code_actions_for_position_with_cache(
+            &caller_uri,
+            caller_text,
+            position(2, 10),
+            &HashMap::new(),
+            &mut cache,
+        );
+        assert!(matches!(
+            first.index_cache_status,
+            IndexCacheStatus::Miss(_)
+        ));
+        assert_eq!(first.skip_reason, Some(SkipReason::UnsafeNamedArguments));
+
+        let open_documents = HashMap::from([(
+            service_uri,
+            "<?php\nnamespace App;\nclass Service { public static function sync($first, $second) {} }\n"
+                .to_string(),
+        )]);
+        let second = analyze_code_actions_for_position_with_cache(
+            &caller_uri,
+            caller_text,
+            position(2, 10),
+            &open_documents,
+            &mut cache,
+        );
+
+        assert!(matches!(
+            second.index_cache_status,
+            IndexCacheStatus::Hit(_)
+        ));
+        assert_eq!(second.skip_reason, None);
+        assert_eq!(second.actions.len(), 1);
 
         fs::remove_dir_all(project_root).expect("remove project root");
     }
@@ -1560,7 +1833,14 @@ mod tests {
         let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
         let caller_text = "<?php\nnamespace App;\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
 
-        assert!(named_argument_code_action(&caller_uri, caller_text, position(3, 5)).is_none());
+        let analysis = analyze_code_actions_for_position(
+            &caller_uri,
+            caller_text,
+            position(3, 5),
+            &HashMap::new(),
+        );
+        assert!(analysis.actions.is_empty());
+        assert_eq!(analysis.skip_reason, Some(SkipReason::PhpVersionBelow8));
 
         fs::remove_dir_all(project_root).expect("remove project root");
     }
@@ -1678,6 +1958,10 @@ mod tests {
         let text = "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice(notify: true, $invoice);\n";
 
         assert!(named_argument_code_action(&uri(), text, position(2, 25)).is_none());
+        assert_eq!(
+            skip_reason(&uri(), text, position(2, 25)),
+            Some(SkipReason::UnsafeNamedArguments)
+        );
     }
 
     #[test]
@@ -1685,6 +1969,10 @@ mod tests {
         let text = "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, ...$flags);\n";
 
         assert!(named_argument_code_action(&uri(), text, position(2, 5)).is_none());
+        assert_eq!(
+            skip_reason(&uri(), text, position(2, 5)),
+            Some(SkipReason::UnpackingArgument)
+        );
     }
 
     #[test]
@@ -1692,5 +1980,21 @@ mod tests {
         let text = "<?php\nfunction send_invoice($invoice, $notify) {}\n$fn($invoice, true);\n";
 
         assert!(named_argument_code_action(&uri(), text, position(2, 2)).is_none());
+        assert_eq!(
+            skip_reason(&uri(), text, position(2, 2)),
+            Some(SkipReason::UnsupportedDynamicCall)
+        );
+    }
+
+    #[test]
+    fn reports_unresolved_callable_skip_reason() {
+        let text = "<?php\nmissing_function($invoice, true);\n";
+
+        assert_eq!(
+            skip_reason(&uri(), text, position(1, 5)),
+            Some(SkipReason::UnresolvedCallable(
+                "missing_function".to_string()
+            ))
+        );
     }
 }
