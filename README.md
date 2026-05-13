@@ -142,10 +142,10 @@ constructors, and locally obvious instance methods. It intentionally returns no
 signature for unsupported or ambiguous calls instead of guessing.
 
 Go To Definition V1 navigates to resolved functions, constants, class constants
-declared on indexed classes or related parents/interfaces/traits, classes,
-methods, static methods, constructors, traits, interfaces, and imports that are
-present in the project index. It returns no location for dynamic or ambiguous
-symbols.
+declared on indexed classes or related parents/interfaces/traits, including
+`self::`, `static::`, and direct `parent::` references, classes, methods, static
+methods, constructors, traits, interfaces, and imports that are present in the
+project index. It returns no location for dynamic or ambiguous symbols.
 
 Go To Declaration V1 navigates from a class method implementation to the
 matching interface or base-class method declaration when that relationship is
@@ -320,8 +320,8 @@ files that are not open in the editor are picked up on the next request.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
 - Matching class-like PHP file rename operations for class/interface/trait
   declaration renames.
-- Class constant hover and definition lookup for direct and inherited
-  `ClassName::CONSTANT` references.
+- Class constant hover and definition lookup for direct, inherited, `self::`,
+  `static::`, and direct `parent::` constant references.
 - Exact-reference and implementation-count code lenses for declarations,
   including constants and properties.
 - Method declaration lookup for interface/base-class implementations.

@@ -736,6 +736,28 @@ fn lsp_returns_definition_for_inherited_class_constant() {
 }
 
 #[test]
+fn lsp_returns_definition_for_static_scope_class_constants() {
+    let root = temp_project("definition-static-scope-class-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseRecord { const STATUS_OPEN = 'open'; }\nclass CustomerRecord extends BaseRecord { const STATUS_PAID = 'paid'; public function run() {\n    echo self::STATUS_PAID;\n    echo parent::STATUS_OPEN;\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let self_definition = server.definition(&uri, 3, 18).expect("self definition");
+    let parent_definition = server.definition(&uri, 4, 20).expect("parent definition");
+
+    assert_eq!(
+        self_definition["range"]["start"],
+        json!({ "line": 2, "character": 48 })
+    );
+    assert_eq!(
+        parent_definition["range"]["start"],
+        json!({ "line": 1, "character": 25 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_definition_for_dynamic_call() {
     let root = temp_project("definition-unsupported");
     let mut server = LspProcess::start(&root);
@@ -811,6 +833,28 @@ fn lsp_returns_hover_for_inherited_class_constant() {
 
     assert_eq!(hover["contents"]["kind"], "markdown");
     assert!(markdown.contains("const BaseRecord::STATUS_OPEN"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_hover_for_static_scope_class_constants() {
+    let root = temp_project("hover-static-scope-class-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseRecord { const STATUS_OPEN = 'open'; }\nclass CustomerRecord extends BaseRecord { const STATUS_PAID = 'paid'; public function run() {\n    echo self::STATUS_PAID;\n    echo parent::STATUS_OPEN;\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let self_hover = server.hover(&uri, 3, 18).expect("self hover");
+    let parent_hover = server.hover(&uri, 4, 20).expect("parent hover");
+    let self_markdown = self_hover["contents"]["value"]
+        .as_str()
+        .expect("self hover markdown");
+    let parent_markdown = parent_hover["contents"]["value"]
+        .as_str()
+        .expect("parent hover markdown");
+
+    assert!(self_markdown.contains("const CustomerRecord::STATUS_PAID"));
+    assert!(parent_markdown.contains("const BaseRecord::STATUS_OPEN"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

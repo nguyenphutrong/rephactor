@@ -1171,7 +1171,15 @@ fn definition_for_position_with_cache(
     }
 
     if let Some((class_name, constant_name)) = static_constant_reference_context(text, byte_offset)
-        && let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
+        && let Some(class_info) = resolve_static_scope_class(
+            &index,
+            root,
+            text,
+            byte_offset,
+            &class_name,
+            namespace.as_deref(),
+            &imports,
+        )
         && let Some((_, constant_info)) =
             resolve_class_constant_info(&index, class_info, &constant_name)
     {
@@ -1515,7 +1523,15 @@ fn hover_for_position_with_cache(
     }
 
     if let Some((class_name, constant_name)) = static_constant_reference_context(text, byte_offset)
-        && let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
+        && let Some(class_info) = resolve_static_scope_class(
+            &index,
+            root,
+            text,
+            byte_offset,
+            &class_name,
+            namespace.as_deref(),
+            &imports,
+        )
         && let Some((owner, constant_info)) =
             resolve_class_constant_info(&index, class_info, &constant_name)
     {
@@ -1573,7 +1589,7 @@ fn completion_for_position_with_cache(
     let items = if let Some((class_name, method_prefix)) =
         static_method_completion_context(text, byte_offset)
     {
-        let Some(class_info) = resolve_static_completion_class(
+        let Some(class_info) = resolve_static_scope_class(
             &index,
             root,
             text,
@@ -6972,7 +6988,7 @@ fn static_scope_completion_items(
     items
 }
 
-fn resolve_static_completion_class<'a>(
+fn resolve_static_scope_class<'a>(
     index: &'a SymbolIndex,
     root: Node,
     text: &str,
