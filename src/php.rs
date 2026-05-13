@@ -5046,15 +5046,17 @@ impl SymbolIndex {
                 .resolve_class(class_name, namespace, imports)
                 .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
                 .and_then(|class_info| self.resolve_method(class_info, method, target)),
-            CallTarget::Constructor { class_name } => self
-                .resolve_class(class_name, namespace, imports)
-                .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
-                .and_then(|class_info| {
-                    class_info
+            CallTarget::Constructor { class_name } => {
+                if let Some(class_info) = self.resolve_class(class_name, namespace, imports) {
+                    return class_info
                         .constructor
                         .clone()
-                        .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
-                }),
+                        .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()));
+                }
+
+                self.resolve_internal_constructor(class_name, namespace, imports)
+                    .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+            }
             CallTarget::InstanceMethod { variable, method } => {
                 let variable_types =
                     variable_types_at_byte(root, text, byte_offset, namespace, imports, Some(self));
@@ -5066,6 +5068,21 @@ impl SymbolIndex {
                     .and_then(|class_info| self.resolve_method(class_info, method, target))
             }
         }
+    }
+
+    fn resolve_internal_constructor(
+        &self,
+        class_name: &str,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> Option<Signature> {
+        for candidate in imports.resolve_class_name(class_name, namespace) {
+            if let Some(signature) = internal_constructor_signature(&candidate) {
+                return Some(signature);
+            }
+        }
+
+        None
     }
 
     fn resolve_function(
@@ -9279,6 +9296,41 @@ fn normalize_symbol_key(name: &str) -> String {
 
 fn normalize_method_key(name: &str) -> String {
     name.to_ascii_lowercase()
+}
+
+fn internal_constructor_signature(class_name: &str) -> Option<Signature> {
+    let normalized_name = normalize_symbol_key(class_name);
+    let (canonical_name, parameters) = match normalized_name.as_str() {
+        "datetime" => ("DateTime", &["datetime", "timezone"][..]),
+        "datetimeimmutable" => ("DateTimeImmutable", &["datetime", "timezone"][..]),
+        "datetimezone" => ("DateTimeZone", &["timezone"][..]),
+        "dateinterval" => ("DateInterval", &["duration"][..]),
+        "exception" => ("Exception", &["message", "code", "previous"][..]),
+        "runtimeexception" => ("RuntimeException", &["message", "code", "previous"][..]),
+        "invalidargumentexception" => (
+            "InvalidArgumentException",
+            &["message", "code", "previous"][..],
+        ),
+        "logicexception" => ("LogicException", &["message", "code", "previous"][..]),
+        _ => return None,
+    };
+
+    Some(Signature {
+        name: format!("{canonical_name}::__construct"),
+        parameters: parameters
+            .iter()
+            .map(|parameter| parameter.to_string())
+            .collect(),
+        parameter_types: vec![None; parameters.len()],
+        return_type: None,
+        is_variadic: false,
+        is_abstract: false,
+        location: None,
+        doc_summary: Some(format!(
+            "[PHP manual](https://www.php.net/{})",
+            canonical_name.to_ascii_lowercase()
+        )),
+    })
 }
 
 fn internal_function_signature(name: &str) -> Option<Signature> {

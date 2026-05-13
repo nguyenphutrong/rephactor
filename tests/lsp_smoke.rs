@@ -629,6 +629,25 @@ fn lsp_returns_null_signature_help_for_dynamic_call() {
 }
 
 #[test]
+fn lsp_returns_signature_help_for_internal_constructor() {
+    let root = temp_project("signature-internal-constructor");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nnew DateTimeImmutable('now');\n");
+
+    let help = server
+        .signature_help(&uri, 1, 23)
+        .expect("signature help result");
+
+    assert_eq!(
+        help["signatures"][0]["label"],
+        "DateTimeImmutable::__construct($datetime, $timezone)"
+    );
+    assert_eq!(help["activeParameter"], 0);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_definition_for_same_file_function_call() {
     let root = temp_project("definition-same-file");
     let mut server = LspProcess::start(&root);
