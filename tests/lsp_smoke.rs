@@ -66,6 +66,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["workspaceSymbolProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["referencesProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -215,6 +219,27 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("workspace symbol array")
+            .clone()
+    }
+
+    fn references(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        include_declaration: bool,
+    ) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/references",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+                "context": { "includeDeclaration": include_declaration }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("references array")
             .clone()
     }
 
@@ -554,6 +579,47 @@ fn lsp_returns_workspace_symbols_from_composer_project() {
         symbols
             .iter()
             .any(|symbol| symbol["location"]["uri"] == file_uri(&service_path))
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_workspace_references_for_function_name() {
+    let root = temp_project("references");
+    let src_dir = root.join("src");
+    std::fs::create_dir_all(&src_dir).expect("create source dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let functions_path = src_dir.join("Functions.php");
+    std::fs::write(
+        &functions_path,
+        "<?php\nnamespace App;\nfunction send_invoice($invoice) {}\n",
+    )
+    .expect("write functions");
+    let caller_path = src_dir.join("Caller.php");
+    let mut server = LspProcess::start(&root);
+    let caller_uri = server.open_php(
+        &caller_path,
+        "<?php\nnamespace App;\nsend_invoice($first);\nsend_invoice($second);\n",
+    );
+
+    let references = server.references(&caller_uri, 2, 5, true);
+
+    assert_eq!(references.len(), 3);
+    assert!(
+        references
+            .iter()
+            .any(|reference| reference["uri"] == file_uri(&functions_path))
+    );
+    assert_eq!(
+        references
+            .iter()
+            .filter(|reference| reference["uri"] == caller_uri)
+            .count(),
+        2
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

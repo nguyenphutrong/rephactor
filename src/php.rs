@@ -162,6 +162,13 @@ pub struct WorkspaceSymbolAnalysis {
     pub index_cache_status: IndexCacheStatus,
 }
 
+#[derive(Debug)]
+pub struct ReferencesAnalysis {
+    pub locations: Vec<Location>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
 enum CodeActionOutcome {
     Action(Box<CodeAction>),
     NoAction(SkipReason),
@@ -357,6 +364,29 @@ pub fn analyze_workspace_symbols(
         skip_reason: symbols.is_empty().then_some(SkipReason::NoEdits),
         symbols,
         index_cache_status,
+    }
+}
+
+pub fn analyze_references_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    include_declaration: bool,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> ReferencesAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match references_for_position(uri, text, position, include_declaration, open_documents) {
+        Ok(locations) => ReferencesAnalysis {
+            skip_reason: locations.is_empty().then_some(SkipReason::NoEdits),
+            locations,
+            index_cache_status,
+        },
+        Err(reason) => ReferencesAnalysis {
+            locations: Vec::new(),
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
     }
 }
 
@@ -651,6 +681,65 @@ fn document_symbols_for_text(text: &str) -> Result<DocumentSymbolResponse, SkipR
 
     let symbols = collect_document_symbols(tree.root_node(), text)?;
     Ok(DocumentSymbolResponse::Nested(symbols))
+}
+
+fn references_for_position(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    include_declaration: bool,
+    open_documents: &HashMap<Url, String>,
+) -> Result<Vec<Location>, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let Some(name_node) = find_reference_name_at_byte(tree.root_node(), text, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let search_name = clean_reference_name(node_text(name_node, text));
+    if search_name.is_empty() {
+        return Err(SkipReason::NoSupportedCall);
+    }
+
+    let documents = reference_documents(uri, text, open_documents);
+    let mut locations = Vec::new();
+
+    for (path, document_text) in documents {
+        let Some(tree) = parse_php(&document_text) else {
+            continue;
+        };
+        let mut names = Vec::new();
+        collect_name_nodes(tree.root_node(), &mut names);
+
+        for name in names {
+            if !include_declaration && is_declaration_name(name) {
+                continue;
+            }
+            if clean_reference_name(node_text(name, &document_text))
+                .eq_ignore_ascii_case(&search_name)
+                && let Some(location) = location_for_path_range(
+                    &path,
+                    &document_text,
+                    name.start_byte(),
+                    name.end_byte(),
+                )
+            {
+                locations.push(location);
+            }
+        }
+    }
+
+    locations.sort_by_key(|location| {
+        (
+            location.uri.to_string(),
+            location.range.start.line,
+            location.range.start.character,
+        )
+    });
+    Ok(locations)
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
@@ -1504,6 +1593,18 @@ fn location_for_source(
     ))
 }
 
+fn location_for_path_range(
+    path: &Path,
+    text: &str,
+    start_byte: usize,
+    end_byte: usize,
+) -> Option<Location> {
+    Some(Location::new(
+        Url::from_file_path(path).ok()?,
+        range_for_bytes(text, start_byte, end_byte).ok()?,
+    ))
+}
+
 fn workspace_query_matches(name: &str, query: &str) -> bool {
     let query = query.trim();
     query.is_empty()
@@ -2081,6 +2182,102 @@ fn collect_name_nodes<'tree>(node: Node<'tree>, names: &mut Vec<Node<'tree>>) {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_name_nodes(child, names);
+    }
+}
+
+fn find_reference_name_at_byte<'tree>(
+    node: Node<'tree>,
+    text: &str,
+    byte_offset: usize,
+) -> Option<Node<'tree>> {
+    let name = find_name_reference_at_byte(node, text, byte_offset)?;
+    if name.kind() == "qualified_name" {
+        let mut cursor = name.walk();
+        return name
+            .named_children(&mut cursor)
+            .filter(|child| child.kind() == "name")
+            .find(|child| child.start_byte() <= byte_offset && byte_offset <= child.end_byte())
+            .or(Some(name));
+    }
+
+    Some(name)
+}
+
+fn clean_reference_name(name: &str) -> String {
+    last_name_segment(clean_name_text(name).trim_start_matches('\\')).to_string()
+}
+
+fn is_declaration_name(node: Node) -> bool {
+    node.parent().is_some_and(|parent| {
+        matches!(
+            parent.kind(),
+            "function_definition"
+                | "class_declaration"
+                | "interface_declaration"
+                | "trait_declaration"
+                | "method_declaration"
+        ) && parent.child_by_field_name("name") == Some(node)
+    })
+}
+
+fn reference_documents(
+    uri: &Url,
+    text: &str,
+    open_documents: &HashMap<Url, String>,
+) -> HashMap<PathBuf, String> {
+    let mut documents = HashMap::new();
+
+    if let Some(project_root) = project_root_for_uri(uri)
+        && let Some(paths) = composer_autoload_paths(&project_root)
+    {
+        for path in paths {
+            collect_reference_documents_from_path(&path, open_documents, &mut documents);
+        }
+    }
+
+    for (path, open_text) in open_project_documents(open_documents) {
+        documents.insert(path, open_text);
+    }
+
+    if let Ok(path) = uri.to_file_path() {
+        documents.insert(path, text.to_string());
+    }
+
+    documents
+}
+
+fn collect_reference_documents_from_path(
+    path: &Path,
+    open_documents: &HashMap<Url, String>,
+    documents: &mut HashMap<PathBuf, String>,
+) {
+    if path.is_dir() {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            collect_reference_documents_from_path(&entry.path(), open_documents, documents);
+        }
+        return;
+    }
+
+    if path.extension().and_then(|extension| extension.to_str()) != Some("php") {
+        return;
+    }
+
+    if let Some(open_text) = open_documents.iter().find_map(|(uri, text)| {
+        uri.to_file_path()
+            .ok()
+            .as_deref()
+            .is_some_and(|open_path| open_path == path)
+            .then(|| text.clone())
+    }) {
+        documents.insert(path.to_path_buf(), open_text);
+        return;
+    }
+
+    if let Ok(text) = fs::read_to_string(path) {
+        documents.insert(path.to_path_buf(), text);
     }
 }
 

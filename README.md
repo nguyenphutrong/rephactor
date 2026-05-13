@@ -36,6 +36,7 @@ of the same resolver and project index.
 - Provide deterministic `textDocument/completion` for basic symbols.
 - Provide `textDocument/documentSymbol` for outline and breadcrumbs.
 - Provide `workspace/symbol` for Composer-indexed project symbols.
+- Provide `textDocument/references` for exact AST symbol references.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
@@ -112,7 +113,7 @@ run Rephactor alongside it:
 
 Rephactor currently provides named-argument and class-import refactor code
 actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1, and
-Document Symbol V1, and Workspace Symbol V1.
+Document Symbol V1, Workspace Symbol V1, and References V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -140,6 +141,10 @@ methods for editor outline and breadcrumb UIs.
 
 Workspace Symbol V1 searches Composer-indexed functions, classes, and methods
 with deterministic case-insensitive matching.
+
+References V1 finds exact matching AST name references across Composer-indexed
+PHP files and open document overlays. It is intentionally conservative and does
+not yet perform full type-aware disambiguation.
 
 Import refactors support adding an import for a resolvable fully-qualified
 class name, shortening that usage, sorting simple class imports, and removing
@@ -169,6 +174,7 @@ file watcher is intentionally deferred.
   completions.
 - Document symbols for functions, class-like declarations, and methods.
 - Workspace symbols for indexed functions, classes, and methods.
+- Exact AST references across Composer-indexed PHP files.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class

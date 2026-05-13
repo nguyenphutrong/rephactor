@@ -6,7 +6,8 @@ use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
     analyze_document_symbols, analyze_hover_for_position_with_cache,
-    analyze_signature_help_for_position_with_cache, analyze_workspace_symbols,
+    analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
+    analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -14,10 +15,10 @@ use tower_lsp::lsp_types::{
     CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, MessageType,
-    OneOf, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
-    WorkspaceSymbolParams,
+    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
+    MessageType, OneOf, ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -68,6 +69,7 @@ fn server_capabilities() -> ServerCapabilities {
         }),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -496,6 +498,60 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(Some(analysis.symbols))
     }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_references_for_position_with_cache(
+                &uri,
+                &document_text,
+                position,
+                params.context.include_declaration,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::ReferencesAnalysis {
+                locations: Vec::new(),
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor references {}:{}:{} -> {} location(s) in {}ms ({})",
+            uri,
+            position.line,
+            position.character,
+            analysis.locations.len(),
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if analysis.locations.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(Some(analysis.locations))
+    }
 }
 
 #[cfg(test)]
@@ -535,5 +591,6 @@ mod tests {
             capabilities.workspace_symbol_provider,
             Some(OneOf::Left(true))
         );
+        assert_eq!(capabilities.references_provider, Some(OneOf::Left(true)));
     }
 }
