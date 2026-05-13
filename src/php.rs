@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
-    CompletionResponse, GotoDefinitionResponse, Hover, HoverContents, Location, MarkupContent,
-    MarkupKind, ParameterInformation, ParameterLabel, Position, Range, SignatureHelp,
-    SignatureInformation, TextEdit, Url, WorkspaceEdit,
+    CompletionResponse, DocumentSymbol, DocumentSymbolResponse, GotoDefinitionResponse, Hover,
+    HoverContents, Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel,
+    Position, Range, SignatureHelp, SignatureInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -146,6 +146,12 @@ pub struct CompletionAnalysis {
     pub completion: Option<CompletionResponse>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct DocumentSymbolAnalysis {
+    pub symbols: Option<DocumentSymbolResponse>,
+    pub skip_reason: Option<SkipReason>,
 }
 
 enum CodeActionOutcome {
@@ -304,6 +310,19 @@ pub fn analyze_completion_for_position_with_cache(
             completion: None,
             skip_reason: Some(reason),
             index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_document_symbols(text: &str) -> DocumentSymbolAnalysis {
+    match document_symbols_for_text(text) {
+        Ok(symbols) => DocumentSymbolAnalysis {
+            symbols: Some(symbols),
+            skip_reason: None,
+        },
+        Err(reason) => DocumentSymbolAnalysis {
+            symbols: None,
+            skip_reason: Some(reason),
         },
     }
 }
@@ -590,6 +609,15 @@ fn completion_for_position_with_cache(
     } else {
         Ok(CompletionResponse::Array(items))
     }
+}
+
+fn document_symbols_for_text(text: &str) -> Result<DocumentSymbolResponse, SkipReason> {
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+
+    let symbols = collect_document_symbols(tree.root_node(), text)?;
+    Ok(DocumentSymbolResponse::Nested(symbols))
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
@@ -1234,6 +1262,105 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option
             .methods
             .insert(normalize_method_key(&method_name), signature);
     }
+}
+
+fn collect_document_symbols(node: Node, text: &str) -> Result<Vec<DocumentSymbol>, SkipReason> {
+    let mut symbols = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "namespace_definition" => {
+                if let Some(body) = child.child_by_field_name("body") {
+                    symbols.extend(collect_document_symbols(body, text)?);
+                } else {
+                    symbols.extend(collect_document_symbols(child, text)?);
+                }
+            }
+            "function_definition" => {
+                if let Some(symbol) = document_symbol(child, text, SymbolKind::FUNCTION, None)? {
+                    symbols.push(symbol);
+                }
+            }
+            "class_declaration" => {
+                if let Some(symbol) = document_symbol(
+                    child,
+                    text,
+                    SymbolKind::CLASS,
+                    class_member_symbols(child, text)?,
+                )? {
+                    symbols.push(symbol);
+                }
+            }
+            "interface_declaration" => {
+                if let Some(symbol) = document_symbol(
+                    child,
+                    text,
+                    SymbolKind::INTERFACE,
+                    class_member_symbols(child, text)?,
+                )? {
+                    symbols.push(symbol);
+                }
+            }
+            "trait_declaration" => {
+                if let Some(symbol) = document_symbol(
+                    child,
+                    text,
+                    SymbolKind::CLASS,
+                    class_member_symbols(child, text)?,
+                )? {
+                    symbols.push(symbol);
+                }
+            }
+            _ => symbols.extend(collect_document_symbols(child, text)?),
+        }
+    }
+
+    Ok(symbols)
+}
+
+fn class_member_symbols(
+    class_node: Node,
+    text: &str,
+) -> Result<Option<Vec<DocumentSymbol>>, SkipReason> {
+    let Some(body) = class_node.child_by_field_name("body") else {
+        return Ok(None);
+    };
+    let mut members = Vec::new();
+    let mut cursor = body.walk();
+
+    for child in body.named_children(&mut cursor) {
+        if child.kind() == "method_declaration"
+            && let Some(symbol) = document_symbol(child, text, SymbolKind::METHOD, None)?
+        {
+            members.push(symbol);
+        }
+    }
+
+    Ok((!members.is_empty()).then_some(members))
+}
+
+#[allow(deprecated)]
+fn document_symbol(
+    node: Node,
+    text: &str,
+    kind: SymbolKind,
+    children: Option<Vec<DocumentSymbol>>,
+) -> Result<Option<DocumentSymbol>, SkipReason> {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return Ok(None);
+    };
+
+    Ok(Some(DocumentSymbol {
+        name: node_text(name_node, text).to_string(),
+        detail: None,
+        kind,
+        tags: None,
+        deprecated: None,
+        range: range_for_bytes(text, node.start_byte(), node.end_byte())?,
+        selection_range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())?,
+        children,
+    }))
 }
 
 fn class_like_names_from_direct_child(

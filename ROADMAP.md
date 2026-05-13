@@ -88,3 +88,10 @@
 - [x] Implement import refactor code actions.
 - [x] Implement hover for resolved symbols.
 - [x] Implement deterministic completion V1.
+
+## Phase 12: Intelephense Parity Foundations
+
+- [x] Implement `textDocument/documentSymbol`.
+- [ ] Implement `workspace/symbol`.
+- [ ] Implement `textDocument/references`.
+- [ ] Implement diagnostics for open files.

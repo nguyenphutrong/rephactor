@@ -58,6 +58,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["completionProvider"]["triggerCharacters"],
             json!(["\\", ":", ">", "$"])
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["documentSymbolProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -181,6 +185,19 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("completion array")
+            .clone()
+    }
+
+    fn document_symbols(&mut self, uri: &str) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/documentSymbol",
+            json!({
+                "textDocument": { "uri": uri }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("document symbol array")
             .clone()
     }
 
@@ -454,6 +471,35 @@ fn lsp_returns_method_completion_after_static_scope() {
     let items = server.completion(&uri, 2, 20);
 
     assert!(items.iter().any(|item| item["label"] == "syncOrder"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_nested_document_symbols() {
+    let root = temp_project("document-symbol");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App;\nfunction send_invoice($invoice) {}\nclass InvoiceSender { public function dispatch($invoice) {} }\n";
+    let uri = server.open_php(&file, text);
+
+    let symbols = server.document_symbols(&uri);
+
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["name"] == "send_invoice")
+    );
+    let class_symbol = symbols
+        .iter()
+        .find(|symbol| symbol["name"] == "InvoiceSender")
+        .expect("class symbol");
+    assert!(
+        class_symbol["children"]
+            .as_array()
+            .expect("class children")
+            .iter()
+            .any(|symbol| symbol["name"] == "dispatch")
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

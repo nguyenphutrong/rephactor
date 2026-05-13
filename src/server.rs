@@ -5,17 +5,18 @@ use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
-    analyze_hover_for_position_with_cache, analyze_signature_help_for_position_with_cache,
+    analyze_document_symbols, analyze_hover_for_position_with_cache,
+    analyze_signature_help_for_position_with_cache,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, MessageType, OneOf, ServerCapabilities, ServerInfo,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, MessageType,
+    OneOf, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -62,6 +63,7 @@ fn server_capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
             ..CompletionOptions::default()
         }),
+        document_symbol_provider: Some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -394,6 +396,55 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(analysis.completion)
     }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let started_at = Instant::now();
+        let document_text = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).map(|document| document.text.clone())
+        };
+
+        let analysis = if let Some(document_text) = document_text {
+            analyze_document_symbols(&document_text)
+        } else {
+            crate::php::DocumentSymbolAnalysis {
+                symbols: None,
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+            }
+        };
+        let elapsed = started_at.elapsed();
+        let symbol_count = analysis
+            .symbols
+            .as_ref()
+            .map(|symbols| match symbols {
+                DocumentSymbolResponse::Flat(symbols) => symbols.len(),
+                DocumentSymbolResponse::Nested(symbols) => symbols.len(),
+            })
+            .unwrap_or_default();
+
+        let mut log_message = format!(
+            "Rephactor documentSymbol {} -> {} symbol(s) in {}ms",
+            uri,
+            symbol_count,
+            elapsed.as_millis(),
+        );
+        if symbol_count == 0
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(analysis.symbols)
+    }
 }
 
 #[cfg(test)]
@@ -425,5 +476,9 @@ mod tests {
             Some(HoverProviderCapability::Simple(true))
         );
         assert!(capabilities.completion_provider.is_some());
+        assert_eq!(
+            capabilities.document_symbol_provider,
+            Some(OneOf::Left(true))
+        );
     }
 }

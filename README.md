@@ -34,6 +34,7 @@ of the same resolver and project index.
 - Provide `textDocument/definition` for resolved project symbols.
 - Provide `textDocument/hover` for resolved symbols.
 - Provide deterministic `textDocument/completion` for basic symbols.
+- Provide `textDocument/documentSymbol` for outline and breadcrumbs.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
@@ -109,7 +110,8 @@ run Rephactor alongside it:
 ```
 
 Rephactor currently provides named-argument and class-import refactor code
-actions, Signature Help V1, Go To Definition V1, Hover V1, and Completion V1.
+actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1, and
+Document Symbol V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -131,6 +133,9 @@ Completion V1 returns deterministic prefix matches for indexed class names,
 indexed project functions, seeded PHP internal functions, static methods after
 `ClassName::`, and instance methods when the receiver type is locally obvious.
 It intentionally avoids snippets and fuzzy ranking.
+
+Document Symbol V1 returns functions, classes, interfaces, traits, and class
+methods for editor outline and breadcrumb UIs.
 
 Import refactors support adding an import for a resolvable fully-qualified
 class name, shortening that usage, sorting simple class imports, and removing
@@ -158,6 +163,7 @@ file watcher is intentionally deferred.
 - Same-file functions.
 - Basic class, function, static method, and locally obvious instance method
   completions.
+- Document symbols for functions, class-like declarations, and methods.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
