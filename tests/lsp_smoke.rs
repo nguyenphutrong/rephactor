@@ -782,6 +782,40 @@ fn lsp_returns_definition_for_instance_properties() {
 }
 
 #[test]
+fn lsp_returns_definition_for_static_properties() {
+    let root = temp_project("definition-static-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseSender { protected static $queue; protected $draft; }\nclass Sender extends BaseSender { private static $transport; private $instance; }\necho Sender::$transport;\necho Sender::$queue;\nclass Child extends BaseSender { private static $local; public function run() {\n    echo self::$local;\n    echo parent::$queue;\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let own_definition = server.definition(&uri, 3, 18).expect("own definition");
+    let inherited_definition = server
+        .definition(&uri, 4, 16)
+        .expect("inherited definition");
+    let self_definition = server.definition(&uri, 6, 16).expect("self definition");
+    let parent_definition = server.definition(&uri, 7, 18).expect("parent definition");
+
+    assert_eq!(
+        own_definition["range"]["start"],
+        json!({ "line": 2, "character": 49 })
+    );
+    assert_eq!(
+        inherited_definition["range"]["start"],
+        json!({ "line": 1, "character": 36 })
+    );
+    assert_eq!(
+        self_definition["range"]["start"],
+        json!({ "line": 5, "character": 48 })
+    );
+    assert_eq!(
+        parent_definition["range"]["start"],
+        json!({ "line": 1, "character": 36 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_definition_for_this_property() {
     let root = temp_project("definition-this-property");
     let mut server = LspProcess::start(&root);
@@ -935,6 +969,28 @@ fn lsp_returns_hover_for_instance_properties() {
 
     assert!(own_markdown.contains("property Sender::$transport"));
     assert!(inherited_markdown.contains("property BaseSender::$queue"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_hover_for_static_properties() {
+    let root = temp_project("hover-static-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseSender { protected static $queue; protected $draft; }\nclass Sender extends BaseSender { private static $transport; private $instance; }\necho Sender::$transport;\necho Sender::$queue;\n";
+    let uri = server.open_php(&file, text);
+
+    let own_hover = server.hover(&uri, 3, 18).expect("own hover");
+    let inherited_hover = server.hover(&uri, 4, 16).expect("inherited hover");
+    let own_markdown = own_hover["contents"]["value"]
+        .as_str()
+        .expect("own hover markdown");
+    let inherited_markdown = inherited_hover["contents"]["value"]
+        .as_str()
+        .expect("inherited hover markdown");
+
+    assert!(own_markdown.contains("static property Sender::$transport"));
+    assert!(inherited_markdown.contains("static property BaseSender::$queue"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

@@ -1194,6 +1194,22 @@ fn definition_for_position_with_cache(
         return location_response(constant_info.location.as_ref(), &open_paths);
     }
 
+    if let Some((class_name, property_name)) = static_property_reference_context(text, byte_offset)
+        && let Some(class_info) = resolve_static_scope_class(
+            &index,
+            root,
+            text,
+            byte_offset,
+            &class_name,
+            namespace.as_deref(),
+            &imports,
+        )
+        && let Some((_, property_info)) =
+            resolve_class_property_info(&index, class_info, &property_name, true)
+    {
+        return location_response(property_info.location.as_ref(), &open_paths);
+    }
+
     if let Some((variable, property_name)) = instance_property_reference_context(text, byte_offset)
     {
         let variable_types = variable_types_at_byte(
@@ -1208,7 +1224,7 @@ fn definition_for_position_with_cache(
             && let Some(class_info) =
                 index.resolve_class(class_name, namespace.as_deref(), &imports)
             && let Some((_, property_info)) =
-                resolve_class_property_info(&index, class_info, &property_name)
+                resolve_class_property_info(&index, class_info, &property_name, false)
         {
             return location_response(property_info.location.as_ref(), &open_paths);
         }
@@ -1570,6 +1586,26 @@ fn hover_for_position_with_cache(
         ));
     }
 
+    if let Some((class_name, property_name)) = static_property_reference_context(text, byte_offset)
+        && let Some(class_info) = resolve_static_scope_class(
+            &index,
+            root,
+            text,
+            byte_offset,
+            &class_name,
+            namespace.as_deref(),
+            &imports,
+        )
+        && let Some((owner, property_info)) =
+            resolve_class_property_info(&index, class_info, &property_name, true)
+    {
+        return Ok(hover_from_parts(
+            format!("static property {}::${}", owner.fqn, property_info.name),
+            property_info.location.as_ref(),
+            None,
+        ));
+    }
+
     if let Some((variable, property_name)) = instance_property_reference_context(text, byte_offset)
     {
         let variable_types = variable_types_at_byte(
@@ -1584,7 +1620,7 @@ fn hover_for_position_with_cache(
             && let Some(class_info) =
                 index.resolve_class(class_name, namespace.as_deref(), &imports)
             && let Some((owner, property_info)) =
-                resolve_class_property_info(&index, class_info, &property_name)
+                resolve_class_property_info(&index, class_info, &property_name, false)
         {
             return Ok(hover_from_parts(
                 format!("property {}::${}", owner.fqn, property_info.name),
@@ -6890,6 +6926,28 @@ fn static_property_completion_context(text: &str, byte_offset: usize) -> Option<
     })
 }
 
+fn static_property_reference_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
+    let (property_start, property_end) = identifier_bounds_at_byte(text, byte_offset)?;
+    if property_start < 3 || text.get(property_start.saturating_sub(3)..property_start)? != "::$" {
+        return None;
+    }
+
+    let class_end = property_start - 3;
+    let class_start = text
+        .get(..class_end)?
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!is_qualified_name_character(character)).then_some(index + character.len_utf8())
+        })
+        .unwrap_or(0);
+    let class_name = text.get(class_start..class_end)?.trim();
+    let property_name = text.get(property_start..property_end)?.trim();
+
+    (!class_name.is_empty() && !property_name.is_empty())
+        .then(|| (class_name.to_string(), property_name.to_string()))
+}
+
 fn static_constant_reference_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
     let (member_start, member_end) = identifier_bounds_at_byte(text, byte_offset)?;
     if member_start < 2 || text.get(member_start.saturating_sub(2)..member_start)? != "::" {
@@ -7356,26 +7414,28 @@ fn resolve_class_constant_info_inner<'a>(
 fn class_property_info<'a>(
     class_info: &'a ClassInfo,
     property_name: &str,
+    static_only: bool,
 ) -> Option<&'a ClassPropertyInfo> {
-    class_info
-        .properties
-        .iter()
-        .find(|property| property.name.eq_ignore_ascii_case(property_name))
+    class_info.properties.iter().find(|property| {
+        property.is_static == static_only && property.name.eq_ignore_ascii_case(property_name)
+    })
 }
 
 fn resolve_class_property_info<'a>(
     index: &'a SymbolIndex,
     class_info: &'a ClassInfo,
     property_name: &str,
+    static_only: bool,
 ) -> Option<(&'a ClassInfo, &'a ClassPropertyInfo)> {
     let mut visited = Vec::new();
-    resolve_class_property_info_inner(index, class_info, property_name, &mut visited)
+    resolve_class_property_info_inner(index, class_info, property_name, static_only, &mut visited)
 }
 
 fn resolve_class_property_info_inner<'a>(
     index: &'a SymbolIndex,
     class_info: &'a ClassInfo,
     property_name: &str,
+    static_only: bool,
     visited: &mut Vec<String>,
 ) -> Option<(&'a ClassInfo, &'a ClassPropertyInfo)> {
     let class_key = normalize_symbol_key(&class_info.fqn);
@@ -7384,7 +7444,7 @@ fn resolve_class_property_info_inner<'a>(
     }
     visited.push(class_key);
 
-    if let Some(property_info) = class_property_info(class_info, property_name) {
+    if let Some(property_info) = class_property_info(class_info, property_name, static_only) {
         return Some((class_info, property_info));
     }
 
@@ -7396,8 +7456,13 @@ fn resolve_class_property_info_inner<'a>(
         .chain(class_info.mixins.iter())
     {
         if let Some(related_info) = index.classes.get(&normalize_symbol_key(related_name))
-            && let Some(resolved) =
-                resolve_class_property_info_inner(index, related_info, property_name, visited)
+            && let Some(resolved) = resolve_class_property_info_inner(
+                index,
+                related_info,
+                property_name,
+                static_only,
+                visited,
+            )
         {
             return Some(resolved);
         }

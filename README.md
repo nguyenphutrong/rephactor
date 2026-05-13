@@ -143,10 +143,10 @@ signature for unsupported or ambiguous calls instead of guessing.
 
 Go To Definition V1 navigates to resolved functions, constants, class constants
 declared on indexed classes or related parents/interfaces/traits, including
-`self::`, `static::`, and direct `parent::` references, classes, properties,
-methods, static methods, constructors, traits, interfaces, and imports that are
-present in the project index. It returns no location for dynamic or ambiguous
-symbols.
+`self::`, `static::`, and direct `parent::` references, classes, instance and
+static properties, methods, static methods, constructors, traits, interfaces,
+and imports that are present in the project index. It returns no location for
+dynamic or ambiguous symbols.
 
 Go To Declaration V1 navigates from a class method implementation to the
 matching interface or base-class method declaration when that relationship is
@@ -329,6 +329,8 @@ files that are not open in the editor are picked up on the next request.
 - Instance method hover and definition lookup for `$this` receivers.
 - Instance property hover and definition lookup for `$this`, typed receivers,
   and inherited indexed properties.
+- Static property hover and definition lookup for direct, inherited, `self::`,
+  `static::`, and direct `parent::` property references.
 - Exact-reference and implementation-count code lenses for declarations,
   including constants and properties.
 - Method declaration lookup for interface/base-class implementations.
