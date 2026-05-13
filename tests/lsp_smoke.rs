@@ -1947,6 +1947,25 @@ fn lsp_returns_implementation_code_lenses_for_class_like_declarations() {
 }
 
 #[test]
+fn lsp_returns_usage_code_lenses_for_trait_declarations() {
+    let root = temp_project("trait-usage-code-lens");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\ntrait Dispatchable {}\nclass EmailSender { use Dispatchable; }\n",
+    );
+
+    let lenses = server.code_lens(&uri);
+
+    assert!(lenses.iter().any(|lens| {
+        lens["command"]["title"] == "1 usage"
+            && lens["command"]["command"] == "editor.action.showReferences"
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_parse_diagnostics_for_open_document() {
     let root = temp_project("diagnostics");
     let mut server = LspProcess::start(&root);

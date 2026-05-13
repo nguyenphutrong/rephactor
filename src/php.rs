@@ -4020,7 +4020,7 @@ fn implementation_code_lens_for_declaration(
     }
 
     let namespace = namespace_at_byte(root, text, declaration.start_byte());
-    let locations = if declaration.kind() == "method_declaration" {
+    let (locations, title_kind) = if declaration.kind() == "method_declaration" {
         let Some(class_node) = containing_class_like_declaration(declaration) else {
             return Ok(None);
         };
@@ -4031,18 +4031,33 @@ fn implementation_code_lens_for_declaration(
         let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), imports) else {
             return Ok(None);
         };
-        implementation_locations_for_method_lens(
-            index,
-            target,
-            &normalize_method_key(node_text(name, text)),
-            open_paths,
+        (
+            implementation_locations_for_method_lens(
+                index,
+                target,
+                &normalize_method_key(node_text(name, text)),
+                open_paths,
+            ),
+            "implementation",
+        )
+    } else if declaration.kind() == "trait_declaration" {
+        let trait_name = clean_name_text(node_text(name, text));
+        let Some(target) = index.resolve_class(&trait_name, namespace.as_deref(), imports) else {
+            return Ok(None);
+        };
+        (
+            trait_usage_locations_for_lens(index, target, open_paths),
+            "usage",
         )
     } else {
         let class_name = clean_name_text(node_text(name, text));
         let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), imports) else {
             return Ok(None);
         };
-        implementation_locations_for_class(index, target, open_paths)
+        (
+            implementation_locations_for_class(index, target, open_paths),
+            "implementation",
+        )
     };
     if locations.is_empty() {
         return Ok(None);
@@ -4054,8 +4069,9 @@ fn implementation_code_lens_for_declaration(
         range: range_for_bytes(text, name.start_byte(), name.end_byte())?,
         command: Some(Command::new(
             format!(
-                "{} implementation{}",
+                "{} {}{}",
                 locations.len(),
+                title_kind,
                 if locations.len() == 1 { "" } else { "s" }
             ),
             "editor.action.showReferences".to_string(),
@@ -4109,6 +4125,45 @@ fn implementation_locations_for_method_lens(
         .collect::<Vec<_>>();
     locations.sort_by_key(|location| location.uri.to_string());
     locations
+}
+
+fn trait_usage_locations_for_lens(
+    index: &SymbolIndex,
+    target: &ClassInfo,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Vec<Location> {
+    let mut locations = index
+        .classes
+        .values()
+        .filter(|class_info| {
+            normalize_symbol_key(&class_info.fqn) != normalize_symbol_key(&target.fqn)
+        })
+        .filter(|class_info| class_uses_trait(index, class_info, &target.fqn, &mut HashSet::new()))
+        .filter_map(|class_info| location_for_source(class_info.location.as_ref()?, open_paths))
+        .collect::<Vec<_>>();
+    locations.sort_by_key(|location| location.uri.to_string());
+    locations
+}
+
+fn class_uses_trait(
+    index: &SymbolIndex,
+    class_info: &ClassInfo,
+    target_fqn: &str,
+    visited: &mut HashSet<String>,
+) -> bool {
+    if !visited.insert(normalize_symbol_key(&class_info.fqn)) {
+        return false;
+    }
+
+    class_info
+        .traits
+        .iter()
+        .any(|trait_name| normalize_symbol_key(trait_name) == normalize_symbol_key(target_fqn))
+        || class_info
+            .traits
+            .iter()
+            .filter_map(|trait_name| index.classes.get(&normalize_symbol_key(trait_name)))
+            .any(|trait_info| class_uses_trait(index, trait_info, target_fqn, visited))
 }
 
 fn range_for_node(text: &str, node: Node) -> Range {
