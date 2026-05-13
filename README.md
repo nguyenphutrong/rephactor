@@ -36,6 +36,7 @@ of the same resolver and project index.
 - Provide `textDocument/implementation` for class/interface inheritance.
 - Provide `textDocument/hover` for resolved symbols.
 - Provide `textDocument/rename` for exact AST symbol references.
+- Provide `textDocument/codeLens` reference counts for declarations.
 - Provide deterministic `textDocument/completion` for basic symbols.
 - Add conservative `use` declaration edits for unambiguous class completions.
 - Provide `textDocument/documentSymbol` for outline and breadcrumbs.
@@ -126,7 +127,7 @@ actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1,
 Go To Type Definition V1, Go To Implementation V1, Document Symbol V1,
 Workspace Symbol V1, References V1, Diagnostics V1, Document Highlight V1,
 Rename V1, Folding Range V1, Inlay Hint V1, Document Link V1, and Selection
-Range V1.
+Range V1. Code Lens V1 shows declaration reference counts.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -171,6 +172,9 @@ not yet perform full type-aware disambiguation.
 
 Rename V1 returns a workspace edit for exact AST symbol references. It does not
 rename files or folders.
+
+Code Lens V1 shows exact-reference counts for function, class, interface,
+trait, and method declarations.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, and unresolved type-annotation diagnostics for open
@@ -222,6 +226,7 @@ file watcher is intentionally deferred.
 - Workspace symbols for indexed functions, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
+- Exact-reference code lenses for declarations.
 - Type definitions for locally typed variables and parameters.
 - Class/interface implementation lookup across indexed PHP files.
 - Parse diagnostics for open PHP documents.

@@ -63,6 +63,10 @@ impl LspProcess {
             json!(true)
         );
         assert_eq!(
+            initialize["result"]["capabilities"]["codeLensProvider"]["resolveProvider"],
+            json!(false)
+        );
+        assert_eq!(
             initialize["result"]["capabilities"]["hoverProvider"],
             json!(true)
         );
@@ -163,6 +167,19 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("code action array")
+            .clone()
+    }
+
+    fn code_lens(&mut self, uri: &str) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/codeLens",
+            json!({
+                "textDocument": { "uri": uri }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("code lens array")
             .clone()
     }
 
@@ -958,6 +975,25 @@ fn lsp_returns_workspace_references_for_function_name() {
             .count(),
         2
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_reference_code_lenses_for_declarations() {
+    let root = temp_project("code-lens");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction send_invoice($invoice) {}\nsend_invoice($invoice);\n",
+    );
+
+    let lenses = server.code_lens(&uri);
+
+    assert!(lenses.iter().any(|lens| {
+        lens["command"]["title"] == "1 reference"
+            && lens["command"]["command"] == "editor.action.showReferences"
+    }));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

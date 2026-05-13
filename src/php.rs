@@ -4,13 +4,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
-    CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentHighlight, DocumentHighlightKind,
-    DocumentLink, DocumentSymbol, DocumentSymbolResponse, FoldingRange, FoldingRangeKind,
-    GotoDefinitionResponse, Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel,
-    Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
-    SelectionRange, SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit,
-    Url, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CodeLens, Command, CompletionItem,
+    CompletionItemKind, CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentHighlight,
+    DocumentHighlightKind, DocumentLink, DocumentSymbol, DocumentSymbolResponse, FoldingRange,
+    FoldingRangeKind, GotoDefinitionResponse, Hover, HoverContents, InlayHint, InlayHintKind,
+    InlayHintLabel, Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel,
+    Position, Range, SelectionRange, SignatureHelp, SignatureInformation, SymbolInformation,
+    SymbolKind, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -167,6 +167,13 @@ pub struct WorkspaceSymbolAnalysis {
 #[derive(Debug)]
 pub struct ReferencesAnalysis {
     pub locations: Vec<Location>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct CodeLensAnalysis {
+    pub lenses: Vec<CodeLens>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
 }
@@ -565,6 +572,27 @@ pub fn analyze_references_for_position_with_cache(
         },
         Err(reason) => ReferencesAnalysis {
             locations: Vec::new(),
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_code_lenses_for_document_with_cache(
+    uri: &Url,
+    text: &str,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> CodeLensAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match code_lenses_for_document(uri, text, open_documents) {
+        Ok(lenses) => CodeLensAnalysis {
+            skip_reason: lenses.is_empty().then_some(SkipReason::NoEdits),
+            lenses,
+            index_cache_status,
+        },
+        Err(reason) => CodeLensAnalysis {
+            lenses: Vec::new(),
             skip_reason: Some(reason),
             index_cache_status,
         },
@@ -1515,6 +1543,73 @@ fn is_valid_rename_identifier(name: &str) -> bool {
     };
     (first.is_ascii_alphabetic() || first == '_')
         && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+fn code_lenses_for_document(
+    uri: &Url,
+    text: &str,
+    open_documents: &HashMap<Url, String>,
+) -> Result<Vec<CodeLens>, SkipReason> {
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+
+    let mut declaration_names = Vec::new();
+    collect_declaration_name_nodes(tree.root_node(), &mut declaration_names);
+    let mut lenses = Vec::new();
+
+    for name in declaration_names {
+        let Some(position) = lsp_position_for_byte_offset(text, name.start_byte()) else {
+            continue;
+        };
+        let Ok(locations) = references_for_position(uri, text, position, true, open_documents)
+        else {
+            continue;
+        };
+        let reference_count = locations
+            .iter()
+            .filter(|location| {
+                !(location.uri == *uri && location.range == range_for_node(text, name))
+            })
+            .count();
+        let range = range_for_bytes(text, name.start_byte(), name.end_byte())?;
+
+        lenses.push(CodeLens {
+            range,
+            command: Some(Command::new(
+                format!(
+                    "{} reference{}",
+                    reference_count,
+                    if reference_count == 1 { "" } else { "s" }
+                ),
+                "editor.action.showReferences".to_string(),
+                Some(vec![
+                    serde_json::to_value(uri).unwrap_or(serde_json::Value::Null),
+                    serde_json::to_value(position).unwrap_or(serde_json::Value::Null),
+                    serde_json::to_value(locations).unwrap_or(serde_json::Value::Null),
+                ]),
+            )),
+            data: None,
+        });
+    }
+
+    Ok(lenses)
+}
+
+fn range_for_node(text: &str, node: Node) -> Range {
+    range_for_bytes(text, node.start_byte(), node.end_byte()).unwrap_or_else(|_| Range::default())
+}
+
+fn collect_declaration_name_nodes<'tree>(node: Node<'tree>, names: &mut Vec<Node<'tree>>) {
+    if is_declaration_name(node) {
+        names.push(node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_declaration_name_nodes(child, names);
+    }
 }
 
 fn document_highlights_for_position(

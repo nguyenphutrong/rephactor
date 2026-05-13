@@ -4,13 +4,13 @@ use std::time::Instant;
 use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
-    analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
-    analyze_diagnostics_for_document_with_cache, analyze_document_highlights,
-    analyze_document_links, analyze_document_symbols, analyze_folding_ranges,
-    analyze_hover_for_position_with_cache, analyze_implementation_for_position_with_cache,
-    analyze_inlay_hints_for_range_with_cache, analyze_references_for_position_with_cache,
-    analyze_rename_for_position_with_cache, analyze_selection_ranges,
-    analyze_signature_help_for_position_with_cache,
+    analyze_code_lenses_for_document_with_cache, analyze_completion_for_position_with_cache,
+    analyze_definition_for_position_with_cache, analyze_diagnostics_for_document_with_cache,
+    analyze_document_highlights, analyze_document_links, analyze_document_symbols,
+    analyze_folding_ranges, analyze_hover_for_position_with_cache,
+    analyze_implementation_for_position_with_cache, analyze_inlay_hints_for_range_with_cache,
+    analyze_references_for_position_with_cache, analyze_rename_for_position_with_cache,
+    analyze_selection_ranges, analyze_signature_help_for_position_with_cache,
     analyze_type_definition_for_position_with_cache, analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
@@ -20,11 +20,11 @@ use tower_lsp::lsp_types::request::{
 };
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
-    CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentHighlight, DocumentHighlightParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
-    FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
+    CodeActionResponse, CodeLens, CodeLensOptions, CodeLensParams, CompletionOptions,
+    CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams, DocumentLink,
+    DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse,
+    FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
     ImplementationProviderCapability, InitializeParams, InitializeResult, InlayHint,
     InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location, MessageType, OneOf,
@@ -92,6 +92,9 @@ fn server_capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
             ..CodeActionOptions::default()
         })),
+        code_lens_provider: Some(CodeLensOptions {
+            resolve_provider: Some(false),
+        }),
         signature_help_provider: Some(SignatureHelpOptions {
             trigger_characters: Some(vec!["(".to_string(), ",".to_string(), ":".to_string()]),
             retrigger_characters: Some(vec![",".to_string(), ":".to_string()]),
@@ -236,6 +239,55 @@ impl LanguageServer for RephactorLanguageServer {
             .await;
 
         Ok(Some(analysis.actions))
+    }
+
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let uri = params.text_document.uri;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_code_lenses_for_document_with_cache(
+                &uri,
+                &document_text,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::CodeLensAnalysis {
+                lenses: Vec::new(),
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor codeLens {} -> {} lens(es) in {}ms ({})",
+            uri,
+            analysis.lenses.len(),
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if analysis.lenses.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok((!analysis.lenses.is_empty()).then_some(analysis.lenses))
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {

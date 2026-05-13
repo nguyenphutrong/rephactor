@@ -100,6 +100,7 @@
 - [x] Implement `textDocument/typeDefinition` for locally typed variables.
 - [x] Implement `textDocument/implementation` for class/interface inheritance.
 - [x] Implement `textDocument/rename` for exact AST symbol references.
+- [x] Implement reference-count `textDocument/codeLens` for declarations.
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
