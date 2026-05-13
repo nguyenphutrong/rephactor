@@ -13,7 +13,8 @@ jobs:
         with:
           targets: wasm32-wasip2
       - run: cargo fmt --check
+      - run: cargo check
       - run: cargo clippy -- -D warnings
       - run: cargo test
       - run: cargo fmt --manifest-path zed-extension/Cargo.toml --check
-      - run: cargo check --manifest-path zed-extension/Cargo.toml --target wasm32-wasip2
+      - run: scripts/check-zed-extension.sh

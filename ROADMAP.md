@@ -5,7 +5,7 @@
 - [x] Create Rust binary crate.
 - [x] Add LSP and PHP parser dependencies.
 - [x] Document product scope and implementation plan.
-- [ ] Add CI once the first tests exist.
+- [x] Add CI once the first tests exist.
 
 ## Phase 1: LSP Baseline
 
@@ -62,7 +62,7 @@
 
 ## Phase 8: Release Hardening
 
-- Add CI for formatting, clippy, tests, and fixture snapshots.
+- [x] Add CI for formatting, check, clippy, tests, and Zed extension Wasm check.
 - Add release binaries for macOS, Linux, and Windows.
 - Publish installation instructions.
 - Document known unsupported cases.
