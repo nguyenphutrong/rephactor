@@ -215,7 +215,8 @@ obvious values before return and resolved calls with declared return types.
 Resolved calls also report conservative argument type mismatches when typed
 parameters receive obvious literal or object-creation arguments, including
 variables assigned obvious values earlier in the same local or top-level scope
-and resolved calls with declared return types.
+and variables assigned from resolved calls with declared return types.
+Direct resolved-call arguments with declared return types are checked too.
 Typed parameters report assignment mismatches when
 reassigned to those obvious values, and local `@var` PHPDoc annotations are
 used as assignment type contracts for the same conservative checks. Broader
@@ -303,6 +304,8 @@ files that are not open in the editor are picked up on the next request.
   variable arguments.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments
   with declared return types.
+- Conservative argument-type mismatch diagnostics for variables assigned from
+  resolved calls with declared return types.
 - Conservative assignment-type mismatch diagnostics for typed parameters
   reassigned to obvious literal or object-creation values.
 - Conservative assignment-type mismatch diagnostics for local PHPDoc `@var`

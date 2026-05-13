@@ -2422,6 +2422,98 @@ fn local_variable_return_type_at_byte(
     types.get(variable_name).cloned()
 }
 
+fn local_variable_call_return_type_at_byte(
+    declaration: Node,
+    variable_name: &str,
+    context: &CallAssignmentInference<'_, '_>,
+) -> Option<ComparableReturnType> {
+    let mut types = HashMap::new();
+    collect_local_call_assignment_return_types(declaration, declaration, &mut types, context);
+    types.get(variable_name).cloned()
+}
+
+struct CallAssignmentInference<'a, 'tree> {
+    root: Node<'tree>,
+    text: &'a str,
+    byte_offset: usize,
+    namespace: Option<&'a str>,
+    imports: &'a ImportMap,
+    index: &'a SymbolIndex,
+}
+
+fn collect_local_call_assignment_return_types(
+    declaration: Node,
+    node: Node,
+    types: &mut HashMap<String, ComparableReturnType>,
+    context: &CallAssignmentInference<'_, '_>,
+) {
+    if node.start_byte() >= context.byte_offset {
+        return;
+    }
+    if node != declaration
+        && matches!(
+            node.kind(),
+            "function_definition"
+                | "method_declaration"
+                | "anonymous_function_creation_expression"
+                | "arrow_function"
+                | "class_declaration"
+                | "interface_declaration"
+                | "trait_declaration"
+        )
+    {
+        return;
+    }
+
+    if node.kind() == "assignment_expression"
+        && let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        )
+        && left.kind() == "variable_name"
+        && let Some(return_type) = inferred_call_return_type(right, context)
+    {
+        types.insert(node_text(left, context.text).to_string(), return_type);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_local_call_assignment_return_types(declaration, child, types, context);
+    }
+}
+
+fn inferred_call_return_type(
+    expression: Node,
+    context: &CallAssignmentInference<'_, '_>,
+) -> Option<ComparableReturnType> {
+    let kind = expression.kind();
+    if kind == "expression" {
+        let mut cursor = expression.walk();
+        let inner = expression.named_children(&mut cursor).next()?;
+        return inferred_call_return_type(inner, context);
+    }
+    if !matches!(
+        kind,
+        "function_call_expression" | "scoped_call_expression" | "member_call_expression"
+    ) {
+        return None;
+    }
+
+    let target = call_target_for_call_node(expression, context.text).ok()?;
+    context
+        .index
+        .resolve(
+            &target,
+            context.root,
+            context.text,
+            expression.start_byte(),
+            context.namespace,
+            context.imports,
+        )
+        .ok()?
+        .return_type
+}
+
 fn collect_local_assignment_return_types(
     declaration: Node,
     node: Node,
@@ -2519,6 +2611,21 @@ fn inferred_argument_expression_type(
             namespace,
             imports,
             node_text(expression, text),
+        ) {
+            return Some(return_type);
+        }
+        let call_assignment_context = CallAssignmentInference {
+            root,
+            text,
+            byte_offset: expression.start_byte(),
+            namespace,
+            imports,
+            index,
+        };
+        if let Some(return_type) = local_variable_call_return_type_at_byte(
+            scope,
+            node_text(expression, text),
+            &call_assignment_context,
         ) {
             return Some(return_type);
         }
