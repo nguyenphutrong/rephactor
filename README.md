@@ -213,8 +213,9 @@ return type conflicts with a directly returned scalar literal, array literal, or
 object creation expression, including local variables assigned one of those
 obvious values before return. Resolved calls also report conservative argument
 type mismatches when typed parameters receive obvious literal or object-creation
-arguments. Broader static analysis is still deferred until the type model is
-stronger.
+arguments, and typed parameters report assignment mismatches when reassigned to
+those obvious values. Broader static analysis is still deferred until the type
+model is stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -293,6 +294,8 @@ files that are not open in the editor are picked up on the next request.
   before return.
 - Conservative argument-type mismatch diagnostics for resolved calls with typed
   parameters and obvious literal or object-creation arguments.
+- Conservative assignment-type mismatch diagnostics for typed parameters
+  reassigned to obvious literal or object-creation values.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Whole-document and range whitespace formatting for trailing whitespace; whole
@@ -344,7 +347,7 @@ Rephactor returns no action instead of guessing for:
 - completion for dynamic receivers or unresolved classes
 - PSR-12 structural formatting beyond trailing-whitespace cleanup
 - static-analysis diagnostics beyond parser, callable-resolution, and
-  conservative return/argument type mismatch errors
+  conservative return/argument/assignment type mismatch errors
 - Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols

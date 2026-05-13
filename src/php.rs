@@ -325,6 +325,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
     diagnostics.extend(duplicate_declaration_diagnostics(root, text));
     diagnostics.extend(duplicate_parameter_diagnostics(root, text));
     diagnostics.extend(return_type_mismatch_diagnostics(root, text, &imports));
+    diagnostics.extend(assignment_type_mismatch_diagnostics(root, text, &imports));
     diagnostics.extend(unused_import_diagnostics(
         root,
         text,
@@ -2486,6 +2487,136 @@ fn inferred_argument_expression_type(
     }
 
     inferred_return_expression_type(expression, expression, text, namespace, imports)
+}
+
+fn assignment_type_mismatch_diagnostics(
+    root: Node,
+    text: &str,
+    imports: &ImportMap,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    collect_assignment_type_mismatch_diagnostics(root, root, text, imports, &mut diagnostics);
+    diagnostics
+}
+
+fn collect_assignment_type_mismatch_diagnostics(
+    root: Node,
+    node: Node,
+    text: &str,
+    imports: &ImportMap,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if matches!(node.kind(), "function_definition" | "method_declaration") {
+        diagnostics.extend(assignment_type_mismatches_for_declaration(
+            root, node, text, imports,
+        ));
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_assignment_type_mismatch_diagnostics(root, child, text, imports, diagnostics);
+    }
+}
+
+fn assignment_type_mismatches_for_declaration(
+    root: Node,
+    declaration: Node,
+    text: &str,
+    imports: &ImportMap,
+) -> Vec<Diagnostic> {
+    let Some(parameters_node) = declaration.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    let namespace = namespace_at_byte(root, text, declaration.start_byte());
+    let parameters = parameter_names(parameters_node, text);
+    let parameter_types = parameter_types(parameters_node, text, namespace.as_deref(), imports);
+    let expected_types = parameters
+        .into_iter()
+        .zip(parameter_types)
+        .filter_map(|(parameter, parameter_type)| Some((format!("${parameter}"), parameter_type?)))
+        .collect::<HashMap<_, _>>();
+    if expected_types.is_empty() {
+        return Vec::new();
+    }
+
+    let mut diagnostics = Vec::new();
+    collect_assignment_type_mismatches(
+        declaration,
+        declaration,
+        text,
+        namespace.as_deref(),
+        imports,
+        &expected_types,
+        &mut diagnostics,
+    );
+    diagnostics
+}
+
+fn collect_assignment_type_mismatches(
+    declaration: Node,
+    node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    expected_types: &HashMap<String, ComparableReturnType>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if node != declaration
+        && matches!(
+            node.kind(),
+            "function_definition"
+                | "method_declaration"
+                | "anonymous_function_creation_expression"
+                | "arrow_function"
+                | "class_declaration"
+                | "interface_declaration"
+                | "trait_declaration"
+        )
+    {
+        return;
+    }
+
+    if node.kind() == "assignment_expression"
+        && let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        )
+        && left.kind() == "variable_name"
+        && let Some(expected) = expected_types.get(node_text(left, text))
+        && let Some(actual) = inferred_assigned_return_type(right, text, namespace, imports)
+        && expected != &actual
+    {
+        diagnostics.push(Diagnostic {
+            range: range_for_bytes(text, right.start_byte(), right.end_byte())
+                .unwrap_or_else(|_| Range::default()),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("rephactor".to_string()),
+            message: format!(
+                "assignment type mismatch for {}: expected {}, got {}",
+                node_text(left, text),
+                expected.display,
+                actual.display
+            ),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_assignment_type_mismatches(
+            declaration,
+            child,
+            text,
+            namespace,
+            imports,
+            expected_types,
+            diagnostics,
+        );
+    }
 }
 
 fn collect_return_expressions<'tree>(
