@@ -665,6 +665,26 @@ fn lsp_returns_signature_help_for_internal_instance_method() {
 }
 
 #[test]
+fn lsp_returns_signature_help_for_internal_static_method() {
+    let root = temp_project("signature-internal-static-method");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nDateTimeImmutable::createFromFormat('Y-m-d', $value);\n";
+    let uri = server.open_php(&file, text);
+
+    let help = server
+        .signature_help(&uri, 1, 39)
+        .expect("signature help result");
+
+    assert_eq!(
+        help["signatures"][0]["label"],
+        "DateTimeImmutable::createFromFormat($format, $datetime, $timezone)"
+    );
+    assert_eq!(help["activeParameter"], 0);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_definition_for_same_file_function_call() {
     let root = temp_project("definition-same-file");
     let mut server = LspProcess::start(&root);
@@ -2305,6 +2325,25 @@ fn lsp_returns_internal_instance_method_completions() {
         .iter()
         .find(|item| item["label"] == "format")
         .expect("format completion");
+
+    assert_eq!(item["kind"], method_kind);
+    assert_eq!(item["detail"], "PHP internal method");
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_internal_static_method_completions() {
+    let root = temp_project("completion-internal-static-methods");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nDateTimeImmutable::create;\n");
+
+    let items = server.completion(&uri, 1, 25);
+    let method_kind = serde_json::to_value(CompletionItemKind::METHOD).expect("method kind json");
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "createFromFormat")
+        .expect("createFromFormat completion");
 
     assert_eq!(item["kind"], method_kind);
     assert_eq!(item["detail"], "PHP internal method");

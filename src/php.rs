@@ -9406,6 +9406,12 @@ fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature
                 &["modifier"][..],
                 None,
             ),
+            ("datetime" | "datetimeimmutable", "createfromformat") => (
+                last_name_segment(class_name),
+                "createFromFormat",
+                &["format", "datetime", "timezone"][..],
+                None,
+            ),
             _ => return None,
         };
 
@@ -9431,7 +9437,9 @@ fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature
 
 fn internal_method_names(class_name: &str) -> Vec<&'static str> {
     match normalize_symbol_key(class_name).as_str() {
-        "datetime" | "datetimeimmutable" => vec!["format", "getTimestamp", "modify"],
+        "datetime" | "datetimeimmutable" => {
+            vec!["createFromFormat", "format", "getTimestamp", "modify"]
+        }
         "datetimeinterface" => vec!["format", "getTimestamp"],
         _ => Vec::new(),
     }
