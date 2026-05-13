@@ -1240,8 +1240,14 @@ fn type_definition_for_position_with_cache(
     let open_paths = open_project_documents(open_documents);
 
     if let Some(variable) = find_variable_name_at_byte(root, text, byte_offset) {
-        let variable_types =
-            variable_types_at_byte(root, text, byte_offset, namespace.as_deref(), &imports);
+        let variable_types = variable_types_at_byte(
+            root,
+            text,
+            byte_offset,
+            namespace.as_deref(),
+            &imports,
+            Some(&index),
+        );
         let Some(class_name) = variable_types.get(&variable) else {
             return Err(SkipReason::UnresolvedCallable(variable));
         };
@@ -1523,8 +1529,14 @@ fn completion_for_position_with_cache(
     } else if let Some((variable, method_prefix)) =
         instance_method_completion_context(text, byte_offset)
     {
-        let variable_types =
-            variable_types_at_byte(root, text, byte_offset, namespace.as_deref(), &imports);
+        let variable_types = variable_types_at_byte(
+            root,
+            text,
+            byte_offset,
+            namespace.as_deref(),
+            &imports,
+            Some(&index),
+        );
         let Some(class_name) = variable_types.get(&variable) else {
             return Err(SkipReason::UnresolvedCallable(variable));
         };
@@ -3591,7 +3603,7 @@ impl SymbolIndex {
                 }),
             CallTarget::InstanceMethod { variable, method } => {
                 let variable_types =
-                    variable_types_at_byte(root, text, byte_offset, namespace, imports);
+                    variable_types_at_byte(root, text, byte_offset, namespace, imports, Some(self));
                 let class_name = variable_types
                     .get(variable)
                     .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))?;
@@ -6094,11 +6106,20 @@ fn variable_types_at_byte(
     byte_offset: usize,
     namespace: Option<&str>,
     imports: &ImportMap,
+    index: Option<&SymbolIndex>,
 ) -> HashMap<String, String> {
     let mut types = HashMap::new();
     collect_parameter_types(root, text, byte_offset, namespace, imports, &mut types);
     collect_phpdoc_param_types(root, text, byte_offset, namespace, imports, &mut types);
-    collect_assignment_types(root, text, byte_offset, namespace, imports, &mut types);
+    let assignment_context = AssignmentTypeCollectionContext {
+        root,
+        text,
+        byte_offset,
+        namespace,
+        imports,
+        index,
+    };
+    collect_assignment_types(root, &assignment_context, &mut types);
     collect_phpdoc_var_types(text, byte_offset, namespace, imports, &mut types);
     types
 }
@@ -6217,15 +6238,21 @@ fn phpdoc_param_types_before(
         .collect()
 }
 
+struct AssignmentTypeCollectionContext<'a, 'tree> {
+    root: Node<'tree>,
+    text: &'a str,
+    byte_offset: usize,
+    namespace: Option<&'a str>,
+    imports: &'a ImportMap,
+    index: Option<&'a SymbolIndex>,
+}
+
 fn collect_assignment_types(
     node: Node,
-    text: &str,
-    byte_offset: usize,
-    namespace: Option<&str>,
-    imports: &ImportMap,
+    context: &AssignmentTypeCollectionContext<'_, '_>,
     types: &mut HashMap<String, String>,
 ) {
-    if node.start_byte() >= byte_offset {
+    if node.start_byte() >= context.byte_offset {
         return;
     }
 
@@ -6235,42 +6262,61 @@ fn collect_assignment_types(
             node.child_by_field_name("right"),
         )
         && left.kind() == "variable_name"
-        && let Some(type_name) = assigned_variable_type_name(right, text, namespace, imports, types)
+        && let Some(type_name) = assigned_variable_type_name(right, context, types)
     {
-        types.insert(node_text(left, text).to_string(), type_name);
+        types.insert(node_text(left, context.text).to_string(), type_name);
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_assignment_types(child, text, byte_offset, namespace, imports, types);
+        collect_assignment_types(child, context, types);
     }
 }
 
 fn assigned_variable_type_name(
     expression: Node,
-    text: &str,
-    namespace: Option<&str>,
-    imports: &ImportMap,
+    context: &AssignmentTypeCollectionContext<'_, '_>,
     types: &HashMap<String, String>,
 ) -> Option<String> {
     let kind = expression.kind();
     if kind == "expression" {
         let mut cursor = expression.walk();
         let inner = expression.named_children(&mut cursor).next()?;
-        return assigned_variable_type_name(inner, text, namespace, imports, types);
+        return assigned_variable_type_name(inner, context, types);
     }
     if kind == "variable_name" {
-        return types.get(node_text(expression, text)).cloned();
+        return types.get(node_text(expression, context.text)).cloned();
     }
     if kind == "object_creation_expression"
         && let Some(class_node) = class_name_for_object_creation(expression)
         && is_name_node(class_node)
     {
         return Some(qualify_type_name(
-            &clean_name_text(node_text(class_node, text)),
-            namespace,
-            imports,
+            &clean_name_text(node_text(class_node, context.text)),
+            context.namespace,
+            context.imports,
         ));
+    }
+    if matches!(
+        kind,
+        "function_call_expression" | "scoped_call_expression" | "member_call_expression"
+    ) {
+        let target = call_target_for_call_node(expression, context.text).ok()?;
+        let return_type = context
+            .index?
+            .resolve(
+                &target,
+                context.root,
+                context.text,
+                expression.start_byte(),
+                context.namespace,
+                context.imports,
+            )
+            .ok()?
+            .return_type?;
+        if return_type.key.starts_with("class:") {
+            return Some(return_type.display);
+        }
     }
 
     None
