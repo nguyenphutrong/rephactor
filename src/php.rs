@@ -38,6 +38,7 @@ struct ClassInfo {
     location: Option<SourceLocation>,
     doc_summary: Option<String>,
     methods: HashMap<String, Signature>,
+    constants: Vec<String>,
     constructor: Option<Signature>,
     parents: Vec<String>,
     interfaces: Vec<String>,
@@ -1550,7 +1551,7 @@ fn completion_for_position_with_cache(
         else {
             return Err(SkipReason::UnresolvedCallable(class_name));
         };
-        method_completion_items(&index, class_info, &method_prefix)
+        static_scope_completion_items(&index, class_info, &method_prefix)
     } else if let Some((variable, method_prefix)) =
         instance_method_completion_context(text, byte_offset)
     {
@@ -4803,6 +4804,13 @@ fn index_class(
             continue;
         }
 
+        if child.kind() == "const_declaration" {
+            class_info
+                .constants
+                .extend(class_constant_names(child, text));
+            continue;
+        }
+
         if child.kind() != "method_declaration" {
             continue;
         }
@@ -4811,6 +4819,22 @@ fn index_class(
     }
 
     index.add_class(fqn, class_info);
+}
+
+fn class_constant_names(node: Node, text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut cursor = node.walk();
+
+    for constant in node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "const_element")
+    {
+        if let Some(name_node) = first_named_child_kind(constant, "name") {
+            names.push(node_text(name_node, text).to_string());
+        }
+    }
+
+    names
 }
 
 fn index_method(
@@ -6804,6 +6828,36 @@ fn method_completion_items(
         .map(|label| CompletionItem {
             label,
             kind: Some(CompletionItemKind::METHOD),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+fn static_scope_completion_items(
+    index: &SymbolIndex,
+    class_info: &ClassInfo,
+    prefix: &str,
+) -> Vec<CompletionItem> {
+    let mut items = method_completion_items(index, class_info, prefix);
+    items.extend(class_constant_completion_items(class_info, prefix));
+    items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    items
+}
+
+fn class_constant_completion_items(class_info: &ClassInfo, prefix: &str) -> Vec<CompletionItem> {
+    let mut labels = class_info
+        .constants
+        .iter()
+        .filter(|name| prefix_matches(name, prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.to_ascii_lowercase());
+    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    labels
+        .into_iter()
+        .map(|label| CompletionItem {
+            label,
+            kind: Some(CompletionItemKind::CONSTANT),
             ..CompletionItem::default()
         })
         .collect()

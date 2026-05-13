@@ -167,10 +167,11 @@ scalar/array contracts. It intentionally avoids rich PHPDoc rendering and
 returns no hover for ambiguous or dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
-matches for indexed class names, indexed project functions, seeded PHP internal
-functions, static methods after `ClassName::`, and instance methods when the
-receiver type is locally obvious, flows through a simple local variable alias,
-or comes from a resolved call with a class return type. Method completion
+matches for indexed class names, indexed project functions and constants,
+seeded PHP internal functions, static methods and class constants after
+`ClassName::`, and instance methods when the receiver type is locally obvious,
+flows through a simple local variable alias, or comes from a resolved call with
+a class return type. Method completion
 understands native `self`, `static`, and direct `parent` parameter types inside
 class-like scopes. Method completion includes indexed parent, interface, trait,
 and PHPDoc `@mixin` methods. It also includes common PHP keyword completions and
@@ -303,6 +304,7 @@ files that are not open in the editor are picked up on the next request.
 - Basic class, function, static method, and locally obvious instance method
   completions.
 - Project constant completions.
+- Class constant completions after `ClassName::`.
 - Related instance method completions from indexed parents, interfaces, traits,
   and PHPDoc `@mixin` classes.
 - PHP keyword completions.

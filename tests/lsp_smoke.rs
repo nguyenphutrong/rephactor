@@ -4,7 +4,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{CompletionItemKind, Url};
 
 struct LspProcess {
     child: Child,
@@ -1150,12 +1150,19 @@ fn lsp_returns_method_completion_after_static_scope() {
     let root = temp_project("completion-static-method");
     let mut server = LspProcess::start(&root);
     let file = root.join("example.php");
-    let text = "<?php\nclass CustomerRecord { public static function syncOrder($order) {} }\nCustomerRecord::syncOrder();\n";
+    let text = "<?php\nclass CustomerRecord { const STATUS_PAID = 'paid'; public static function syncOrder($order) {} }\nCustomerRecord::syncOrder();\n";
     let uri = server.open_php(&file, text);
 
-    let items = server.completion(&uri, 2, 20);
+    let items = server.completion(&uri, 2, 16);
+    let constant_kind =
+        serde_json::to_value(CompletionItemKind::CONSTANT).expect("constant kind json");
 
     assert!(items.iter().any(|item| item["label"] == "syncOrder"));
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "STATUS_PAID" && item["kind"] == constant_kind })
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
