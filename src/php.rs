@@ -1344,19 +1344,7 @@ fn implementation_locations_for_method(
     method_key: &str,
     open_paths: &HashMap<PathBuf, String>,
 ) -> Result<GotoDefinitionResponse, SkipReason> {
-    let mut locations = index
-        .classes
-        .values()
-        .filter(|class_info| {
-            normalize_symbol_key(&class_info.fqn) != normalize_symbol_key(&target.fqn)
-        })
-        .filter(|class_info| {
-            class_derives_from(index, class_info, &target.fqn, &mut HashSet::new())
-        })
-        .filter_map(|class_info| class_info.methods.get(method_key))
-        .filter_map(|signature| location_for_source(signature.location.as_ref()?, open_paths))
-        .collect::<Vec<_>>();
-    locations.sort_by_key(|location| location.uri.to_string());
+    let locations = implementation_locations_for_method_lens(index, target, method_key, open_paths);
 
     if locations.is_empty() {
         Err(SkipReason::NoEdits)
@@ -3613,17 +3601,36 @@ fn implementation_code_lens_for_declaration(
     };
     if !matches!(
         declaration.kind(),
-        "class_declaration" | "interface_declaration" | "trait_declaration"
+        "class_declaration" | "interface_declaration" | "trait_declaration" | "method_declaration"
     ) {
         return Ok(None);
     }
 
     let namespace = namespace_at_byte(root, text, declaration.start_byte());
-    let class_name = clean_name_text(node_text(name, text));
-    let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), imports) else {
-        return Ok(None);
+    let locations = if declaration.kind() == "method_declaration" {
+        let Some(class_node) = containing_class_like_declaration(declaration) else {
+            return Ok(None);
+        };
+        let Some(class_name_node) = class_node.child_by_field_name("name") else {
+            return Ok(None);
+        };
+        let class_name = clean_name_text(node_text(class_name_node, text));
+        let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), imports) else {
+            return Ok(None);
+        };
+        implementation_locations_for_method_lens(
+            index,
+            target,
+            &normalize_method_key(node_text(name, text)),
+            open_paths,
+        )
+    } else {
+        let class_name = clean_name_text(node_text(name, text));
+        let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), imports) else {
+            return Ok(None);
+        };
+        implementation_locations_for_class(index, target, open_paths)
     };
-    let locations = implementation_locations_for_class(index, target, open_paths);
     if locations.is_empty() {
         return Ok(None);
     }
@@ -3664,6 +3671,28 @@ fn implementation_locations_for_class(
             class_derives_from(index, class_info, &target.fqn, &mut HashSet::new())
         })
         .filter_map(|class_info| location_for_source(class_info.location.as_ref()?, open_paths))
+        .collect::<Vec<_>>();
+    locations.sort_by_key(|location| location.uri.to_string());
+    locations
+}
+
+fn implementation_locations_for_method_lens(
+    index: &SymbolIndex,
+    target: &ClassInfo,
+    method_key: &str,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Vec<Location> {
+    let mut locations = index
+        .classes
+        .values()
+        .filter(|class_info| {
+            normalize_symbol_key(&class_info.fqn) != normalize_symbol_key(&target.fqn)
+        })
+        .filter(|class_info| {
+            class_derives_from(index, class_info, &target.fqn, &mut HashSet::new())
+        })
+        .filter_map(|class_info| class_info.methods.get(method_key))
+        .filter_map(|signature| location_for_source(signature.location.as_ref()?, open_paths))
         .collect::<Vec<_>>();
     locations.sort_by_key(|location| location.uri.to_string());
     locations

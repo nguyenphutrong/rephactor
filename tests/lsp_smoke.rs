@@ -1318,22 +1318,28 @@ fn lsp_returns_implementation_code_lenses_for_class_like_declarations() {
     .expect("write composer");
     std::fs::write(
         src_dir.join("EmailSender.php"),
-        "<?php\nnamespace App;\nclass EmailSender implements Sender {}\n",
+        "<?php\nnamespace App;\nclass EmailSender implements Sender { public function dispatch($invoice) {} }\n",
     )
     .expect("write implementation");
     let mut server = LspProcess::start(&root);
     let contract_path = src_dir.join("Sender.php");
     let contract_uri = server.open_php(
         &contract_path,
-        "<?php\nnamespace App;\ninterface Sender {}\n",
+        "<?php\nnamespace App;\ninterface Sender { public function dispatch($invoice); }\n",
     );
 
     let lenses = server.code_lens(&contract_uri);
 
-    assert!(lenses.iter().any(|lens| {
-        lens["command"]["title"] == "1 implementation"
-            && lens["command"]["command"] == "editor.action.showReferences"
-    }));
+    assert_eq!(
+        lenses
+            .iter()
+            .filter(|lens| {
+                lens["command"]["title"] == "1 implementation"
+                    && lens["command"]["command"] == "editor.action.showReferences"
+            })
+            .count(),
+        2
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
