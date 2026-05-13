@@ -2489,6 +2489,7 @@ fn collect_local_call_assignment_return_types(
         )
         && left.kind() == "variable_name"
         && let Some(return_type) = inferred_call_return_type(right, context)
+            .or_else(|| assigned_variable_return_type(right, context.text, types))
     {
         types.insert(node_text(left, context.text).to_string(), return_type);
     }
@@ -2565,6 +2566,7 @@ fn collect_local_assignment_return_types(
         )
         && left.kind() == "variable_name"
         && let Some(return_type) = inferred_assigned_return_type(right, text, namespace, imports)
+            .or_else(|| assigned_variable_return_type(right, text, types))
     {
         types.insert(node_text(left, text).to_string(), return_type);
     }
@@ -2602,6 +2604,22 @@ fn inferred_assigned_return_type(
     inferred_return_expression_type(
         expression, expression, expression, text, namespace, imports, None,
     )
+}
+
+fn assigned_variable_return_type(
+    expression: Node,
+    text: &str,
+    types: &HashMap<String, ComparableReturnType>,
+) -> Option<ComparableReturnType> {
+    let kind = expression.kind();
+    if kind == "expression" {
+        let mut cursor = expression.walk();
+        let inner = expression.named_children(&mut cursor).next()?;
+        return assigned_variable_return_type(inner, text, types);
+    }
+    (kind == "variable_name")
+        .then(|| types.get(node_text(expression, text)).cloned())
+        .flatten()
 }
 
 fn inferred_argument_expression_type(
@@ -2815,6 +2833,9 @@ fn collect_assignment_type_mismatches(
                 index: context.index,
             };
             inferred_call_return_type(right, &call_context)
+        })
+        .or_else(|| {
+            inferred_assigned_variable_type(declaration, right, context, assignment_namespace)
         });
         if let Some(expected) = expected
             && let Some(actual) = actual
@@ -2844,6 +2865,44 @@ fn collect_assignment_type_mismatches(
     for child in node.named_children(&mut cursor) {
         collect_assignment_type_mismatches(declaration, child, context, diagnostics);
     }
+}
+
+fn inferred_assigned_variable_type(
+    declaration: Node,
+    expression: Node,
+    context: &AssignmentTypeMismatchContext<'_, '_>,
+    namespace: Option<&str>,
+) -> Option<ComparableReturnType> {
+    let kind = expression.kind();
+    if kind == "expression" {
+        let mut cursor = expression.walk();
+        let inner = expression.named_children(&mut cursor).next()?;
+        return inferred_assigned_variable_type(declaration, inner, context, namespace);
+    }
+    if kind != "variable_name" {
+        return None;
+    }
+
+    let variable_name = node_text(expression, context.text);
+    local_variable_return_type_at_byte(
+        declaration,
+        context.text,
+        expression.start_byte(),
+        namespace,
+        context.imports,
+        variable_name,
+    )
+    .or_else(|| {
+        let call_context = CallAssignmentInference {
+            root: context.root,
+            text: context.text,
+            byte_offset: expression.start_byte(),
+            namespace,
+            imports: context.imports,
+            index: context.index,
+        };
+        local_variable_call_return_type_at_byte(declaration, variable_name, &call_context)
+    })
 }
 
 fn phpdoc_variable_type_at_byte(
