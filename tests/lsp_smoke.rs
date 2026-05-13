@@ -713,6 +713,22 @@ fn lsp_returns_hover_for_resolved_function_call() {
 }
 
 #[test]
+fn lsp_returns_hover_for_imported_constant() {
+    let root = temp_project("hover-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App\\Config;\nconst API_VERSION = '1';\nnamespace App\\Http;\nuse const App\\Config\\API_VERSION;\necho API_VERSION;\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 5, 7).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert_eq!(hover["contents"]["kind"], "markdown");
+    assert!(markdown.contains("const App\\Config\\API_VERSION"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_type_definition_for_typed_variable() {
     let root = temp_project("type-definition");
     let mut server = LspProcess::start(&root);

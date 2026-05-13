@@ -1496,16 +1496,26 @@ fn hover_for_position_with_cache(
     let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
         return Err(SkipReason::NoSupportedCall);
     };
-    let class_name = clean_name_text(node_text(name_node, text));
-    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
-        return Err(SkipReason::UnresolvedCallable(class_name));
-    };
+    let symbol_name = clean_name_text(node_text(name_node, text));
+    if let Some(class_info) = index.resolve_class(&symbol_name, namespace.as_deref(), &imports) {
+        return Ok(hover_from_parts(
+            format!("class {}", class_info.fqn),
+            class_info.location.as_ref(),
+            class_info.doc_summary.as_deref(),
+        ));
+    }
 
-    Ok(hover_from_parts(
-        format!("class {}", class_info.fqn),
-        class_info.location.as_ref(),
-        class_info.doc_summary.as_deref(),
-    ))
+    if let Some(constant_info) =
+        index.resolve_constant(&symbol_name, namespace.as_deref(), &imports)
+    {
+        return Ok(hover_from_parts(
+            format!("const {}", constant_info.fqn),
+            constant_info.location.as_ref(),
+            None,
+        ));
+    }
+
+    Err(SkipReason::UnresolvedCallable(symbol_name))
 }
 
 fn completion_for_position_with_cache(
@@ -4035,6 +4045,28 @@ impl ImportMap {
 
         name_candidates(&name, namespace)
     }
+
+    fn resolve_constant_name(&self, name: &str, namespace: Option<&str>) -> Vec<String> {
+        let name = clean_name_text(name);
+        if name.starts_with('\\') {
+            return vec![name.trim_start_matches('\\').to_string()];
+        }
+
+        let mut segments = name.split('\\');
+        let first_segment = segments.next().unwrap_or_default();
+        let rest = segments.collect::<Vec<_>>();
+
+        if let Some(imported) = self.constants.get(&normalize_symbol_key(first_segment)) {
+            let mut resolved = imported.clone();
+            if !rest.is_empty() {
+                resolved.push('\\');
+                resolved.push_str(&rest.join("\\"));
+            }
+            return vec![resolved];
+        }
+
+        name_candidates(&name, namespace)
+    }
 }
 
 impl SymbolIndex {
@@ -4187,6 +4219,21 @@ impl SymbolIndex {
         for candidate in imports.resolve_class_name(class_name, namespace) {
             if let Some(class_info) = self.classes.get(&normalize_symbol_key(&candidate)) {
                 return Some(class_info);
+            }
+        }
+
+        None
+    }
+
+    fn resolve_constant(
+        &self,
+        constant_name: &str,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> Option<&ConstantInfo> {
+        for candidate in imports.resolve_constant_name(constant_name, namespace) {
+            if let Some(constant_info) = self.constants.get(&normalize_symbol_key(&candidate)) {
+                return Some(constant_info);
             }
         }
 
