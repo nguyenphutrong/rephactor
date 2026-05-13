@@ -306,6 +306,8 @@ pub fn analyze_diagnostics_for_document_with_cache(
         });
     }
 
+    diagnostics.extend(duplicate_declaration_diagnostics(root, text));
+
     diagnostics
 }
 
@@ -1324,6 +1326,67 @@ fn collect_parse_error_diagnostics(node: Node, text: &str, diagnostics: &mut Vec
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_parse_error_diagnostics(child, text, diagnostics);
+    }
+}
+
+fn duplicate_declaration_diagnostics(root: Node, text: &str) -> Vec<Diagnostic> {
+    let mut declarations = Vec::new();
+    collect_duplicate_checked_declarations(root, &mut declarations);
+    let mut seen = HashMap::new();
+    let mut diagnostics = Vec::new();
+
+    for declaration in declarations {
+        let Some(name_node) = declaration.child_by_field_name("name") else {
+            continue;
+        };
+        let namespace = namespace_at_byte(root, text, declaration.start_byte());
+        let name = qualify_name(node_text(name_node, text), namespace.as_deref());
+        let duplicate_key = match declaration.kind() {
+            "function_definition" => format!("function:{}", normalize_symbol_key(&name)),
+            "class_declaration" | "interface_declaration" | "trait_declaration" => {
+                format!("type:{}", normalize_symbol_key(&name))
+            }
+            _ => continue,
+        };
+
+        if seen.insert(duplicate_key, name_node.start_byte()).is_some() {
+            let label = if declaration.kind() == "function_definition" {
+                "function"
+            } else {
+                "type"
+            };
+            diagnostics.push(Diagnostic {
+                range: range_for_bytes(text, name_node.start_byte(), name_node.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!("duplicate {label} declaration {name}"),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
+    diagnostics
+}
+
+fn collect_duplicate_checked_declarations<'tree>(
+    node: Node<'tree>,
+    declarations: &mut Vec<Node<'tree>>,
+) {
+    if matches!(
+        node.kind(),
+        "function_definition" | "class_declaration" | "interface_declaration" | "trait_declaration"
+    ) {
+        declarations.push(node);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_duplicate_checked_declarations(child, declarations);
     }
 }
 

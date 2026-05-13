@@ -177,9 +177,9 @@ Code Lens V1 shows exact-reference counts for function, class, interface,
 trait, and method declarations.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
-callable diagnostics, and unresolved type-annotation diagnostics for open
-documents. Broader static analysis is still deferred until the type model is
-stronger.
+callable diagnostics, unresolved type-annotation diagnostics, and duplicate
+function/class-like declaration diagnostics for open documents. Broader static
+analysis is still deferred until the type model is stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -232,6 +232,8 @@ file watcher is intentionally deferred.
 - Parse diagnostics for open PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Unresolved type-annotation diagnostics for open PHP documents.
+- Duplicate function and class-like declaration diagnostics for open PHP
+  documents.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Parameter-name inlay hints for resolved positional call arguments.
