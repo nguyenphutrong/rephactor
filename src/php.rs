@@ -4072,6 +4072,21 @@ fn collect_phpdoc_type_annotation_diagnostics(
                 );
             }
         }
+
+        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@throws") {
+            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+            if let Some(type_name) = phpdoc_var_type_token(&tokens) {
+                maybe_push_unresolved_phpdoc_type_diagnostic(
+                    text,
+                    imports,
+                    index,
+                    namespace.as_deref(),
+                    &record,
+                    type_name,
+                    diagnostics,
+                );
+            }
+        }
     }
 
     if matches!(

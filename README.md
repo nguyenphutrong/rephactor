@@ -364,8 +364,8 @@ files that are not open in the editor are picked up on the next request.
 - Parse diagnostics for open PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Unresolved type-annotation diagnostics for open PHP documents.
-- Unresolved PHPDoc `@param` and `@return` type diagnostics for open PHP
-  documents.
+- Unresolved PHPDoc `@param`, `@return`, and `@throws` type diagnostics for
+  open PHP documents.
 - Unresolved class-level PHPDoc `@property`, `@property-read`,
   `@property-write`, `@mixin`, and `@method` type diagnostics for open PHP
   documents.
