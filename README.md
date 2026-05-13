@@ -61,6 +61,9 @@ return a path, add Cargo's bin directory to your shell profile:
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
+Prebuilt release binaries are not published yet. Until the V1 behavior settles,
+the supported install path is `cargo install --path .` from this repository.
+
 ## Zed Setup
 
 Zed compiles dev extensions to Wasm. Make sure Zed sees the Rustup toolchain
@@ -129,6 +132,29 @@ Rephactor returns no action instead of guessing for:
 - ambiguous symbols
 - unknown parameter names
 - PHP internal functions or Composer classmaps
+- Composer autoload modes other than `autoload.psr-4`
+- parent/interface/trait resolution that depends on unindexed or ambiguous
+  symbols
+- PHP version detection below 8.0; project version configuration is not wired
+  yet
+
+## Release Status
+
+Current release posture:
+
+- Build from source with `cargo install --path .`.
+- Install the local Zed extension from `zed-extension/`.
+- Verify the Rust server with `cargo fmt --check`, `cargo check`,
+  `cargo test`, and `cargo clippy -- -D warnings`.
+- Verify the Zed extension with `scripts/check-zed-extension.sh`.
+
+Deferred until V1 behavior is stable:
+
+- prebuilt macOS, Linux, and Windows binaries
+- Composer classmap support
+- PHP internal stubs
+- PHPStan/Psalm metadata
+- project PHP version configuration
 
 ## Manual Acceptance
 
