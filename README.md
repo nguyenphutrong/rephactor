@@ -197,9 +197,10 @@ into method resolution for completion, signature help, and code actions.
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
 function/class-like declaration diagnostics for open documents. It also reports
-duplicate parameter diagnostics and conservative unused-import diagnostics for
-normal non-aliased class imports. Broader static analysis is still deferred
-until the type model is stronger.
+duplicate parameter diagnostics, unknown named-argument diagnostics for resolved
+calls, and conservative unused-import diagnostics for normal non-aliased class
+imports. Broader static analysis is still deferred until the type model is
+stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -259,6 +260,7 @@ files that are not open in the editor are picked up on the next request.
 - Duplicate function and class-like declaration diagnostics for open PHP
   documents.
 - Duplicate function and method parameter diagnostics for open PHP documents.
+- Unknown named-argument diagnostics for resolved calls in open PHP documents.
 - Conservative unused-import diagnostics for normal non-aliased class imports in
   open PHP documents.
 - Same-file document highlights for exact AST name matches.

@@ -248,9 +248,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
             continue;
         };
         let namespace = namespace_at_byte(root, text, call_node.start_byte());
-        if let Err(
-            reason @ (SkipReason::UnresolvedCallable(_) | SkipReason::AmbiguousCallable(_)),
-        ) = index.resolve(
+        match index.resolve(
             &call.target,
             root,
             text,
@@ -258,17 +256,25 @@ pub fn analyze_diagnostics_for_document_with_cache(
             namespace.as_deref(),
             &imports,
         ) {
-            diagnostics.push(Diagnostic {
-                range: call_target_range(text, call_node).unwrap_or_else(|_| Range::default()),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: None,
-                code_description: None,
-                source: Some("rephactor".to_string()),
-                message: reason.to_string(),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
+            Ok(signature) => {
+                diagnostics.extend(unknown_named_argument_diagnostics(text, &call, &signature));
+            }
+            Err(
+                reason @ (SkipReason::UnresolvedCallable(_) | SkipReason::AmbiguousCallable(_)),
+            ) => {
+                diagnostics.push(Diagnostic {
+                    range: call_target_range(text, call_node).unwrap_or_else(|_| Range::default()),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("rephactor".to_string()),
+                    message: reason.to_string(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
+            Err(_) => {}
         }
     }
 
@@ -1619,6 +1625,39 @@ fn duplicate_parameter_diagnostics(root: Node, text: &str) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+fn unknown_named_argument_diagnostics(
+    text: &str,
+    call: &CallInfo,
+    signature: &Signature,
+) -> Vec<Diagnostic> {
+    call.arguments
+        .iter()
+        .filter_map(|argument| {
+            let argument_name = argument.name.as_ref()?;
+            if signature
+                .parameters
+                .iter()
+                .any(|parameter| parameter.eq_ignore_ascii_case(argument_name))
+            {
+                return None;
+            }
+
+            Some(Diagnostic {
+                range: range_for_bytes(text, argument.start_byte, argument.end_byte)
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!("unknown named argument {argument_name}"),
+                related_information: None,
+                tags: None,
+                data: None,
+            })
+        })
+        .collect()
 }
 
 fn collect_function_like_declarations<'tree>(
