@@ -3473,6 +3473,29 @@ fn lsp_publishes_semantic_diagnostics_for_local_variable_return_type_mismatch() 
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_internal_method_argument_type_mismatch() {
+    let root = temp_project("internal-method-argument-type-mismatch");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\n$date = new DateTimeImmutable('now');\n$date->format(123);\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for format: expected string, got int"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_call_return_type_mismatch() {
     let root = temp_project("call-return-type-mismatch-diagnostics");
     let mut server = LspProcess::start(&root);

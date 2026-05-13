@@ -416,7 +416,7 @@ files that are not open in the editor are picked up on the next request.
 - Conservative PHPDoc generic array/list diagnostics that treat `array<int,Foo>`,
   `list<Foo>`, and `Foo[]` as array contracts.
 - Conservative argument-type mismatch diagnostics for seeded PHP internal
-  function parameter contracts.
+  function and method parameter contracts.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments
   with declared return types.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments

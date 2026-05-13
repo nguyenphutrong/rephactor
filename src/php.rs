@@ -9386,17 +9386,19 @@ fn internal_constructor_signature(class_name: &str) -> Option<Signature> {
 fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature> {
     let normalized_class = normalize_symbol_key(class_name);
     let normalized_method = normalize_method_key(method);
-    let (canonical_class, canonical_method, parameters, return_type) =
+    let (canonical_class, canonical_method, parameters, parameter_types, return_type) =
         match (normalized_class.as_str(), normalized_method.as_str()) {
             ("datetime" | "datetimeimmutable" | "datetimeinterface", "format") => (
                 last_name_segment(class_name),
                 "format",
                 &["format"][..],
+                &[Some("string")][..],
                 Some("string"),
             ),
             ("datetime" | "datetimeimmutable" | "datetimeinterface", "gettimestamp") => (
                 last_name_segment(class_name),
                 "getTimestamp",
+                &[][..],
                 &[][..],
                 Some("int"),
             ),
@@ -9404,12 +9406,14 @@ fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature
                 last_name_segment(class_name),
                 "modify",
                 &["modifier"][..],
+                &[Some("string")][..],
                 None,
             ),
             ("datetime" | "datetimeimmutable", "createfromformat") => (
                 last_name_segment(class_name),
                 "createFromFormat",
                 &["format", "datetime", "timezone"][..],
+                &[Some("string"), Some("string"), None][..],
                 None,
             ),
             _ => return None,
@@ -9421,7 +9425,13 @@ fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature
             .iter()
             .map(|parameter| parameter.to_string())
             .collect(),
-        parameter_types: vec![None; parameters.len()],
+        parameter_types: parameter_types
+            .iter()
+            .map(|type_name| {
+                type_name
+                    .map(|type_name| comparable_return_type(type_name, None, &ImportMap::default()))
+            })
+            .collect(),
         return_type: return_type
             .map(|type_name| comparable_return_type(type_name, None, &ImportMap::default())),
         is_variadic: false,
