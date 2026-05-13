@@ -29,6 +29,7 @@ of the same resolver and project index.
   constructors.
 - Return `WorkspaceEdit` changes that insert `parameter_name: ` before
   positional arguments.
+- Provide conservative class import refactor code actions.
 - Provide `textDocument/signatureHelp` for resolved callables.
 - Provide `textDocument/definition` for resolved project symbols.
 - Skip cases where conversion could change behavior or where symbol resolution
@@ -105,8 +106,8 @@ run Rephactor alongside it:
 }
 ```
 
-Rephactor currently provides one refactor code action, Signature Help V1, and
-Go To Definition V1.
+Rephactor currently provides named-argument and class-import refactor code
+actions, Signature Help V1, and Go To Definition V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -119,6 +120,11 @@ signature for unsupported or ambiguous calls instead of guessing.
 Go To Definition V1 navigates to resolved functions, classes, methods, static
 methods, constructors, traits, interfaces, and imports that are present in the
 project index. It returns no location for dynamic or ambiguous symbols.
+
+Import refactors support adding an import for a resolvable fully-qualified
+class name, shortening that usage, sorting simple class imports, and removing
+unused simple class imports. Function imports, const imports, and destructive
+grouped-import rewrites are intentionally skipped.
 
 Zed currently applies LSP code actions directly. It does not show a PHPStorm-
 style diff preview when moving through code action menu items; the aside popover
@@ -139,6 +145,7 @@ file watcher is intentionally deferred.
 ## Supported Cases
 
 - Same-file functions.
+- Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.
@@ -159,6 +166,7 @@ Rephactor returns no action instead of guessing for:
 
 - dynamic calls such as `$fn(...)` or `$object->$method(...)`
 - calls with unpacking (`...$args`)
+- function imports, const imports, and grouped-import rewrites
 - calls whose existing named arguments do not match the resolved signature
 - ambiguous symbols
 - unknown parameter names

@@ -361,6 +361,24 @@ fn lsp_returns_named_argument_code_action_for_open_document() {
 }
 
 #[test]
+fn lsp_returns_import_refactor_for_fully_qualified_class_name() {
+    let root = temp_project("import-refactor");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App\\Http;\nclass Controller { public function run() { \\App\\Models\\Customer::sync(); } }\nnamespace App\\Models;\nclass Customer { public static function sync() {} }\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 2, 60);
+
+    assert!(
+        actions.iter().any(|action| {
+            action["title"] == "[Rephactor] Add import for 'App\\Models\\Customer'"
+        })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_handles_grouped_import_static_method() {
     let root = temp_project("grouped-import");
     let mut server = LspProcess::start(&root);

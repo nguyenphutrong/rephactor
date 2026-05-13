@@ -22,6 +22,7 @@ struct Signature {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ClassInfo {
+    fqn: String,
     location: Option<SourceLocation>,
     methods: HashMap<String, Signature>,
     constructor: Option<Signature>,
@@ -70,6 +71,16 @@ struct ArgumentInfo {
     insert_byte: usize,
     name: Option<String>,
     is_unpacking: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImportDeclaration {
+    fqn: String,
+    alias: String,
+    start_byte: usize,
+    end_byte: usize,
+    is_grouped: bool,
+    has_alias: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -164,17 +175,30 @@ pub fn analyze_code_actions_for_position_with_cache(
     cache: &mut ProjectIndexCache,
 ) -> CodeActionAnalysis {
     let index_cache_status = cache.status_for_document(uri);
+    let mut actions = Vec::new();
+    let mut skip_reason = None;
+
     match named_argument_code_action_with_cache(uri, text, position, open_documents, cache) {
-        CodeActionOutcome::Action(action) => CodeActionAnalysis {
-            actions: vec![CodeActionOrCommand::CodeAction(*action)],
-            skip_reason: None,
-            index_cache_status,
-        },
-        CodeActionOutcome::NoAction(reason) => CodeActionAnalysis {
-            actions: Vec::new(),
-            skip_reason: Some(reason),
-            index_cache_status,
-        },
+        CodeActionOutcome::Action(action) => actions.push(CodeActionOrCommand::CodeAction(*action)),
+        CodeActionOutcome::NoAction(reason) => skip_reason = Some(reason),
+    }
+
+    match import_code_actions_with_cache(uri, text, position, open_documents, cache) {
+        Ok(import_actions) => {
+            actions.extend(
+                import_actions
+                    .into_iter()
+                    .map(CodeActionOrCommand::CodeAction),
+            );
+        }
+        Err(reason) if actions.is_empty() && skip_reason.is_none() => skip_reason = Some(reason),
+        Err(_) => {}
+    }
+
+    CodeActionAnalysis {
+        skip_reason: actions.is_empty().then_some(skip_reason).flatten(),
+        actions,
+        index_cache_status,
     }
 }
 
@@ -280,6 +304,42 @@ fn named_argument_code_action_with_cache(
     }))
 }
 
+fn import_code_actions_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<Vec<CodeAction>, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+
+    let root = tree.root_node();
+    let imports = import_declarations(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let mut actions = Vec::new();
+
+    if let Some(action) =
+        replace_fqcn_with_import_action(uri, text, root, byte_offset, &imports, &index)?
+    {
+        actions.push(action);
+    }
+    if let Some(action) = sort_imports_action(uri, text, &imports)? {
+        actions.push(action);
+    }
+    actions.extend(remove_unused_import_actions(uri, text, root, &imports)?);
+
+    if actions.is_empty() {
+        Err(SkipReason::NoEdits)
+    } else {
+        Ok(actions)
+    }
+}
+
 fn signature_help_for_position_with_cache(
     uri: &Url,
     text: &str,
@@ -357,7 +417,7 @@ fn definition_for_position_with_cache(
         return location_response(signature.location.as_ref(), &open_paths);
     }
 
-    let Some(name_node) = find_smallest_name(root, byte_offset) else {
+    let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
         return Err(SkipReason::NoSupportedCall);
     };
     let class_name = clean_name_text(node_text(name_node, text));
@@ -720,6 +780,78 @@ fn collect_imports(node: Node, text: &str, imports: &mut ImportMap) {
     }
 }
 
+fn import_declarations(root: Node, text: &str) -> Vec<ImportDeclaration> {
+    let mut declarations = Vec::new();
+    collect_import_declarations(root, text, &mut declarations);
+    declarations
+}
+
+fn collect_import_declarations(node: Node, text: &str, declarations: &mut Vec<ImportDeclaration>) {
+    let mut cursor = node.walk();
+
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "namespace_use_declaration" {
+            declarations.extend(import_declarations_from_node(child, text));
+            continue;
+        }
+
+        if child.kind() == "class_declaration" || child.kind() == "function_definition" {
+            continue;
+        }
+
+        collect_import_declarations(child, text, declarations);
+    }
+}
+
+fn import_declarations_from_node(node: Node, text: &str) -> Vec<ImportDeclaration> {
+    let declaration_text = node_text(node, text).trim_start();
+    if starts_with_use_kind(declaration_text, "function")
+        || starts_with_use_kind(declaration_text, "const")
+    {
+        return Vec::new();
+    }
+
+    if let Some(group) = direct_child_kind(node, "namespace_use_group") {
+        let Some(prefix) = direct_child_kind(node, "namespace_name") else {
+            return Vec::new();
+        };
+        let prefix = clean_name_text(node_text(prefix, text));
+        let mut cursor = group.walk();
+
+        return group
+            .named_children(&mut cursor)
+            .filter(|child| child.kind() == "namespace_use_clause")
+            .filter_map(|clause| {
+                let (alias, target) = use_clause_names(clause, text)?;
+                Some(ImportDeclaration {
+                    fqn: qualify_name(&target, Some(&prefix)),
+                    alias,
+                    start_byte: node.start_byte(),
+                    end_byte: node.end_byte(),
+                    is_grouped: true,
+                    has_alias: use_clause_has_alias(clause, text),
+                })
+            })
+            .collect();
+    }
+
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| child.kind() == "namespace_use_clause")
+        .filter_map(|clause| {
+            let (alias, target) = use_clause_names(clause, text)?;
+            Some(ImportDeclaration {
+                fqn: target,
+                alias,
+                start_byte: node.start_byte(),
+                end_byte: node.end_byte(),
+                is_grouped: false,
+                has_alias: use_clause_has_alias(clause, text),
+            })
+        })
+        .collect()
+}
+
 fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
     let declaration_text = node_text(node, text).trim_start();
     if starts_with_use_kind(declaration_text, "function")
@@ -879,7 +1011,9 @@ fn index_class(
         return;
     };
 
+    let fqn = qualify_name(node_text(name_node, text), namespace);
     let mut class_info = ClassInfo {
+        fqn: fqn.clone(),
         location: source_location(path, name_node.start_byte()),
         parents: class_like_names_from_direct_child(node, "base_clause", text, namespace),
         interfaces: class_like_names_from_direct_child(
@@ -907,10 +1041,7 @@ fn index_class(
         index_method(&mut class_info, child, text, path);
     }
 
-    index.add_class(
-        qualify_name(node_text(name_node, text), namespace),
-        class_info,
-    );
+    index.add_class(fqn, class_info);
 }
 
 fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option<&Path>) {
@@ -1032,6 +1163,31 @@ fn find_smallest_name<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<No
     }
 
     is_name_node(node).then_some(node)
+}
+
+fn find_name_reference_at_byte<'tree>(
+    node: Node<'tree>,
+    text: &str,
+    byte_offset: usize,
+) -> Option<Node<'tree>> {
+    let name = find_smallest_name(node, byte_offset)?;
+    let mut current = name;
+    let mut best = name;
+
+    while let Some(parent) = current.parent() {
+        if parent.start_byte() > byte_offset || parent.end_byte() < byte_offset {
+            break;
+        }
+        if is_name_node(parent) {
+            best = parent;
+            if clean_name_text(node_text(parent, text)).contains('\\') {
+                return Some(parent);
+            }
+        }
+        current = parent;
+    }
+
+    Some(best)
 }
 
 fn find_smallest_call<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {
@@ -1255,6 +1411,288 @@ fn action_title_for_edits(edits: &[TextEdit]) -> String {
     }
 
     ACTION_TITLE.to_string()
+}
+
+fn replace_fqcn_with_import_action(
+    uri: &Url,
+    text: &str,
+    root: Node,
+    byte_offset: usize,
+    imports: &[ImportDeclaration],
+    index: &SymbolIndex,
+) -> Result<Option<CodeAction>, SkipReason> {
+    let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
+        return Ok(None);
+    };
+    if is_inside_import(name_node, root, byte_offset) {
+        return Ok(None);
+    }
+
+    let fqn = clean_name_text(node_text(name_node, text))
+        .trim_start_matches('\\')
+        .to_string();
+    if !fqn.contains('\\') {
+        return Ok(None);
+    }
+
+    let Some(class_info) = index.classes.get(&normalize_symbol_key(&fqn)) else {
+        return Err(SkipReason::UnresolvedCallable(fqn));
+    };
+    if class_info.fqn != fqn {
+        return Err(SkipReason::AmbiguousCallable(fqn));
+    }
+
+    let short_name = last_name_segment(&fqn);
+    if imports.iter().any(|import| {
+        normalize_symbol_key(&import.alias) == normalize_symbol_key(short_name)
+            && normalize_symbol_key(&import.fqn) != normalize_symbol_key(&fqn)
+    }) {
+        return Err(SkipReason::AmbiguousCallable(short_name.to_string()));
+    }
+
+    let mut edits = Vec::new();
+    if !imports
+        .iter()
+        .any(|import| normalize_symbol_key(&import.fqn) == normalize_symbol_key(&fqn))
+    {
+        edits.push(insert_import_edit(text, root, imports, &fqn)?);
+    }
+
+    edits.push(TextEdit::new(
+        range_for_bytes(text, name_node.start_byte(), name_node.end_byte())?,
+        short_name.to_string(),
+    ));
+
+    Ok(Some(code_action(
+        format!("[Rephactor] Add import for '{fqn}'"),
+        uri,
+        edits,
+    )))
+}
+
+fn sort_imports_action(
+    uri: &Url,
+    text: &str,
+    imports: &[ImportDeclaration],
+) -> Result<Option<CodeAction>, SkipReason> {
+    let normal_imports = imports
+        .iter()
+        .filter(|import| !import.is_grouped && !import.has_alias)
+        .collect::<Vec<_>>();
+    if normal_imports.len() < 2 {
+        return Ok(None);
+    }
+
+    let start_byte = normal_imports
+        .iter()
+        .map(|import| import.start_byte)
+        .min()
+        .expect("normal imports");
+    let end_byte = normal_imports
+        .iter()
+        .map(|import| line_end_including_newline(text, import.end_byte))
+        .max()
+        .expect("normal imports");
+    let import_block = &text[start_byte..end_byte];
+    if import_block.contains("//") || import_block.contains("/*") {
+        return Ok(None);
+    }
+
+    let sorted = {
+        let mut imports = normal_imports
+            .iter()
+            .map(|import| import.fqn.clone())
+            .collect::<Vec<_>>();
+        imports.sort_by_key(|import| normalize_symbol_key(import));
+        imports
+    };
+    if sorted
+        .iter()
+        .map(|fqn| normalize_symbol_key(fqn))
+        .eq(normal_imports
+            .iter()
+            .map(|import| normalize_symbol_key(&import.fqn)))
+    {
+        return Ok(None);
+    }
+
+    let new_text = sorted
+        .iter()
+        .map(|fqn| format!("use {fqn};\n"))
+        .collect::<String>();
+    let edit = TextEdit::new(range_for_bytes(text, start_byte, end_byte)?, new_text);
+
+    Ok(Some(code_action(
+        "[Rephactor] Sort imports",
+        uri,
+        vec![edit],
+    )))
+}
+
+fn remove_unused_import_actions(
+    uri: &Url,
+    text: &str,
+    root: Node,
+    imports: &[ImportDeclaration],
+) -> Result<Vec<CodeAction>, SkipReason> {
+    let mut actions = Vec::new();
+
+    for import in imports
+        .iter()
+        .filter(|import| !import.is_grouped && !import.has_alias)
+    {
+        if class_name_is_used(
+            root,
+            text,
+            &import.alias,
+            import.start_byte,
+            import.end_byte,
+        ) {
+            continue;
+        }
+
+        let edit = TextEdit::new(
+            range_for_bytes(
+                text,
+                import.start_byte,
+                line_end_including_newline(text, import.end_byte),
+            )?,
+            String::new(),
+        );
+        actions.push(code_action(
+            format!("[Rephactor] Remove unused import '{}'", import.alias),
+            uri,
+            vec![edit],
+        ));
+    }
+
+    Ok(actions)
+}
+
+fn insert_import_edit(
+    text: &str,
+    root: Node,
+    imports: &[ImportDeclaration],
+    fqn: &str,
+) -> Result<TextEdit, SkipReason> {
+    let insert_byte = import_insert_byte(text, root, imports);
+    let Some(position) = lsp_position_for_byte_offset(text, insert_byte) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    Ok(TextEdit::new(
+        Range {
+            start: position,
+            end: position,
+        },
+        format!("use {fqn};\n"),
+    ))
+}
+
+fn import_insert_byte(text: &str, root: Node, imports: &[ImportDeclaration]) -> usize {
+    if let Some(last_import_end) = imports
+        .iter()
+        .filter(|import| !import.is_grouped)
+        .map(|import| line_end_including_newline(text, import.end_byte))
+        .max()
+    {
+        return last_import_end;
+    }
+
+    if let Some(namespace) = first_namespace_definition(root) {
+        return line_end_including_newline(text, namespace.end_byte());
+    }
+
+    text.find('\n').map(|index| index + 1).unwrap_or(text.len())
+}
+
+fn first_namespace_definition(root: Node) -> Option<Node> {
+    let mut cursor = root.walk();
+    root.named_children(&mut cursor)
+        .find(|child| child.kind() == "namespace_definition")
+}
+
+fn class_name_is_used(
+    root: Node,
+    text: &str,
+    alias: &str,
+    start_byte: usize,
+    end_byte: usize,
+) -> bool {
+    let mut names = Vec::new();
+    collect_name_nodes(root, &mut names);
+    names.into_iter().any(|name| {
+        (name.end_byte() <= start_byte || name.start_byte() >= end_byte)
+            && node_text(name, text).eq_ignore_ascii_case(alias)
+    })
+}
+
+fn collect_name_nodes<'tree>(node: Node<'tree>, names: &mut Vec<Node<'tree>>) {
+    if is_name_node(node) {
+        names.push(node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_name_nodes(child, names);
+    }
+}
+
+fn is_inside_import(node: Node, root: Node, byte_offset: usize) -> bool {
+    let mut imports = Vec::new();
+    collect_import_nodes(root, &mut imports);
+    imports
+        .into_iter()
+        .any(|import| import.start_byte() <= byte_offset && byte_offset <= import.end_byte())
+        || node.kind() == "namespace_use_declaration"
+}
+
+fn collect_import_nodes<'tree>(node: Node<'tree>, imports: &mut Vec<Node<'tree>>) {
+    if node.kind() == "namespace_use_declaration" {
+        imports.push(node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_import_nodes(child, imports);
+    }
+}
+
+fn code_action(title: impl Into<String>, uri: &Url, edits: Vec<TextEdit>) -> CodeAction {
+    let mut changes = HashMap::new();
+    changes.insert(uri.clone(), edits);
+
+    CodeAction {
+        title: title.into(),
+        kind: Some(CodeActionKind::REFACTOR_REWRITE),
+        diagnostics: None,
+        edit: Some(WorkspaceEdit::new(changes)),
+        command: None,
+        is_preferred: Some(false),
+        disabled: None,
+        data: None,
+    }
+}
+
+fn range_for_bytes(text: &str, start_byte: usize, end_byte: usize) -> Result<Range, SkipReason> {
+    let Some(start) = lsp_position_for_byte_offset(text, start_byte) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(end) = lsp_position_for_byte_offset(text, end_byte) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    Ok(Range { start, end })
+}
+
+fn line_end_including_newline(text: &str, byte_offset: usize) -> usize {
+    let Some(relative_newline) = text[byte_offset..].find('\n') else {
+        return text.len();
+    };
+
+    byte_offset + relative_newline + 1
 }
 
 fn location_response(
@@ -1755,21 +2193,44 @@ mod tests {
             .expect("edits")
     }
 
+    fn action_by_title(text: &str, line: u32, character: u32, title: &str) -> CodeAction {
+        analyze_code_actions_for_position(&uri(), text, position(line, character), &HashMap::new())
+            .actions
+            .into_iter()
+            .find_map(|action| match action {
+                CodeActionOrCommand::CodeAction(action) if action.title == title => Some(action),
+                _ => None,
+            })
+            .expect("code action by title")
+    }
+
+    fn edits_from_action(action: CodeAction) -> Vec<TextEdit> {
+        action
+            .edit
+            .expect("workspace edit")
+            .changes
+            .expect("changes")
+            .remove(&uri())
+            .expect("edits")
+    }
+
     fn apply_edits(text: &str, edits: &[TextEdit]) -> String {
         let mut output = text.to_string();
         let mut byte_edits = edits
             .iter()
             .map(|edit| {
-                let byte_offset = byte_offset_for_lsp_position(&output, edit.range.start)
-                    .expect("valid edit position");
-                (byte_offset, edit.new_text.clone())
+                let start = byte_offset_for_lsp_position(&output, edit.range.start)
+                    .expect("valid edit start");
+                let end =
+                    byte_offset_for_lsp_position(&output, edit.range.end).expect("valid edit end");
+                (start, end, edit.new_text.clone())
             })
             .collect::<Vec<_>>();
 
-        byte_edits.sort_by_key(|(byte_offset, _)| *byte_offset);
+        byte_edits.sort_by_key(|(start, _, _)| *start);
 
-        for (byte_offset, new_text) in byte_edits.into_iter().rev() {
-            output.insert_str(byte_offset, &new_text);
+        for (start, end, new_text) in byte_edits.into_iter().rev() {
+            output.replace_range(start..end, &new_text);
         }
 
         output
@@ -1839,6 +2300,63 @@ mod tests {
             apply_edits(text, &edits),
             "<?php\nstr_replace(search: $search, replace: $replace, subject: $subject);\n"
         );
+    }
+
+    #[test]
+    fn adds_import_and_shortens_fully_qualified_class_name() {
+        let text = "<?php\nnamespace App\\Http;\nclass Controller { public function run() { \\App\\Models\\Customer::sync(); } }\nnamespace App\\Models;\nclass Customer { public static function sync() {} }\n";
+
+        let action = action_by_title(
+            text,
+            2,
+            60,
+            "[Rephactor] Add import for 'App\\Models\\Customer'",
+        );
+        let edits = edits_from_action(action);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\Models\\Customer;\nclass Controller { public function run() { Customer::sync(); } }\nnamespace App\\Models;\nclass Customer { public static function sync() {} }\n"
+        );
+    }
+
+    #[test]
+    fn sorts_simple_imports_without_reformatting_usage() {
+        let text = "<?php\nnamespace App\\Http;\nuse Zed\\B;\nuse App\\A;\nnew B();\nnew A();\n";
+
+        let action = action_by_title(text, 4, 1, "[Rephactor] Sort imports");
+        let edits = edits_from_action(action);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\A;\nuse Zed\\B;\nnew B();\nnew A();\n"
+        );
+    }
+
+    #[test]
+    fn removes_unused_simple_import() {
+        let text = "<?php\nnamespace App\\Http;\nuse App\\A;\nuse App\\Unused;\nnew A();\n";
+
+        let action = action_by_title(text, 4, 1, "[Rephactor] Remove unused import 'Unused'");
+        let edits = edits_from_action(action);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\A;\nnew A();\n"
+        );
+    }
+
+    #[test]
+    fn skips_import_action_when_short_name_is_ambiguous() {
+        let text = "<?php\nnamespace App\\Http;\nuse Other\\Customer;\nclass Controller { public function run() { \\App\\Models\\Customer::sync(); } }\nnamespace App\\Models;\nclass Customer { public static function sync() {} }\n";
+
+        let actions =
+            analyze_code_actions_for_position(&uri(), text, position(2, 78), &HashMap::new());
+
+        assert!(actions.actions.into_iter().all(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => !action.title.contains("Add import"),
+            CodeActionOrCommand::Command(_) => true,
+        }));
     }
 
     #[test]
