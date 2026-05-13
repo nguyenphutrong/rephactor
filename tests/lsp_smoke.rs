@@ -3496,6 +3496,26 @@ fn lsp_publishes_semantic_diagnostics_for_internal_method_argument_type_mismatch
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_internal_constructor_argument_type_mismatch() {
+    let root = temp_project("internal-constructor-argument-type-mismatch");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nnew DateTimeImmutable([]);\n");
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for datetime: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_call_return_type_mismatch() {
     let root = temp_project("call-return-type-mismatch-diagnostics");
     let mut server = LspProcess::start(&root);

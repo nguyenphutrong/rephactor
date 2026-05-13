@@ -9350,18 +9350,39 @@ fn normalize_method_key(name: &str) -> String {
 
 fn internal_constructor_signature(class_name: &str) -> Option<Signature> {
     let normalized_name = normalize_symbol_key(class_name);
-    let (canonical_name, parameters) = match normalized_name.as_str() {
-        "datetime" => ("DateTime", &["datetime", "timezone"][..]),
-        "datetimeimmutable" => ("DateTimeImmutable", &["datetime", "timezone"][..]),
-        "datetimezone" => ("DateTimeZone", &["timezone"][..]),
-        "dateinterval" => ("DateInterval", &["duration"][..]),
-        "exception" => ("Exception", &["message", "code", "previous"][..]),
-        "runtimeexception" => ("RuntimeException", &["message", "code", "previous"][..]),
+    let (canonical_name, parameters, parameter_types) = match normalized_name.as_str() {
+        "datetime" => (
+            "DateTime",
+            &["datetime", "timezone"][..],
+            &[Some("string"), None][..],
+        ),
+        "datetimeimmutable" => (
+            "DateTimeImmutable",
+            &["datetime", "timezone"][..],
+            &[Some("string"), None][..],
+        ),
+        "datetimezone" => ("DateTimeZone", &["timezone"][..], &[Some("string")][..]),
+        "dateinterval" => ("DateInterval", &["duration"][..], &[Some("string")][..]),
+        "exception" => (
+            "Exception",
+            &["message", "code", "previous"][..],
+            &[Some("string"), Some("int"), None][..],
+        ),
+        "runtimeexception" => (
+            "RuntimeException",
+            &["message", "code", "previous"][..],
+            &[Some("string"), Some("int"), None][..],
+        ),
         "invalidargumentexception" => (
             "InvalidArgumentException",
             &["message", "code", "previous"][..],
+            &[Some("string"), Some("int"), None][..],
         ),
-        "logicexception" => ("LogicException", &["message", "code", "previous"][..]),
+        "logicexception" => (
+            "LogicException",
+            &["message", "code", "previous"][..],
+            &[Some("string"), Some("int"), None][..],
+        ),
         _ => return None,
     };
 
@@ -9371,7 +9392,13 @@ fn internal_constructor_signature(class_name: &str) -> Option<Signature> {
             .iter()
             .map(|parameter| parameter.to_string())
             .collect(),
-        parameter_types: vec![None; parameters.len()],
+        parameter_types: parameter_types
+            .iter()
+            .map(|type_name| {
+                type_name
+                    .map(|type_name| comparable_return_type(type_name, None, &ImportMap::default()))
+            })
+            .collect(),
         return_type: None,
         is_variadic: false,
         is_abstract: false,
