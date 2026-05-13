@@ -6235,24 +6235,45 @@ fn collect_assignment_types(
             node.child_by_field_name("right"),
         )
         && left.kind() == "variable_name"
-        && right.kind() == "object_creation_expression"
-        && let Some(class_node) = class_name_for_object_creation(right)
-        && is_name_node(class_node)
+        && let Some(type_name) = assigned_variable_type_name(right, text, namespace, imports, types)
     {
-        types.insert(
-            node_text(left, text).to_string(),
-            qualify_type_name(
-                &clean_name_text(node_text(class_node, text)),
-                namespace,
-                imports,
-            ),
-        );
+        types.insert(node_text(left, text).to_string(), type_name);
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_assignment_types(child, text, byte_offset, namespace, imports, types);
     }
+}
+
+fn assigned_variable_type_name(
+    expression: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    types: &HashMap<String, String>,
+) -> Option<String> {
+    let kind = expression.kind();
+    if kind == "expression" {
+        let mut cursor = expression.walk();
+        let inner = expression.named_children(&mut cursor).next()?;
+        return assigned_variable_type_name(inner, text, namespace, imports, types);
+    }
+    if kind == "variable_name" {
+        return types.get(node_text(expression, text)).cloned();
+    }
+    if kind == "object_creation_expression"
+        && let Some(class_node) = class_name_for_object_creation(expression)
+        && is_name_node(class_node)
+    {
+        return Some(qualify_type_name(
+            &clean_name_text(node_text(class_node, text)),
+            namespace,
+            imports,
+        ));
+    }
+
+    None
 }
 
 fn collect_phpdoc_var_types(

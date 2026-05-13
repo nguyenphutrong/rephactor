@@ -1040,6 +1040,20 @@ fn lsp_returns_related_instance_method_completions() {
 }
 
 #[test]
+fn lsp_returns_instance_method_completion_for_variable_alias() {
+    let root = temp_project("completion-variable-alias-methods");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass Sender { public function dispatch() {} }\nfunction run() {\n    $sender = new Sender();\n    $alias = $sender;\n    $alias->dispatch();\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 5, 12);
+
+    assert!(items.iter().any(|item| item["label"] == "dispatch"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_nested_document_symbols() {
     let root = temp_project("document-symbol");
     let mut server = LspProcess::start(&root);
