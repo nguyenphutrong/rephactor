@@ -13,6 +13,7 @@ use crate::php::{
     analyze_rename_for_position_with_cache, analyze_selection_ranges,
     analyze_signature_help_for_position_with_cache,
     analyze_type_definition_for_position_with_cache, analyze_workspace_symbols,
+    formatting_edits_for_text,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::request::{
@@ -24,16 +25,16 @@ use tower_lsp::lsp_types::{
     CodeActionResponse, CodeLens, CodeLensOptions, CodeLensParams, CompletionOptions,
     CompletionParams, CompletionResponse, DeclarationCapability, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentHighlight, DocumentHighlightParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
-    FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
+    DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams, DocumentLink,
+    DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse,
+    FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
     ImplementationProviderCapability, InitializeParams, InitializeResult, InlayHint,
     InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location, MessageType, OneOf,
     ReferenceParams, RenameParams, SelectionRange, SelectionRangeParams,
     SelectionRangeProviderCapability, ServerCapabilities, ServerInfo, SignatureHelp,
     SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TypeDefinitionProviderCapability, Url, WorkspaceEdit,
+    TextDocumentSyncKind, TextEdit, TypeDefinitionProviderCapability, Url, WorkspaceEdit,
     WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
@@ -133,6 +134,7 @@ fn server_capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
             work_done_progress_options: Default::default(),
         }),
+        document_formatting_provider: Some(OneOf::Left(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
@@ -1121,6 +1123,35 @@ impl LanguageServer for RephactorLanguageServer {
             .await;
 
         Ok(Some(analysis.links))
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+        let started_at = Instant::now();
+        let document_text = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).map(|document| document.text.clone())
+        };
+
+        let edits = document_text
+            .as_deref()
+            .map(formatting_edits_for_text)
+            .unwrap_or_default();
+        let elapsed = started_at.elapsed();
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "Rephactor formatting {} -> {} edit(s) in {}ms",
+                    uri,
+                    edits.len(),
+                    elapsed.as_millis()
+                ),
+            )
+            .await;
+
+        Ok((!edits.is_empty()).then_some(edits))
     }
 }
 

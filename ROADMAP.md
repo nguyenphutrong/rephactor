@@ -123,6 +123,7 @@
 - [x] Implement unused-import diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
+- [x] Implement whitespace-only `textDocument/formatting`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
 - [x] Implement inferred return-type `textDocument/inlayHint`.
 - [x] Implement `textDocument/documentLink` for include/require paths.

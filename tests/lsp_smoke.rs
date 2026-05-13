@@ -101,6 +101,10 @@ impl LspProcess {
         assert!(initialize["result"]["capabilities"]["inlayHintProvider"].is_object());
         assert!(initialize["result"]["capabilities"]["documentLinkProvider"].is_object());
         assert_eq!(
+            initialize["result"]["capabilities"]["documentFormattingProvider"],
+            json!(true)
+        );
+        assert_eq!(
             initialize["result"]["capabilities"]["selectionRangeProvider"],
             json!(true)
         );
@@ -419,6 +423,23 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("document link array")
+            .clone()
+    }
+
+    fn formatting(&mut self, uri: &str) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/formatting",
+            json!({
+                "textDocument": { "uri": uri },
+                "options": {
+                    "tabSize": 4,
+                    "insertSpaces": true
+                }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("formatting edits array")
             .clone()
     }
 
@@ -1462,6 +1483,30 @@ fn lsp_returns_document_links_for_require_paths() {
 
     assert_eq!(links.len(), 1);
     assert_eq!(links[0]["target"], file_uri(&target));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_formats_trailing_whitespace_and_final_newline() {
+    let root = temp_project("formatting-whitespace");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php   \nfunction run() {\t\n    return true;   \n}",
+    );
+
+    let edits = server.formatting(&uri);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "<?php\nfunction run() {\n    return true;\n}\n"
+    );
+    assert_eq!(
+        edits[0]["range"]["start"],
+        json!({ "line": 0, "character": 0 })
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

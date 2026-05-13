@@ -217,6 +217,9 @@ document.
 Folding Range V1 folds PHP declaration blocks, compound statements, imports,
 and comments from the syntax tree.
 
+Formatting V1 trims trailing spaces/tabs and ensures a final newline for the
+whole document. PSR-12 structural formatting is still deferred.
+
 Inlay Hint V1 shows parameter names for resolved positional call arguments. It
 also shows conservative return-type hints for function-like declarations without
 a declared return type when they consistently return `new ClassName(...)`.
@@ -279,6 +282,7 @@ files that are not open in the editor are picked up on the next request.
   open PHP documents.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
+- Whole-document whitespace formatting for trailing whitespace and final newline.
 - Parameter-name inlay hints for resolved positional call arguments.
 - Inferred return-type inlay hints for function-like declarations that return
   one `new ClassName(...)` type.
@@ -323,6 +327,7 @@ Rephactor returns no action instead of guessing for:
 - unknown parameter names
 - PHP internal functions outside the seeded stub set
 - completion for dynamic receivers or unresolved classes
+- PSR-12 structural formatting beyond trailing-whitespace cleanup
 - static-analysis diagnostics beyond parser and callable-resolution errors
 - Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous

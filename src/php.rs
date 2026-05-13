@@ -745,6 +745,29 @@ pub fn analyze_document_links(uri: &Url, text: &str) -> DocumentLinkAnalysis {
     }
 }
 
+pub fn formatting_edits_for_text(text: &str) -> Vec<TextEdit> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    let formatted = trim_trailing_whitespace_and_final_newline(text);
+    if formatted == text {
+        return Vec::new();
+    }
+
+    let Some(end) = lsp_position_for_byte_offset(text, text.len()) else {
+        return Vec::new();
+    };
+
+    vec![TextEdit::new(
+        Range {
+            start: Position::new(0, 0),
+            end,
+        },
+        formatted,
+    )]
+}
+
 fn named_argument_code_action_with_cache(
     uri: &Url,
     text: &str,
@@ -4788,6 +4811,28 @@ fn compact_identifier(value: &str) -> String {
         .filter(|character| character.is_alphanumeric())
         .map(|character| character.to_ascii_lowercase())
         .collect()
+}
+
+fn trim_trailing_whitespace_and_final_newline(text: &str) -> String {
+    let mut formatted = String::with_capacity(text.len() + 1);
+
+    for segment in text.split_inclusive('\n') {
+        let (line, newline) = if let Some(line) = segment.strip_suffix("\r\n") {
+            (line, "\r\n")
+        } else if let Some(line) = segment.strip_suffix('\n') {
+            (line, "\n")
+        } else {
+            (segment, "")
+        };
+        formatted.push_str(line.trim_end_matches([' ', '\t']));
+        formatted.push_str(newline);
+    }
+
+    if !text.ends_with('\n') {
+        formatted.push('\n');
+    }
+
+    formatted
 }
 
 fn variable_types_at_byte(
