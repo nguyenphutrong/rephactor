@@ -56,6 +56,7 @@ struct ClassConstantInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ClassPropertyInfo {
     name: String,
+    is_static: bool,
     location: Option<SourceLocation>,
 }
 
@@ -1637,7 +1638,22 @@ fn completion_for_position_with_cache(
     let index = cache.index_for_document(uri, text, open_documents);
     let prefix = completion_prefix(text, byte_offset);
 
-    let items = if let Some((class_name, method_prefix)) =
+    let items = if let Some((class_name, property_prefix)) =
+        static_property_completion_context(text, byte_offset)
+    {
+        let Some(class_info) = resolve_static_scope_class(
+            &index,
+            root,
+            text,
+            byte_offset,
+            &class_name,
+            namespace.as_deref(),
+            &imports,
+        ) else {
+            return Err(SkipReason::UnresolvedCallable(class_name));
+        };
+        property_completion_items(&index, class_info, &property_prefix, true)
+    } else if let Some((class_name, method_prefix)) =
         static_method_completion_context(text, byte_offset)
     {
         let Some(class_info) = resolve_static_scope_class(
@@ -4496,6 +4512,7 @@ impl SymbolIndex {
         class_name: &str,
         visited: &mut Vec<String>,
         names: &mut Vec<String>,
+        static_only: bool,
     ) {
         let class_key = normalize_symbol_key(class_name);
         if visited.contains(&class_key) {
@@ -4511,6 +4528,7 @@ impl SymbolIndex {
             class_info
                 .properties
                 .iter()
+                .filter(|property| property.is_static == static_only)
                 .map(|property| property.name.clone()),
         );
 
@@ -4521,7 +4539,7 @@ impl SymbolIndex {
             .chain(class_info.traits.iter())
             .chain(class_info.mixins.iter())
         {
-            self.collect_related_property_names(related_name, visited, names);
+            self.collect_related_property_names(related_name, visited, names, static_only);
         }
     }
 }
@@ -5018,6 +5036,9 @@ fn class_constant_infos(node: Node, text: &str, path: Option<&Path>) -> Vec<Clas
 fn class_property_infos(node: Node, text: &str, path: Option<&Path>) -> Vec<ClassPropertyInfo> {
     let mut properties = Vec::new();
     let mut cursor = node.walk();
+    let is_static = node_text(node, text)
+        .split_whitespace()
+        .any(|part| part.eq_ignore_ascii_case("static"));
 
     for property in node
         .named_children(&mut cursor)
@@ -5028,6 +5049,7 @@ fn class_property_infos(node: Node, text: &str, path: Option<&Path>) -> Vec<Clas
                 name: node_text(name_node, text)
                     .trim_start_matches('$')
                     .to_string(),
+                is_static,
                 location: source_location(path, name_node.start_byte()),
             });
         }
@@ -6838,6 +6860,36 @@ fn static_method_completion_context(text: &str, byte_offset: usize) -> Option<(S
     (!class_name.is_empty()).then(|| (class_name, completion_prefix(text, byte_offset)))
 }
 
+fn static_property_completion_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
+    let before = text.get(..byte_offset)?;
+    let marker = before.rfind("::$")?;
+    if before[marker + 3..]
+        .chars()
+        .any(|character| !(character.is_alphanumeric() || character == '_'))
+    {
+        return None;
+    }
+
+    let class_name = before[..marker]
+        .chars()
+        .rev()
+        .take_while(|character| {
+            character.is_alphanumeric() || *character == '_' || *character == '\\'
+        })
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    (!class_name.is_empty()).then(|| {
+        (
+            class_name,
+            before[marker + 3..byte_offset]
+                .trim_start_matches('$')
+                .to_string(),
+        )
+    })
+}
+
 fn static_constant_reference_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
     let (member_start, member_end) = identifier_bounds_at_byte(text, byte_offset)?;
     if member_start < 2 || text.get(member_start.saturating_sub(2)..member_start)? != "::" {
@@ -7135,7 +7187,7 @@ fn instance_member_completion_items(
     prefix: &str,
 ) -> Vec<CompletionItem> {
     let mut items = method_completion_items(index, class_info, prefix);
-    items.extend(property_completion_items(index, class_info, prefix));
+    items.extend(property_completion_items(index, class_info, prefix, false));
     items.sort_by_key(|item| item.label.to_ascii_lowercase());
     items
 }
@@ -7212,10 +7264,12 @@ fn property_completion_items(
     index: &SymbolIndex,
     class_info: &ClassInfo,
     prefix: &str,
+    static_only: bool,
 ) -> Vec<CompletionItem> {
     let mut labels = class_info
         .properties
         .iter()
+        .filter(|property| property.is_static == static_only)
         .map(|property| property.name.clone())
         .collect::<Vec<_>>();
 
@@ -7227,7 +7281,7 @@ fn property_completion_items(
         .chain(class_info.traits.iter())
         .chain(class_info.mixins.iter())
     {
-        index.collect_related_property_names(related_name, &mut visited, &mut labels);
+        index.collect_related_property_names(related_name, &mut visited, &mut labels, static_only);
     }
 
     let mut labels = labels

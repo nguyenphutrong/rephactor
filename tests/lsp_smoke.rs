@@ -1375,7 +1375,7 @@ fn lsp_returns_method_completion_after_static_scope() {
     let text = "<?php\nclass BaseRecord { const STATUS_OPEN = 'open'; }\nclass CustomerRecord extends BaseRecord { const STATUS_PAID = 'paid'; public static function syncOrder($order) {} }\nCustomerRecord::syncOrder();\n";
     let uri = server.open_php(&file, text);
 
-    let items = server.completion(&uri, 3, 16);
+    let items = server.completion(&uri, 3, 17);
     let constant_kind =
         serde_json::to_value(CompletionItemKind::CONSTANT).expect("constant kind json");
 
@@ -1418,6 +1418,33 @@ fn lsp_returns_static_scope_completion_for_self_and_parent() {
             .iter()
             .any(|item| { item["label"] == "STATUS_OPEN" && item["kind"] == constant_kind })
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_static_property_completions() {
+    let root = temp_project("completion-static-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseRecord { protected static $shared; protected $queue; }\nclass CustomerRecord extends BaseRecord { private static $transport; private $instance; }\nCustomerRecord::$transport;\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 3, 17);
+    let property_kind =
+        serde_json::to_value(CompletionItemKind::PROPERTY).expect("property kind json");
+
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "transport" && item["kind"] == property_kind })
+    );
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "shared" && item["kind"] == property_kind })
+    );
+    assert!(!items.iter().any(|item| item["label"] == "instance"));
+    assert!(!items.iter().any(|item| item["label"] == "queue"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
