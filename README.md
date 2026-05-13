@@ -466,7 +466,8 @@ files that are not open in the editor are picked up on the next request.
   `preg_match`, `in_array`, `str_starts_with`, `array_values`, `file_exists`,
   `dirname`, `basename`, `realpath`, `str_repeat`, `strpos`, `ltrim`,
   `is_string`, `array_reverse`, `array_unique`, `date`, `strtotime`, `round`,
-  and `abs`, with PHP manual links in hover.
+  `abs`, `hash`, `md5`, `serialize`, `gettype`, `intval`, and `strval`, with
+  PHP manual links in hover.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.
 - Projects without a Composer PHP version constraint, or projects whose
