@@ -1195,6 +1195,43 @@ fn lsp_returns_string_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_type_check_internal_function_metadata() {
+    let root = temp_project("type-check-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nis_str;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 6);
+
+    assert!(items.iter().any(|item| item["label"] == "is_string"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nfunction takes_string(string $value) {}\ntakes_string(is_string('x'));\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got bool"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 2, 16).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("is_string($value)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/is_string)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_declaration_for_implemented_method() {
     let root = temp_project("method-declaration");
     let mut server = LspProcess::start(&root);

@@ -8498,6 +8498,12 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "implode" => &["separator", "array"],
         "in_array" => &["needle", "haystack", "strict"],
         "is_array" => &["value"],
+        "is_bool" => &["value"],
+        "is_int" => &["value"],
+        "is_null" => &["value"],
+        "is_numeric" => &["value"],
+        "is_object" => &["value"],
+        "is_string" => &["value"],
         "json_decode" => &["json", "associative", "depth", "flags"],
         "json_encode" => &["value", "flags", "depth"],
         "ltrim" => &["string", "characters"],
@@ -8559,6 +8565,12 @@ fn internal_function_parameter_types(
         "implode" => &[Some("string"), Some("array")],
         "in_array" => &[None, Some("array"), Some("bool")],
         "is_array" => &[None],
+        "is_bool" => &[None],
+        "is_int" => &[None],
+        "is_null" => &[None],
+        "is_numeric" => &[None],
+        "is_object" => &[None],
+        "is_string" => &[None],
         "json_decode" => &[Some("string"), Some("bool"), Some("int"), Some("int")],
         "json_encode" => &[None, Some("int"), Some("int")],
         "ltrim" => &[Some("string"), Some("string")],
@@ -8602,7 +8614,8 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
     let type_name = match normalized_name {
         "array_column" | "array_filter" | "array_keys" | "array_map" | "array_merge"
         | "array_slice" | "array_values" | "explode" => "array",
-        "array_key_exists" | "file_exists" | "in_array" | "is_array" | "str_contains"
+        "array_key_exists" | "file_exists" | "in_array" | "is_array" | "is_bool" | "is_int"
+        | "is_null" | "is_numeric" | "is_object" | "is_string" | "str_contains"
         | "str_ends_with" | "str_starts_with" => "bool",
         "count" | "preg_match" | "strlen" | "strpos" | "strrpos" => "int",
         "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "realpath" | "rtrim"
@@ -8630,6 +8643,12 @@ fn internal_function_names() -> Vec<&'static str> {
         "implode",
         "in_array",
         "is_array",
+        "is_bool",
+        "is_int",
+        "is_null",
+        "is_numeric",
+        "is_object",
+        "is_string",
         "json_decode",
         "json_encode",
         "ltrim",
