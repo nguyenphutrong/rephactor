@@ -328,7 +328,9 @@ pub fn analyze_diagnostics_for_document_with_cache(
     diagnostics.extend(return_type_mismatch_diagnostics(
         root, text, &imports, &index,
     ));
-    diagnostics.extend(assignment_type_mismatch_diagnostics(root, text, &imports));
+    diagnostics.extend(assignment_type_mismatch_diagnostics(
+        root, text, &imports, &index,
+    ));
     diagnostics.extend(unused_import_diagnostics(
         root,
         text,
@@ -2662,19 +2664,26 @@ fn assignment_type_mismatch_diagnostics(
     root: Node,
     text: &str,
     imports: &ImportMap,
+    index: &SymbolIndex,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let empty_expected_types = HashMap::new();
-    collect_assignment_type_mismatches(
+    let context = AssignmentTypeMismatchContext {
         root,
+        text,
+        imports,
+        index,
+        expected_types: &empty_expected_types,
+    };
+    collect_assignment_type_mismatches(root, root, &context, &mut diagnostics);
+    collect_assignment_type_mismatch_diagnostics(
         root,
         root,
         text,
         imports,
-        &empty_expected_types,
+        index,
         &mut diagnostics,
     );
-    collect_assignment_type_mismatch_diagnostics(root, root, text, imports, &mut diagnostics);
     diagnostics
 }
 
@@ -2683,17 +2692,25 @@ fn collect_assignment_type_mismatch_diagnostics(
     node: Node,
     text: &str,
     imports: &ImportMap,
+    index: &SymbolIndex,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if matches!(node.kind(), "function_definition" | "method_declaration") {
         diagnostics.extend(assignment_type_mismatches_for_declaration(
-            root, node, text, imports,
+            root, node, text, imports, index,
         ));
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_assignment_type_mismatch_diagnostics(root, child, text, imports, diagnostics);
+        collect_assignment_type_mismatch_diagnostics(
+            root,
+            child,
+            text,
+            imports,
+            index,
+            diagnostics,
+        );
     }
 }
 
@@ -2702,6 +2719,7 @@ fn assignment_type_mismatches_for_declaration(
     declaration: Node,
     text: &str,
     imports: &ImportMap,
+    index: &SymbolIndex,
 ) -> Vec<Diagnostic> {
     let Some(parameters_node) = declaration.child_by_field_name("parameters") else {
         return Vec::new();
@@ -2719,25 +2737,29 @@ fn assignment_type_mismatches_for_declaration(
     }
 
     let mut diagnostics = Vec::new();
-    collect_assignment_type_mismatches(
+    let context = AssignmentTypeMismatchContext {
         root,
-        declaration,
-        declaration,
         text,
         imports,
-        &expected_types,
-        &mut diagnostics,
-    );
+        index,
+        expected_types: &expected_types,
+    };
+    collect_assignment_type_mismatches(declaration, declaration, &context, &mut diagnostics);
     diagnostics
 }
 
+struct AssignmentTypeMismatchContext<'a, 'tree> {
+    root: Node<'tree>,
+    text: &'a str,
+    imports: &'a ImportMap,
+    index: &'a SymbolIndex,
+    expected_types: &'a HashMap<String, ComparableReturnType>,
+}
+
 fn collect_assignment_type_mismatches(
-    root: Node,
     declaration: Node,
     node: Node,
-    text: &str,
-    imports: &ImportMap,
-    expected_types: &HashMap<String, ComparableReturnType>,
+    context: &AssignmentTypeMismatchContext<'_, '_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if node != declaration
@@ -2762,27 +2784,44 @@ fn collect_assignment_type_mismatches(
         )
         && left.kind() == "variable_name"
     {
-        let assignment_namespace = namespace_at_byte(root, text, node.start_byte());
+        let assignment_namespace = namespace_at_byte(context.root, context.text, node.start_byte());
         let assignment_namespace = assignment_namespace.as_deref();
-        let expected = expected_types
-            .get(node_text(left, text))
+        let expected = context
+            .expected_types
+            .get(node_text(left, context.text))
             .cloned()
             .or_else(|| {
                 phpdoc_variable_type_at_byte(
-                    text,
+                    context.text,
                     left.start_byte(),
                     assignment_namespace,
-                    imports,
-                    node_text(left, text),
+                    context.imports,
+                    node_text(left, context.text),
                 )
             });
+        let actual = inferred_assigned_return_type(
+            right,
+            context.text,
+            assignment_namespace,
+            context.imports,
+        )
+        .or_else(|| {
+            let call_context = CallAssignmentInference {
+                root: context.root,
+                text: context.text,
+                byte_offset: right.end_byte(),
+                namespace: assignment_namespace,
+                imports: context.imports,
+                index: context.index,
+            };
+            inferred_call_return_type(right, &call_context)
+        });
         if let Some(expected) = expected
-            && let Some(actual) =
-                inferred_assigned_return_type(right, text, assignment_namespace, imports)
+            && let Some(actual) = actual
             && expected != actual
         {
             diagnostics.push(Diagnostic {
-                range: range_for_bytes(text, right.start_byte(), right.end_byte())
+                range: range_for_bytes(context.text, right.start_byte(), right.end_byte())
                     .unwrap_or_else(|_| Range::default()),
                 severity: Some(DiagnosticSeverity::ERROR),
                 code: None,
@@ -2790,7 +2829,7 @@ fn collect_assignment_type_mismatches(
                 source: Some("rephactor".to_string()),
                 message: format!(
                     "assignment type mismatch for {}: expected {}, got {}",
-                    node_text(left, text),
+                    node_text(left, context.text),
                     expected.display,
                     actual.display
                 ),
@@ -2803,15 +2842,7 @@ fn collect_assignment_type_mismatches(
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_assignment_type_mismatches(
-            root,
-            declaration,
-            child,
-            text,
-            imports,
-            expected_types,
-            diagnostics,
-        );
+        collect_assignment_type_mismatches(declaration, child, context, diagnostics);
     }
 }
 
