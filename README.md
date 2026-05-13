@@ -189,7 +189,9 @@ Code Lens V1 shows exact-reference counts for function, class, interface,
 trait, and method declarations.
 
 PHPDoc creation V1 adds `@param` tags for function and method parameters and
-an `@return` tag when a non-void return type is declared.
+an `@return` tag when a non-void return type is declared. It also adds
+`@throws` tags for directly detected `throw new ExceptionClass(...)`
+expressions.
 
 PHPDoc Type V1 reads local `@var Type $variable` annotations and feeds them
 into method resolution for completion, signature help, and code actions.
@@ -274,7 +276,7 @@ files that are not open in the editor are picked up on the next request.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - PHPDoc creation for function and method declarations with parameter and
-  return tags.
+  return tags, plus direct `throw new ExceptionClass(...)` throws tags.
 - Local PHPDoc `@var Type $variable` annotations for instance method
   resolution.
 - PHPDoc `@mixin ClassName` annotations for class instance method resolution.

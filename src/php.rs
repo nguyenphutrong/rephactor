@@ -4060,6 +4060,10 @@ fn phpdoc_for_declaration(text: &str, declaration: Node) -> String {
         }
     }
 
+    for thrown_type in thrown_type_names(declaration, text) {
+        lines.push(format!("{indent} * @throws {thrown_type}"));
+    }
+
     if lines.is_empty() {
         return String::new();
     }
@@ -4069,6 +4073,44 @@ fn phpdoc_for_declaration(text: &str, declaration: Node) -> String {
     docblock.push('\n');
     docblock.push_str(&format!("{indent} */\n"));
     docblock
+}
+
+fn thrown_type_names(declaration: Node, text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_thrown_type_names(declaration, text, &mut names);
+    names.sort_by_key(|name| name.to_ascii_lowercase());
+    names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    names
+}
+
+fn collect_thrown_type_names(node: Node, text: &str, names: &mut Vec<String>) {
+    if node.kind() == "throw_expression"
+        && let Some(object_creation) = find_descendant_kind(node, "object_creation_expression")
+        && let Some(class_node) = class_name_for_object_creation(object_creation)
+        && is_name_node(class_node)
+    {
+        names.push(clean_name_text(node_text(class_node, text)));
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_thrown_type_names(child, text, names);
+    }
+}
+
+fn find_descendant_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    if node.kind() == kind {
+        return Some(node);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = find_descendant_kind(child, kind) {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 fn line_indent_before(text: &str, byte_offset: usize) -> String {

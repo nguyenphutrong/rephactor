@@ -106,6 +106,7 @@
 - [x] Implement `textDocument/rename` for exact AST symbol references.
 - [x] Implement reference-count `textDocument/codeLens` for declarations.
 - [x] Implement PHPDoc creation code actions for function-like declarations.
+- [x] Add direct thrown-exception tags to PHPDoc creation.
 - [x] Resolve local PHPDoc `@var` variable types.
 - [x] Resolve PHPDoc `@mixin` methods for instance method resolution.
 - [x] Implement parser diagnostics for open files.

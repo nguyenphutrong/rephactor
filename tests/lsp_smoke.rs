@@ -1464,7 +1464,7 @@ fn lsp_returns_phpdoc_code_action_for_function_declaration() {
     let root = temp_project("phpdoc-action");
     let mut server = LspProcess::start(&root);
     let file = root.join("example.php");
-    let text = "<?php\nfunction send_invoice(int $invoice, $notify): string { return ''; }\n";
+    let text = "<?php\nfunction send_invoice(int $invoice, $notify): string { throw new RuntimeException(); }\n";
     let uri = server.open_php(&file, text);
 
     let actions = server.code_actions(&uri, 1, 12);
@@ -1475,7 +1475,9 @@ fn lsp_returns_phpdoc_code_action_for_function_declaration() {
 
     assert_eq!(
         insert_texts(action, &uri),
-        vec!["/**\n * @param int $invoice\n * @param mixed $notify\n * @return string\n */\n"]
+        vec![
+            "/**\n * @param int $invoice\n * @param mixed $notify\n * @return string\n * @throws RuntimeException\n */\n"
+        ]
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
