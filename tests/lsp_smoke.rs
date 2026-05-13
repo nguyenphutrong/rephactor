@@ -2984,6 +2984,33 @@ fn lsp_returns_document_highlights_for_symbol_name() {
 }
 
 #[test]
+fn lsp_returns_document_highlights_for_php_keyword() {
+    let root = temp_project("document-highlight-keyword");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction pick($first) {\n    if ($first) { return 1; }\n    return 2;\n}\n",
+    );
+
+    let highlights = server.document_highlights(&uri, 2, 20);
+
+    assert_eq!(highlights.len(), 2);
+    assert!(highlights.iter().all(|highlight| highlight["kind"] == 1));
+    assert!(
+        highlights.iter().any(|highlight| {
+            highlight["range"]["start"] == json!({ "line": 2, "character": 18 })
+        })
+    );
+    assert!(
+        highlights.iter().any(|highlight| {
+            highlight["range"]["start"] == json!({ "line": 3, "character": 4 })
+        })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_folding_ranges_for_blocks_and_comments() {
     let root = temp_project("folding-range");
     let mut server = LspProcess::start(&root);

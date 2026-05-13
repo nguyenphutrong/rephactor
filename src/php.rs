@@ -4115,6 +4115,15 @@ fn document_highlights_for_position(
         return Err(SkipReason::ParseError);
     };
     let root = tree.root_node();
+
+    if let Some(keyword) = keyword_at_byte(text, byte_offset) {
+        let mut highlights = Vec::new();
+        collect_keyword_highlights(root, text, &keyword, &mut highlights)?;
+        if !highlights.is_empty() {
+            return Ok(highlights);
+        }
+    }
+
     let Some(name_node) = find_reference_name_at_byte(root, text, byte_offset) else {
         return Err(SkipReason::NoSupportedCall);
     };
@@ -4137,6 +4146,37 @@ fn document_highlights_for_position(
     }
 
     Ok(highlights)
+}
+
+fn keyword_at_byte(text: &str, byte_offset: usize) -> Option<String> {
+    let (start, end) = identifier_bounds_at_byte(text, byte_offset)?;
+    let keyword = text.get(start..end)?;
+    php_keywords()
+        .into_iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(keyword))
+        .then(|| keyword.to_ascii_lowercase())
+}
+
+fn collect_keyword_highlights(
+    node: Node,
+    text: &str,
+    keyword: &str,
+    highlights: &mut Vec<DocumentHighlight>,
+) -> Result<(), SkipReason> {
+    if node.kind().eq_ignore_ascii_case(keyword) {
+        highlights.push(DocumentHighlight {
+            range: range_for_bytes(text, node.start_byte(), node.end_byte())?,
+            kind: Some(DocumentHighlightKind::TEXT),
+        });
+        return Ok(());
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_keyword_highlights(child, text, keyword, highlights)?;
+    }
+
+    Ok(())
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
