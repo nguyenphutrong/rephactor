@@ -104,6 +104,7 @@
 - [x] Implement `textDocument/implementation` for class/interface inheritance.
 - [x] Implement `textDocument/implementation` for interface/base methods.
 - [x] Implement `textDocument/rename` for exact AST symbol references.
+- [x] Resolve calls imported with `use function`.
 - [x] Implement reference-count `textDocument/codeLens` for declarations.
 - [x] Implement code action for missing direct interface methods.
 - [x] Implement code action for missing direct abstract parent methods.

@@ -1744,6 +1744,30 @@ fn lsp_publishes_semantic_diagnostics_for_call_argument_type_mismatch() {
 }
 
 #[test]
+fn lsp_publishes_semantic_diagnostics_for_imported_function_call_argument_type_mismatch() {
+    let root = temp_project("imported-function-call-argument-type-mismatch-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace Lib;\nclass Invoice {}\nfunction make_invoice(): Invoice { return new Invoice(); }\nnamespace App;\nuse function Lib\\make_invoice;\nclass Customer {}\nfunction send(Customer $customer) {}\nsend(make_invoice());\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for customer: expected App\\Customer, got Lib\\Invoice"
+            && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_phpdoc_return_call_argument_type_mismatch() {
     let root = temp_project("phpdoc-return-call-argument-type-mismatch-diagnostics");
     let mut server = LspProcess::start(&root);

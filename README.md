@@ -368,6 +368,7 @@ files that are not open in the editor are picked up on the next request.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.
+- Function calls imported with `use function`.
 - Instance methods when the receiver type is locally obvious from a typed
   parameter or `$var = new ClassName(...)`.
 - Project symbols under Composer `autoload.psr-4` roots.
@@ -385,7 +386,7 @@ Rephactor returns no action instead of guessing for:
 
 - dynamic calls such as `$fn(...)` or `$object->$method(...)`
 - calls with unpacking (`...$args`)
-- function imports, const imports, and grouped-import rewrites
+- const imports and grouped-import rewrites
 - calls whose existing named arguments do not match the resolved signature
 - ambiguous symbols
 - unknown parameter names

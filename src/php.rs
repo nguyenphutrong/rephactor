@@ -53,6 +53,7 @@ struct SourceLocation {
 #[derive(Debug, Default)]
 struct ImportMap {
     classes: HashMap<String, String>,
+    functions: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -3435,6 +3436,11 @@ impl ImportMap {
             .insert(normalize_symbol_key(&alias), clean_name_text(&fqn));
     }
 
+    fn insert_function(&mut self, alias: String, fqn: String) {
+        self.functions
+            .insert(normalize_symbol_key(&alias), clean_name_text(&fqn));
+    }
+
     fn resolve_class_name(&self, name: &str, namespace: Option<&str>) -> Vec<String> {
         let name = clean_name_text(name);
         if name.starts_with('\\') {
@@ -3446,6 +3452,28 @@ impl ImportMap {
         let rest = segments.collect::<Vec<_>>();
 
         if let Some(imported) = self.classes.get(&normalize_symbol_key(first_segment)) {
+            let mut resolved = imported.clone();
+            if !rest.is_empty() {
+                resolved.push('\\');
+                resolved.push_str(&rest.join("\\"));
+            }
+            return vec![resolved];
+        }
+
+        name_candidates(&name, namespace)
+    }
+
+    fn resolve_function_name(&self, name: &str, namespace: Option<&str>) -> Vec<String> {
+        let name = clean_name_text(name);
+        if name.starts_with('\\') {
+            return vec![name.trim_start_matches('\\').to_string()];
+        }
+
+        let mut segments = name.split('\\');
+        let first_segment = segments.next().unwrap_or_default();
+        let rest = segments.collect::<Vec<_>>();
+
+        if let Some(imported) = self.functions.get(&normalize_symbol_key(first_segment)) {
             let mut resolved = imported.clone();
             if !rest.is_empty() {
                 resolved.push('\\');
@@ -3547,7 +3575,7 @@ impl SymbolIndex {
         imports: &ImportMap,
     ) -> Result<Signature, SkipReason> {
         match target {
-            CallTarget::Function(name) => self.resolve_function(name, namespace),
+            CallTarget::Function(name) => self.resolve_function(name, namespace, imports),
             CallTarget::StaticMethod { class_name, method } => self
                 .resolve_class(class_name, namespace, imports)
                 .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
@@ -3578,8 +3606,9 @@ impl SymbolIndex {
         &self,
         name: &str,
         namespace: Option<&str>,
+        imports: &ImportMap,
     ) -> Result<Signature, SkipReason> {
-        for candidate in name_candidates(name, namespace) {
+        for candidate in imports.resolve_function_name(name, namespace) {
             if let Some(signatures) = self.functions.get(&normalize_symbol_key(&candidate)) {
                 return if signatures.len() == 1 {
                     Ok(signatures.first().expect("signature exists").clone())
@@ -3900,11 +3929,10 @@ fn import_declarations_from_node(node: Node, text: &str) -> Vec<ImportDeclaratio
 
 fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
     let declaration_text = node_text(node, text).trim_start();
-    if starts_with_use_kind(declaration_text, "function")
-        || starts_with_use_kind(declaration_text, "const")
-    {
+    if starts_with_use_kind(declaration_text, "const") {
         return;
     }
+    let is_function_import = starts_with_use_kind(declaration_text, "function");
 
     if let Some(group) = direct_child_kind(node, "namespace_use_group") {
         let Some(prefix) = direct_child_kind(node, "namespace_name") else {
@@ -3918,7 +3946,12 @@ fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
             .filter(|child| child.kind() == "namespace_use_clause")
         {
             if let Some((alias, target)) = use_clause_names(clause, text) {
-                imports.insert_class(alias, qualify_name(&target, Some(&prefix)));
+                let fqn = qualify_name(&target, Some(&prefix));
+                if is_function_import {
+                    imports.insert_function(alias, fqn);
+                } else {
+                    imports.insert_class(alias, fqn);
+                }
             }
         }
 
@@ -3931,7 +3964,11 @@ fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
         .filter(|child| child.kind() == "namespace_use_clause")
     {
         if let Some((alias, target)) = use_clause_names(clause, text) {
-            imports.insert_class(alias, target);
+            if is_function_import {
+                imports.insert_function(alias, target);
+            } else {
+                imports.insert_class(alias, target);
+            }
         }
     }
 }
