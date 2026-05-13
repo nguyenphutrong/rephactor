@@ -221,8 +221,9 @@ Direct resolved-call arguments with declared return types are checked too.
 Typed parameters report assignment mismatches when
 reassigned to those obvious values or resolved calls with declared return types,
 and local `@var` PHPDoc annotations are used as assignment type contracts for
-the same conservative checks. Broader static analysis is still deferred until
-the type model is stronger.
+the same conservative checks, including assignments from resolved calls with
+declared return types. Broader static analysis is still deferred until the type
+model is stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -316,6 +317,8 @@ files that are not open in the editor are picked up on the next request.
   reassigned from resolved calls with declared return types.
 - Conservative assignment-type mismatch diagnostics for local PHPDoc `@var`
   variables assigned obvious literal or object-creation values.
+- Conservative assignment-type mismatch diagnostics for local PHPDoc `@var`
+  variables assigned from resolved calls with declared return types.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Whole-document and range whitespace formatting for trailing whitespace; whole
