@@ -23,6 +23,11 @@ struct ClassInfo {
 }
 
 #[derive(Debug, Default)]
+struct ImportMap {
+    classes: HashMap<String, String>,
+}
+
+#[derive(Debug, Default)]
 struct SymbolIndex {
     functions: HashMap<String, Vec<Signature>>,
     classes: HashMap<String, ClassInfo>,
@@ -54,9 +59,17 @@ pub fn named_argument_code_action(uri: &Url, text: &str, position: Position) -> 
     let tree = parse_php(text)?;
     let root = tree.root_node();
     let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
     let call = find_call_at_byte(root, text, byte_offset)?;
     let index = SymbolIndex::for_document_and_project(uri, text);
-    let signature = index.resolve(&call.target, root, text, byte_offset, namespace.as_deref())?;
+    let signature = index.resolve(
+        &call.target,
+        root,
+        text,
+        byte_offset,
+        namespace.as_deref(),
+        &imports,
+    )?;
     let edits = edits_for_call(text, &call, &signature)?;
 
     let mut changes = HashMap::new();
@@ -92,6 +105,41 @@ fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
         .ok()?;
     let tree = parser.parse(text, None)?;
     (!tree.root_node().has_error()).then_some(tree)
+}
+
+impl ImportMap {
+    fn from_root(root: Node, text: &str) -> Self {
+        let mut imports = Self::default();
+        collect_imports(root, text, &mut imports);
+        imports
+    }
+
+    fn insert_class(&mut self, alias: String, fqn: String) {
+        self.classes
+            .insert(normalize_symbol_key(&alias), clean_name_text(&fqn));
+    }
+
+    fn resolve_class_name(&self, name: &str, namespace: Option<&str>) -> Vec<String> {
+        let name = clean_name_text(name);
+        if name.starts_with('\\') {
+            return vec![name.trim_start_matches('\\').to_string()];
+        }
+
+        let mut segments = name.split('\\');
+        let first_segment = segments.next().unwrap_or_default();
+        let rest = segments.collect::<Vec<_>>();
+
+        if let Some(imported) = self.classes.get(&normalize_symbol_key(first_segment)) {
+            let mut resolved = imported.clone();
+            if !rest.is_empty() {
+                resolved.push('\\');
+                resolved.push_str(&rest.join("\\"));
+            }
+            return vec![resolved];
+        }
+
+        name_candidates(&name, namespace)
+    }
 }
 
 impl SymbolIndex {
@@ -178,11 +226,12 @@ impl SymbolIndex {
         text: &str,
         byte_offset: usize,
         namespace: Option<&str>,
+        imports: &ImportMap,
     ) -> Option<Signature> {
         match target {
             CallTarget::Function(name) => self.resolve_function(name, namespace),
             CallTarget::StaticMethod { class_name, method } => self
-                .resolve_class(class_name, namespace)
+                .resolve_class(class_name, namespace, imports)
                 .and_then(|class_info| {
                     class_info
                         .methods
@@ -190,12 +239,13 @@ impl SymbolIndex {
                         .cloned()
                 }),
             CallTarget::Constructor { class_name } => self
-                .resolve_class(class_name, namespace)
+                .resolve_class(class_name, namespace, imports)
                 .and_then(|class_info| class_info.constructor.clone()),
             CallTarget::InstanceMethod { variable, method } => {
-                let variable_types = variable_types_at_byte(root, text, byte_offset, namespace);
+                let variable_types =
+                    variable_types_at_byte(root, text, byte_offset, namespace, imports);
                 let class_name = variable_types.get(variable)?;
-                self.resolve_class(class_name, namespace)
+                self.resolve_class(class_name, namespace, imports)
                     .and_then(|class_info| {
                         class_info
                             .methods
@@ -218,8 +268,13 @@ impl SymbolIndex {
         None
     }
 
-    fn resolve_class(&self, class_name: &str, namespace: Option<&str>) -> Option<&ClassInfo> {
-        for candidate in name_candidates(class_name, namespace) {
+    fn resolve_class(
+        &self,
+        class_name: &str,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> Option<&ClassInfo> {
+        for candidate in imports.resolve_class_name(class_name, namespace) {
             if let Some(class_info) = self.classes.get(&normalize_symbol_key(&candidate)) {
                 return Some(class_info);
             }
@@ -227,6 +282,111 @@ impl SymbolIndex {
 
         None
     }
+}
+
+fn collect_imports(node: Node, text: &str, imports: &mut ImportMap) {
+    let mut cursor = node.walk();
+
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "namespace_use_declaration" {
+            index_use_declaration(child, text, imports);
+            continue;
+        }
+
+        if child.kind() == "class_declaration" || child.kind() == "function_definition" {
+            continue;
+        }
+
+        collect_imports(child, text, imports);
+    }
+}
+
+fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
+    let declaration_text = node_text(node, text).trim_start();
+    if starts_with_use_kind(declaration_text, "function")
+        || starts_with_use_kind(declaration_text, "const")
+    {
+        return;
+    }
+
+    if let Some(group) = direct_child_kind(node, "namespace_use_group") {
+        let Some(prefix) = direct_child_kind(node, "namespace_name") else {
+            return;
+        };
+        let prefix = clean_name_text(node_text(prefix, text));
+        let mut cursor = group.walk();
+
+        for clause in group
+            .named_children(&mut cursor)
+            .filter(|child| child.kind() == "namespace_use_clause")
+        {
+            if let Some((alias, target)) = use_clause_names(clause, text) {
+                imports.insert_class(alias, qualify_name(&target, Some(&prefix)));
+            }
+        }
+
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for clause in node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "namespace_use_clause")
+    {
+        if let Some((alias, target)) = use_clause_names(clause, text) {
+            imports.insert_class(alias, target);
+        }
+    }
+}
+
+fn starts_with_use_kind(text: &str, kind: &str) -> bool {
+    let Some(rest) = text.strip_prefix("use") else {
+        return false;
+    };
+
+    rest.trim_start()
+        .get(..kind.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(kind))
+}
+
+fn direct_child_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find(|child| child.kind() == kind)
+}
+
+fn use_clause_names(clause: Node, text: &str) -> Option<(String, String)> {
+    let children = direct_name_children(clause);
+    let target_node = children.first().copied()?;
+    let target = clean_name_text(node_text(target_node, text));
+    if target.is_empty() {
+        return None;
+    }
+
+    let alias = if use_clause_has_alias(clause, text) {
+        children
+            .last()
+            .copied()
+            .filter(|node| node.kind() == "name")
+            .map(|node| clean_name_text(node_text(node, text)))?
+    } else {
+        last_name_segment(&target).to_string()
+    };
+
+    Some((alias, target))
+}
+
+fn direct_name_children(node: Node) -> Vec<Node> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| is_name_node(*child))
+        .collect()
+}
+
+fn use_clause_has_alias(clause: Node, text: &str) -> bool {
+    node_text(clause, text)
+        .split_whitespace()
+        .any(|part| part.eq_ignore_ascii_case("as"))
 }
 
 fn index_children(index: &mut SymbolIndex, node: Node, text: &str, namespace: Option<String>) {
@@ -565,10 +725,11 @@ fn variable_types_at_byte(
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
+    imports: &ImportMap,
 ) -> HashMap<String, String> {
     let mut types = HashMap::new();
-    collect_parameter_types(root, text, byte_offset, namespace, &mut types);
-    collect_assignment_types(root, text, byte_offset, namespace, &mut types);
+    collect_parameter_types(root, text, byte_offset, namespace, imports, &mut types);
+    collect_assignment_types(root, text, byte_offset, namespace, imports, &mut types);
     types
 }
 
@@ -577,6 +738,7 @@ fn collect_parameter_types(
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
+    imports: &ImportMap,
     types: &mut HashMap<String, String>,
 ) {
     if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
@@ -603,7 +765,7 @@ fn collect_parameter_types(
             if let Some(type_name) = type_name {
                 types.insert(
                     node_text(name_node, text).to_string(),
-                    qualify_type_name(&type_name, namespace),
+                    qualify_type_name(&type_name, namespace, imports),
                 );
             }
         }
@@ -611,7 +773,7 @@ fn collect_parameter_types(
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_parameter_types(child, text, byte_offset, namespace, types);
+        collect_parameter_types(child, text, byte_offset, namespace, imports, types);
     }
 }
 
@@ -620,6 +782,7 @@ fn collect_assignment_types(
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
+    imports: &ImportMap,
     types: &mut HashMap<String, String>,
 ) {
     if node.start_byte() >= byte_offset {
@@ -638,13 +801,17 @@ fn collect_assignment_types(
     {
         types.insert(
             node_text(left, text).to_string(),
-            qualify_type_name(&clean_name_text(node_text(class_node, text)), namespace),
+            qualify_type_name(
+                &clean_name_text(node_text(class_node, text)),
+                namespace,
+                imports,
+            ),
         );
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_assignment_types(child, text, byte_offset, namespace, types);
+        collect_assignment_types(child, text, byte_offset, namespace, imports, types);
     }
 }
 
@@ -724,8 +891,12 @@ fn qualify_name(name: &str, namespace: Option<&str>) -> String {
     }
 }
 
-fn qualify_type_name(name: &str, namespace: Option<&str>) -> String {
-    qualify_name(name, namespace)
+fn qualify_type_name(name: &str, namespace: Option<&str>, imports: &ImportMap) -> String {
+    imports
+        .resolve_class_name(name, namespace)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| qualify_name(name, namespace))
 }
 
 fn name_candidates(name: &str, namespace: Option<&str>) -> Vec<String> {
@@ -743,6 +914,10 @@ fn name_candidates(name: &str, namespace: Option<&str>) -> Vec<String> {
     }
     candidates.push(name);
     candidates
+}
+
+fn last_name_segment(name: &str) -> &str {
+    name.rsplit('\\').next().unwrap_or(name)
 }
 
 fn normalize_symbol_key(name: &str) -> String {
@@ -846,6 +1021,54 @@ mod tests {
     }
 
     #[test]
+    fn converts_static_method_call_through_import() {
+        let text = "<?php\nnamespace App\\Http;\nuse App\\Models\\InvoiceSender;\nnamespace App\\Models;\nclass InvoiceSender { public static function dispatch($invoice, $notify) {} }\nnamespace App\\Http;\nInvoiceSender::dispatch($invoice, true);\n";
+
+        let edits = action_edits(text, 6, 20);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\Models\\InvoiceSender;\nnamespace App\\Models;\nclass InvoiceSender { public static function dispatch($invoice, $notify) {} }\nnamespace App\\Http;\nInvoiceSender::dispatch(invoice: $invoice, notify: true);\n"
+        );
+    }
+
+    #[test]
+    fn converts_static_method_call_through_grouped_import() {
+        let text = "<?php\nnamespace App\\Http;\nuse App\\Models\\{customer_supplier};\nnamespace App\\Models;\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id) {} }\nnamespace App\\Http;\ncustomer_supplier::accumulatePoints($shop_id, $promotion_id);\n";
+
+        let edits = action_edits(text, 6, 35);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\Models\\{customer_supplier};\nnamespace App\\Models;\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id) {} }\nnamespace App\\Http;\ncustomer_supplier::accumulatePoints(shop_id: $shop_id, promotion_id: $promotion_id);\n"
+        );
+    }
+
+    #[test]
+    fn converts_static_method_call_through_aliased_import() {
+        let text = "<?php\nnamespace App\\Http;\nuse App\\Models\\customer_supplier as CustomerSupplier;\nnamespace App\\Models;\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id) {} }\nnamespace App\\Http;\nCustomerSupplier::accumulatePoints($shop_id, $promotion_id);\n";
+
+        let edits = action_edits(text, 6, 35);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\Models\\customer_supplier as CustomerSupplier;\nnamespace App\\Models;\nclass customer_supplier { public static function accumulatePoints($shop_id, $promotion_id) {} }\nnamespace App\\Http;\nCustomerSupplier::accumulatePoints(shop_id: $shop_id, promotion_id: $promotion_id);\n"
+        );
+    }
+
+    #[test]
+    fn converts_static_method_call_through_imported_namespace_alias() {
+        let text = "<?php\nnamespace App\\Http;\nuse App\\Models as Models;\nnamespace App\\Models;\nclass Customer { public static function sync($shop_id, $customer_id) {} }\nnamespace App\\Http;\nModels\\Customer::sync($shop_id, $customer_id);\n";
+
+        let edits = action_edits(text, 6, 25);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\Models as Models;\nnamespace App\\Models;\nclass Customer { public static function sync($shop_id, $customer_id) {} }\nnamespace App\\Http;\nModels\\Customer::sync(shop_id: $shop_id, customer_id: $customer_id);\n"
+        );
+    }
+
+    #[test]
     fn converts_constructor_call() {
         let text = "<?php\nclass InvoiceJob { public function __construct($invoice, $notify) {} }\nnew InvoiceJob($invoice, true);\n";
 
@@ -858,6 +1081,18 @@ mod tests {
     }
 
     #[test]
+    fn converts_constructor_call_through_import() {
+        let text = "<?php\nnamespace App\\Http;\nuse App\\Jobs\\InvoiceJob;\nnamespace App\\Jobs;\nclass InvoiceJob { public function __construct($invoice, $notify) {} }\nnamespace App\\Http;\nnew InvoiceJob($invoice, true);\n";
+
+        let edits = action_edits(text, 6, 6);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\Jobs\\InvoiceJob;\nnamespace App\\Jobs;\nclass InvoiceJob { public function __construct($invoice, $notify) {} }\nnamespace App\\Http;\nnew InvoiceJob(invoice: $invoice, notify: true);\n"
+        );
+    }
+
+    #[test]
     fn converts_instance_method_when_variable_type_is_obvious() {
         let text = "<?php\nclass InvoiceSender { public function dispatch($invoice, $notify) {} }\n$sender = new InvoiceSender();\n$sender->dispatch($invoice, true);\n";
 
@@ -866,6 +1101,18 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nclass InvoiceSender { public function dispatch($invoice, $notify) {} }\n$sender = new InvoiceSender();\n$sender->dispatch(invoice: $invoice, notify: true);\n"
+        );
+    }
+
+    #[test]
+    fn converts_instance_method_from_imported_typed_parameter() {
+        let text = "<?php\nnamespace App\\Http;\nuse App\\Services\\InvoiceSender;\nnamespace App\\Services;\nclass InvoiceSender { public function dispatch($invoice, $notify) {} }\nnamespace App\\Http;\nfunction run(InvoiceSender $sender, $invoice) {\n    $sender->dispatch($invoice, true);\n}\n";
+
+        let edits = action_edits(text, 7, 15);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse App\\Services\\InvoiceSender;\nnamespace App\\Services;\nclass InvoiceSender { public function dispatch($invoice, $notify) {} }\nnamespace App\\Http;\nfunction run(InvoiceSender $sender, $invoice) {\n    $sender->dispatch(invoice: $invoice, notify: true);\n}\n"
         );
     }
 

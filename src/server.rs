@@ -4,10 +4,10 @@ use crate::document::DocumentStore;
 use crate::php::code_actions_for_position;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    CodeActionOptions, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    InitializeParams, InitializeResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind,
+    CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
+    CodeActionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, InitializeParams, InitializeResult, MessageType, ServerCapabilities,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -31,6 +31,7 @@ fn server_capabilities() -> ServerCapabilities {
             TextDocumentSyncKind::INCREMENTAL,
         )),
         code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: Some(vec![CodeActionKind::REFACTOR_REWRITE]),
             resolve_provider: Some(false),
             ..CodeActionOptions::default()
         })),
@@ -85,17 +86,28 @@ impl LanguageServer for RephactorLanguageServer {
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
-        let documents = self.documents.read().expect("document lock poisoned");
-        let actions = documents
-            .get(&params.text_document.uri)
-            .map(|document| {
-                code_actions_for_position(
-                    &params.text_document.uri,
-                    &document.text,
-                    params.range.start,
-                )
-            })
-            .unwrap_or_default();
+        let uri = params.text_document.uri;
+        let position = params.range.start;
+        let actions = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents
+                .get(&uri)
+                .map(|document| code_actions_for_position(&uri, &document.text, position))
+                .unwrap_or_default()
+        };
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "Rephactor codeAction {}:{}:{} -> {} action(s)",
+                    uri,
+                    position.line,
+                    position.character,
+                    actions.len()
+                ),
+            )
+            .await;
 
         Ok(Some(actions))
     }
@@ -118,9 +130,10 @@ mod tests {
         assert!(matches!(
             capabilities.code_action_provider,
             Some(CodeActionProviderCapability::Options(CodeActionOptions {
+                code_action_kinds: Some(kinds),
                 resolve_provider: Some(false),
                 ..
-            }))
+            })) if kinds == vec![CodeActionKind::REFACTOR_REWRITE]
         ));
     }
 }

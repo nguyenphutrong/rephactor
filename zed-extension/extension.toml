@@ -9,3 +9,4 @@ repository = "https://github.com/nguyenphutrong/rephactor"
 [language_servers.rephactor]
 name = "Rephactor"
 languages = ["PHP"]
+code_action_kinds = ["refactor.rewrite"]
