@@ -7,9 +7,9 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
     CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentHighlight, DocumentHighlightKind,
     DocumentSymbol, DocumentSymbolResponse, FoldingRange, FoldingRangeKind, GotoDefinitionResponse,
-    Hover, HoverContents, Location, MarkupContent, MarkupKind, ParameterInformation,
-    ParameterLabel, Position, Range, SignatureHelp, SignatureInformation, SymbolInformation,
-    SymbolKind, TextEdit, Url, WorkspaceEdit,
+    Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel, Location, MarkupContent,
+    MarkupKind, ParameterInformation, ParameterLabel, Position, Range, SignatureHelp,
+    SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -180,6 +180,13 @@ pub struct DocumentHighlightAnalysis {
 pub struct FoldingRangeAnalysis {
     pub ranges: Vec<FoldingRange>,
     pub skip_reason: Option<SkipReason>,
+}
+
+#[derive(Debug)]
+pub struct InlayHintAnalysis {
+    pub hints: Vec<InlayHint>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
 }
 
 pub fn analyze_parse_diagnostics(text: &str) -> Vec<Diagnostic> {
@@ -437,6 +444,28 @@ pub fn analyze_folding_ranges(text: &str) -> FoldingRangeAnalysis {
         Err(reason) => FoldingRangeAnalysis {
             ranges: Vec::new(),
             skip_reason: Some(reason),
+        },
+    }
+}
+
+pub fn analyze_inlay_hints_for_range_with_cache(
+    uri: &Url,
+    text: &str,
+    range: Range,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> InlayHintAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match inlay_hints_for_range(uri, text, range, open_documents, cache) {
+        Ok(hints) => InlayHintAnalysis {
+            skip_reason: hints.is_empty().then_some(SkipReason::NoEdits),
+            hints,
+            index_cache_status,
+        },
+        Err(reason) => InlayHintAnalysis {
+            hints: Vec::new(),
+            skip_reason: Some(reason),
+            index_cache_status,
         },
     }
 }
@@ -742,6 +771,92 @@ fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> 
     collect_folding_ranges(tree.root_node(), text, &mut ranges);
     ranges.sort_by_key(|range| (range.start_line, range.end_line));
     Ok(ranges)
+}
+
+fn inlay_hints_for_range(
+    uri: &Url,
+    text: &str,
+    range: Range,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<Vec<InlayHint>, SkipReason> {
+    let Some(start_byte) = byte_offset_for_lsp_position(text, range.start) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(end_byte) = byte_offset_for_lsp_position(text, range.end) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let mut call_nodes = Vec::new();
+    collect_supported_call_nodes(root, start_byte, end_byte, &mut call_nodes);
+    let mut hints = Vec::new();
+
+    for call_node in call_nodes {
+        let byte_offset = call_node.start_byte();
+        let namespace = namespace_at_byte(root, text, byte_offset);
+        let Ok(call) = call_info(call_node, text) else {
+            continue;
+        };
+        if call.arguments.iter().any(|argument| argument.is_unpacking) {
+            continue;
+        }
+        let Ok(signature) = index.resolve(
+            &call.target,
+            root,
+            text,
+            byte_offset,
+            namespace.as_deref(),
+            &imports,
+        ) else {
+            continue;
+        };
+
+        for (argument, parameter_name) in call.arguments.iter().zip(signature.parameters.iter()) {
+            if argument.name.is_some() {
+                continue;
+            }
+            let Some(position) = lsp_position_for_byte_offset(text, argument.start_byte) else {
+                continue;
+            };
+            hints.push(InlayHint {
+                position,
+                label: InlayHintLabel::String(format!("{parameter_name}:")),
+                kind: Some(InlayHintKind::PARAMETER),
+                text_edits: None,
+                tooltip: None,
+                padding_left: None,
+                padding_right: Some(true),
+                data: None,
+            });
+        }
+    }
+
+    Ok(hints)
+}
+
+fn collect_supported_call_nodes<'tree>(
+    node: Node<'tree>,
+    start_byte: usize,
+    end_byte: usize,
+    calls: &mut Vec<Node<'tree>>,
+) {
+    if node.end_byte() < start_byte || node.start_byte() > end_byte {
+        return;
+    }
+    if is_supported_call_kind(node.kind()) {
+        calls.push(node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_supported_call_nodes(child, start_byte, end_byte, calls);
+    }
 }
 
 fn collect_folding_ranges(node: Node, text: &str, ranges: &mut Vec<FoldingRange>) {

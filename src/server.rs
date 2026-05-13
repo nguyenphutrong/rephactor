@@ -6,9 +6,9 @@ use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
     analyze_document_highlights, analyze_document_symbols, analyze_folding_ranges,
-    analyze_hover_for_position_with_cache, analyze_parse_diagnostics,
-    analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
-    analyze_workspace_symbols,
+    analyze_hover_for_position_with_cache, analyze_inlay_hints_for_range_with_cache,
+    analyze_parse_diagnostics, analyze_references_for_position_with_cache,
+    analyze_signature_help_for_position_with_cache, analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -18,9 +18,10 @@ use tower_lsp::lsp_types::{
     DocumentHighlight, DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse,
     FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, Location, MessageType, OneOf, ReferenceParams, ServerCapabilities,
-    ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SymbolInformation,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceSymbolParams,
+    InitializeResult, InlayHint, InlayHintOptions, InlayHintParams, InlayHintServerCapabilities,
+    Location, MessageType, OneOf, ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -90,6 +91,12 @@ fn server_capabilities() -> ServerCapabilities {
         references_provider: Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
+            InlayHintOptions {
+                resolve_provider: Some(false),
+                work_done_progress_options: Default::default(),
+            },
+        ))),
         ..ServerCapabilities::default()
     }
 }
@@ -660,6 +667,57 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(Some(analysis.ranges))
     }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+        let range = params.range;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_inlay_hints_for_range_with_cache(
+                &uri,
+                &document_text,
+                range,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::InlayHintAnalysis {
+                hints: Vec::new(),
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor inlayHint {} -> {} hint(s) in {}ms ({})",
+            uri,
+            analysis.hints.len(),
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if analysis.hints.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(Some(analysis.hints))
+    }
 }
 
 #[cfg(test)]
@@ -708,5 +766,6 @@ mod tests {
             capabilities.folding_range_provider,
             Some(FoldingRangeProviderCapability::Simple(true))
         );
+        assert!(capabilities.inlay_hint_provider.is_some());
     }
 }

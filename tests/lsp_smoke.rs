@@ -78,6 +78,7 @@ impl LspProcess {
             initialize["result"]["capabilities"]["foldingRangeProvider"],
             json!(true)
         );
+        assert!(initialize["result"]["capabilities"]["inlayHintProvider"].is_object());
         server.notify("initialized", json!({}));
         server
     }
@@ -275,6 +276,30 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("folding range array")
+            .clone()
+    }
+
+    fn inlay_hints(
+        &mut self,
+        uri: &str,
+        start_line: u32,
+        start_character: u32,
+        end_line: u32,
+        end_character: u32,
+    ) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/inlayHint",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": {
+                    "start": { "line": start_line, "character": start_character },
+                    "end": { "line": end_line, "character": end_character }
+                }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("inlay hint array")
             .clone()
     }
 
@@ -727,6 +752,29 @@ fn lsp_returns_folding_ranges_for_blocks_and_comments() {
             .iter()
             .any(|range| range["startLine"] == 5 && range["endLine"] == 7)
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_parameter_name_inlay_hints() {
+    let root = temp_project("inlay-hints");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n",
+    );
+
+    let hints = server.inlay_hints(&uri, 0, 0, 3, 0);
+
+    assert_eq!(
+        hints
+            .iter()
+            .map(|hint| hint["label"].as_str().expect("hint label"))
+            .collect::<Vec<_>>(),
+        vec!["invoice:", "notify:"]
+    );
+    assert!(hints.iter().all(|hint| hint["kind"] == 2));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

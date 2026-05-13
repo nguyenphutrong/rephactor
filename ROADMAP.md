@@ -97,4 +97,5 @@
 - [x] Implement parser diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
+- [x] Implement parameter-name `textDocument/inlayHint`.
 - [ ] Implement semantic diagnostics for open files.
