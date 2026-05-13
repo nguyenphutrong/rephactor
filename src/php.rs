@@ -2841,12 +2841,12 @@ fn supported_single_type_name(type_name: &str) -> Option<(String, bool)> {
         return None;
     }
     if let Some(inner) = type_name.strip_prefix('?') {
-        return Some((inner.trim().to_string(), true));
+        return Some((comparable_phpdoc_type_name(inner), true));
     }
 
     let parts = type_name.split('|').map(str::trim).collect::<Vec<_>>();
     if parts.len() <= 1 {
-        return Some((type_name.to_string(), false));
+        return Some((comparable_phpdoc_type_name(type_name), false));
     }
 
     let mut allows_null = false;
@@ -2859,7 +2859,33 @@ fn supported_single_type_name(type_name: &str) -> Option<(String, bool)> {
         }
     }
 
-    (allows_null && concrete.len() == 1).then(|| (concrete[0].to_string(), true))
+    (allows_null && concrete.len() == 1).then(|| (comparable_phpdoc_type_name(concrete[0]), true))
+}
+
+fn comparable_phpdoc_type_name(type_name: &str) -> String {
+    let type_name = type_name.trim();
+    if type_name.ends_with("[]") {
+        return "array".to_string();
+    }
+
+    let Some(generic_start) = type_name.find('<') else {
+        return type_name.to_string();
+    };
+    if !type_name.ends_with('>') {
+        return type_name.to_string();
+    }
+
+    let base_name = normalize_return_type_name(last_name_segment(&type_name[..generic_start]));
+    match base_name {
+        base if matches!(
+            base.as_str(),
+            "array" | "list" | "non-empty-array" | "non-empty-list"
+        ) =>
+        {
+            "array".to_string()
+        }
+        _ => type_name.to_string(),
+    }
 }
 
 fn inferred_return_expression_type(

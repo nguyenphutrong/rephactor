@@ -227,7 +227,9 @@ signature help, code actions, and conservative diagnostics. Class-level
 class-level `@property` annotations are indexed as magic instance properties for
 completion, hover, and definition lookup.
 Function-like PHPDoc `@param` annotations understand `self`, `static`, and
-direct `parent` inside class-like scopes.
+direct `parent` inside class-like scopes. PHPDoc array and list generics such
+as `array<int,Foo>`, `list<Foo>`, and `Foo[]` are treated as conservative
+`array` contracts for mismatch diagnostics.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
@@ -384,6 +386,8 @@ files that are not open in the editor are picked up on the next request.
   `@param static`, and direct `@param parent` contracts.
 - Nullable native and PHPDoc parameter diagnostics that accept `null` for
   `?Type` and `Type|null`.
+- Conservative PHPDoc generic array/list diagnostics that treat `array<int,Foo>`,
+  `list<Foo>`, and `Foo[]` as array contracts.
 - Conservative argument-type mismatch diagnostics for seeded PHP internal
   function parameter contracts.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments

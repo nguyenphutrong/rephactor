@@ -2667,6 +2667,29 @@ fn lsp_publishes_semantic_diagnostics_for_phpdoc_return_type_mismatch() {
 }
 
 #[test]
+fn lsp_allows_phpdoc_generic_array_return_type_diagnostics() {
+    let root = temp_project("phpdoc-generic-array-return-type-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\n/** @return array<int,Customer> */\nfunction customers() { return []; }\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().all(|diagnostic| {
+        diagnostic["message"]
+            != "return type mismatch: declared App\\array<int,Customer>, returned array"
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_allows_null_for_nullable_return_type_diagnostics() {
     let root = temp_project("nullable-return-type-diagnostics");
     let mut server = LspProcess::start(&root);
@@ -2930,6 +2953,29 @@ fn lsp_publishes_semantic_diagnostics_for_phpdoc_param_argument_type_mismatch() 
         diagnostic["message"]
             == "argument type mismatch for customer: expected App\\Customer, got App\\Invoice"
             && diagnostic["severity"] == 1
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_allows_phpdoc_list_parameter_argument_diagnostics() {
+    let root = temp_project("phpdoc-list-parameter-argument-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\n/** @param list<Customer> $customers */\nfunction send($customers) {}\nsend([]);\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().all(|diagnostic| {
+        diagnostic["message"]
+            != "argument type mismatch for customers: expected App\\list<Customer>, got array"
     }));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
