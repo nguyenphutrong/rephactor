@@ -2234,21 +2234,29 @@ fn return_type_mismatches_for_declaration(
     imports: &ImportMap,
     index: &SymbolIndex,
 ) -> Vec<Diagnostic> {
-    let Some(return_type) = declaration
+    let namespace = namespace_at_byte(root, text, declaration.start_byte());
+    let declared = declaration
         .child_by_field_name("return_type")
         .and_then(|node| single_named_type(node, text))
-    else {
+        .and_then(|return_type| {
+            (!matches!(
+                normalize_return_type_name(&return_type).as_str(),
+                "mixed" | "never"
+            ))
+            .then(|| comparable_return_type(&return_type, namespace.as_deref(), imports))
+        })
+        .or_else(|| {
+            phpdoc_return_type_before(
+                text,
+                declaration.start_byte(),
+                namespace.as_deref(),
+                imports,
+            )
+        });
+    let Some(declared) = declared else {
         return Vec::new();
     };
-    if matches!(
-        normalize_return_type_name(&return_type).as_str(),
-        "mixed" | "never"
-    ) {
-        return Vec::new();
-    }
 
-    let namespace = namespace_at_byte(root, text, declaration.start_byte());
-    let declared = comparable_return_type(&return_type, namespace.as_deref(), imports);
     let mut returned = Vec::new();
     collect_return_expressions(declaration, declaration, &mut returned);
 

@@ -208,11 +208,11 @@ function/class-like declaration diagnostics for open documents. It also reports
 duplicate parameter diagnostics, duplicate/unknown named-argument diagnostics
 for resolved calls, too-many-argument diagnostics for resolved non-variadic
 calls, and conservative unused-import diagnostics for normal non-aliased class
-imports. It also reports conservative return-type mismatches when a declared
-return type conflicts with a directly returned scalar literal, array literal, or
-object creation expression, including local variables assigned one of those
-obvious values before return, resolved calls with declared return types, and
-variables assigned from those calls.
+imports. It also reports conservative return-type mismatches when a native or
+PHPDoc-declared return type conflicts with a directly returned scalar literal,
+array literal, or object creation expression, including local variables assigned
+one of those obvious values before return, resolved calls with declared return
+types, and variables assigned from those calls.
 Resolved calls also report conservative argument type mismatches when typed
 parameters receive obvious literal or object-creation arguments, including
 variables assigned obvious values earlier in the same local or top-level scope
@@ -304,6 +304,8 @@ files that are not open in the editor are picked up on the next request.
 - Conservative return-type mismatch diagnostics for directly returned literals,
   object creation expressions, and local variables assigned those obvious values
   before return.
+- Conservative return-type mismatch diagnostics for PHPDoc `@return`
+  declarations.
 - Conservative return-type mismatch diagnostics for returned resolved calls with
   declared return types.
 - Conservative return-type mismatch diagnostics for variables assigned from
