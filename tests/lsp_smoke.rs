@@ -1082,6 +1082,20 @@ fn lsp_returns_instance_method_completion_for_self_typed_parameter() {
 }
 
 #[test]
+fn lsp_returns_instance_method_completion_for_parent_typed_parameter() {
+    let root = temp_project("completion-parent-typed-parameter-methods");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App;\nclass BaseSender { public function baseDispatch() {} }\nclass Sender extends BaseSender { public function run(parent $sender) {\n    $sender->baseDispatch();\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 4, 13);
+
+    assert!(items.iter().any(|item| item["label"] == "baseDispatch"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_nested_document_symbols() {
     let root = temp_project("document-symbol");
     let mut server = LspProcess::start(&root);

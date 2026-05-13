@@ -6167,7 +6167,11 @@ fn collect_parameter_types(
                 continue;
             };
 
-            if let Some(type_name) = first_named_type(type_node, text)
+            let type_name = first_named_type(type_node, text).or_else(|| {
+                let raw_type = node_text(type_node, text).trim();
+                matches!(raw_type, "parent" | "self" | "static").then(|| raw_type.to_string())
+            });
+            if let Some(type_name) = type_name
                 && let Some(type_name) =
                     qualify_parameter_type_name(&type_name, node, text, namespace, imports)
             {
@@ -6194,6 +6198,12 @@ fn qualify_parameter_type_name(
         let class_node = containing_class_like_declaration(declaration)?;
         let name_node = class_node.child_by_field_name("name")?;
         return Some(qualify_name(node_text(name_node, text), namespace));
+    }
+    if normalized == "parent" {
+        let class_node = containing_class_like_declaration(declaration)?;
+        return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
+            .into_iter()
+            .next();
     }
 
     Some(qualify_type_name(type_name, namespace, imports))
@@ -6436,7 +6446,7 @@ fn first_variable_name_in_line(line: &str) -> Option<String> {
 fn first_named_type(type_node: Node, text: &str) -> Option<String> {
     if matches!(
         type_node.kind(),
-        "named_type" | "name" | "qualified_name" | "relative_name"
+        "primitive_type" | "named_type" | "name" | "qualified_name" | "relative_name"
     ) {
         return Some(clean_name_text(node_text(type_node, text)));
     }
