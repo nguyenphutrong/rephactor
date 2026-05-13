@@ -782,6 +782,23 @@ fn lsp_returns_definition_for_instance_properties() {
 }
 
 #[test]
+fn lsp_returns_definition_for_this_property() {
+    let root = temp_project("definition-this-property");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass Sender { private $transport; public function run() {\n    echo $this->transport;\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server.definition(&uri, 2, 19).expect("definition result");
+
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 23 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_definition_for_dynamic_call() {
     let root = temp_project("definition-unsupported");
     let mut server = LspProcess::start(&root);
@@ -901,6 +918,21 @@ fn lsp_returns_hover_for_instance_properties() {
 
     assert!(own_markdown.contains("property Sender::$transport"));
     assert!(inherited_markdown.contains("property BaseSender::$queue"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_hover_for_this_property() {
+    let root = temp_project("hover-this-property");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass Sender { private $transport; public function run() {\n    echo $this->transport;\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 2, 19).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("property Sender::$transport"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
@@ -1420,6 +1452,27 @@ fn lsp_returns_instance_property_completions() {
         items
             .iter()
             .any(|item| { item["label"] == "channel" && item["kind"] == property_kind })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_this_property_completions() {
+    let root = temp_project("completion-this-properties");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass Sender { private $transport; public function dispatch() {} public function run() {\n    $this->transport;\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 2, 11);
+    let property_kind =
+        serde_json::to_value(CompletionItemKind::PROPERTY).expect("property kind json");
+
+    assert!(items.iter().any(|item| item["label"] == "dispatch"));
+    assert!(
+        items
+            .iter()
+            .any(|item| { item["label"] == "transport" && item["kind"] == property_kind })
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

@@ -174,9 +174,9 @@ matches for indexed class names, indexed project functions and constants,
 seeded PHP internal functions, static methods and class constants from indexed
 classes and related parents/interfaces/traits after `ClassName::`, and instance
 methods and properties when the receiver type is locally obvious, flows through
-a simple local variable alias, or comes from a resolved call with a class return
-type. Static scope completion understands `self`, `static`, and direct `parent`
-inside class-like scopes. Method and property completion includes indexed
+a simple local variable alias, is `$this` inside a class, or comes from a
+resolved call with a class return type. Static scope completion understands
+`self`, `static`, and direct `parent` inside class-like scopes. Method and property completion includes indexed
 parent, interface, trait, and PHPDoc `@mixin` members. It also includes common
 PHP keyword completions and adds a `use` or `use const` declaration edit for
 unambiguous namespaced class
@@ -310,8 +310,8 @@ files that are not open in the editor are picked up on the next request.
 - Project constant completions.
 - Class constant completions after `ClassName::`.
 - Static-scope completion after `self::`, `static::`, and direct `parent::`.
-- Instance property completions from indexed classes, parents, traits, and
-  PHPDoc `@mixin` classes.
+- Instance property completions from `$this`, indexed classes, parents, traits,
+  and PHPDoc `@mixin` classes.
 - Related instance method completions from indexed parents, interfaces, traits,
   and PHPDoc `@mixin` classes.
 - PHP keyword completions.
@@ -324,8 +324,8 @@ files that are not open in the editor are picked up on the next request.
   declaration renames.
 - Class constant hover and definition lookup for direct, inherited, `self::`,
   `static::`, and direct `parent::` constant references.
-- Instance property hover and definition lookup for typed receivers and
-  inherited indexed properties.
+- Instance property hover and definition lookup for `$this`, typed receivers,
+  and inherited indexed properties.
 - Exact-reference and implementation-count code lenses for declarations,
   including constants and properties.
 - Method declaration lookup for interface/base-class implementations.

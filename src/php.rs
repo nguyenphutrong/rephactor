@@ -7481,6 +7481,7 @@ fn variable_types_at_byte(
     index: Option<&SymbolIndex>,
 ) -> HashMap<String, String> {
     let mut types = HashMap::new();
+    collect_this_type(root, text, byte_offset, namespace, &mut types);
     collect_parameter_types(root, text, byte_offset, namespace, imports, &mut types);
     collect_phpdoc_param_types(root, text, byte_offset, namespace, imports, &mut types);
     let assignment_context = AssignmentTypeCollectionContext {
@@ -7494,6 +7495,26 @@ fn variable_types_at_byte(
     collect_assignment_types(root, &assignment_context, &mut types);
     collect_phpdoc_var_types(text, byte_offset, namespace, imports, &mut types);
     types
+}
+
+fn collect_this_type(
+    root: Node,
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    types: &mut HashMap<String, String>,
+) {
+    let Some(class_node) = find_class_declaration_at_byte(root, byte_offset) else {
+        return;
+    };
+    let Some(name_node) = class_node.child_by_field_name("name") else {
+        return;
+    };
+
+    types.insert(
+        "$this".to_string(),
+        qualify_name(node_text(name_node, text), namespace),
+    );
 }
 
 fn collect_parameter_types(
