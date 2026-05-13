@@ -403,6 +403,14 @@ pub fn analyze_code_actions_for_position_with_cache(
         Err(_) => {}
     }
 
+    match implement_interface_methods_action_with_cache(uri, text, position, open_documents, cache)
+    {
+        Ok(Some(action)) => actions.push(CodeActionOrCommand::CodeAction(action)),
+        Ok(None) => {}
+        Err(reason) if actions.is_empty() && skip_reason.is_none() => skip_reason = Some(reason),
+        Err(_) => {}
+    }
+
     CodeActionAnalysis {
         skip_reason: actions.is_empty().then_some(skip_reason).flatten(),
         actions,
@@ -861,6 +869,63 @@ fn phpdoc_code_action(
     Ok(Some(code_action("[Rephactor] Add PHPDoc", uri, vec![edit])))
 }
 
+fn implement_interface_methods_action_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<Option<CodeAction>, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let Some(class_node) = find_class_declaration_at_byte(root, byte_offset) else {
+        return Ok(None);
+    };
+    let Some(name_node) = class_node.child_by_field_name("name") else {
+        return Ok(None);
+    };
+    let Some(body) = class_node.child_by_field_name("body") else {
+        return Ok(None);
+    };
+
+    let namespace = namespace_at_byte(root, text, class_node.start_byte());
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let class_name = clean_name_text(node_text(name_node, text));
+    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+        return Ok(None);
+    };
+
+    let missing = missing_interface_methods(&index, class_info);
+    if missing.is_empty() {
+        return Ok(None);
+    }
+
+    let insert_byte = body.end_byte().saturating_sub(1);
+    let Some(position) = lsp_position_for_byte_offset(text, insert_byte) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let indent = format!("{}    ", line_indent_before(text, class_node.start_byte()));
+    let edit = TextEdit::new(
+        Range {
+            start: position,
+            end: position,
+        },
+        interface_method_stubs(&missing, &indent),
+    );
+
+    Ok(Some(code_action(
+        "[Rephactor] Implement interface methods",
+        uri,
+        vec![edit],
+    )))
+}
+
 fn signature_help_for_position_with_cache(
     uri: &Url,
     text: &str,
@@ -1151,6 +1216,46 @@ fn implementation_locations_for_method(
     } else {
         Ok(GotoDefinitionResponse::Array(locations))
     }
+}
+
+fn missing_interface_methods(index: &SymbolIndex, class_info: &ClassInfo) -> Vec<Signature> {
+    let mut missing = Vec::new();
+    let mut seen = HashSet::new();
+
+    for interface_name in &class_info.interfaces {
+        let Some(interface_info) = index.classes.get(&normalize_symbol_key(interface_name)) else {
+            continue;
+        };
+
+        for (method_key, signature) in &interface_info.methods {
+            if class_info.methods.contains_key(method_key) || !seen.insert(method_key.clone()) {
+                continue;
+            }
+            missing.push(signature.clone());
+        }
+    }
+
+    missing.sort_by_key(|signature| signature.name.to_ascii_lowercase());
+    missing
+}
+
+fn interface_method_stubs(signatures: &[Signature], indent: &str) -> String {
+    let body_indent = format!("{indent}    ");
+    signatures
+        .iter()
+        .map(|signature| {
+            let parameters = signature
+                .parameters
+                .iter()
+                .map(|parameter| format!("${parameter}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "\n{indent}public function {}({parameters}) {{\n{body_indent}throw new \\BadMethodCallException('Not implemented');\n{indent}}}\n",
+                signature.name
+            )
+        })
+        .collect::<String>()
 }
 
 fn class_derives_from(
@@ -3245,6 +3350,27 @@ fn find_method_declaration_at_byte<'tree>(
 ) -> Option<Node<'tree>> {
     let declaration = find_function_like_declaration_at_byte(node, byte_offset)?;
     (declaration.kind() == "method_declaration").then_some(declaration)
+}
+
+fn find_class_declaration_at_byte<'tree>(
+    node: Node<'tree>,
+    byte_offset: usize,
+) -> Option<Node<'tree>> {
+    if node.kind() == "class_declaration"
+        && node.start_byte() <= byte_offset
+        && byte_offset <= node.end_byte()
+    {
+        return Some(node);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = find_class_declaration_at_byte(child, byte_offset) {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 fn containing_class_like_declaration<'tree>(node: Node<'tree>) -> Option<Node<'tree>> {
