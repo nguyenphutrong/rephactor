@@ -2494,6 +2494,16 @@ fn assignment_type_mismatch_diagnostics(
     imports: &ImportMap,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let empty_expected_types = HashMap::new();
+    collect_assignment_type_mismatches(
+        root,
+        root,
+        root,
+        text,
+        imports,
+        &empty_expected_types,
+        &mut diagnostics,
+    );
     collect_assignment_type_mismatch_diagnostics(root, root, text, imports, &mut diagnostics);
     diagnostics
 }
@@ -2540,10 +2550,10 @@ fn assignment_type_mismatches_for_declaration(
 
     let mut diagnostics = Vec::new();
     collect_assignment_type_mismatches(
+        root,
         declaration,
         declaration,
         text,
-        namespace.as_deref(),
         imports,
         &expected_types,
         &mut diagnostics,
@@ -2552,10 +2562,10 @@ fn assignment_type_mismatches_for_declaration(
 }
 
 fn collect_assignment_type_mismatches(
+    root: Node,
     declaration: Node,
     node: Node,
     text: &str,
-    namespace: Option<&str>,
     imports: &ImportMap,
     expected_types: &HashMap<String, ComparableReturnType>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -2581,41 +2591,72 @@ fn collect_assignment_type_mismatches(
             node.child_by_field_name("right"),
         )
         && left.kind() == "variable_name"
-        && let Some(expected) = expected_types.get(node_text(left, text))
-        && let Some(actual) = inferred_assigned_return_type(right, text, namespace, imports)
-        && expected != &actual
     {
-        diagnostics.push(Diagnostic {
-            range: range_for_bytes(text, right.start_byte(), right.end_byte())
-                .unwrap_or_else(|_| Range::default()),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: None,
-            code_description: None,
-            source: Some("rephactor".to_string()),
-            message: format!(
-                "assignment type mismatch for {}: expected {}, got {}",
-                node_text(left, text),
-                expected.display,
-                actual.display
-            ),
-            related_information: None,
-            tags: None,
-            data: None,
-        });
+        let assignment_namespace = namespace_at_byte(root, text, node.start_byte());
+        let assignment_namespace = assignment_namespace.as_deref();
+        let expected = expected_types
+            .get(node_text(left, text))
+            .cloned()
+            .or_else(|| {
+                phpdoc_variable_type_at_byte(
+                    text,
+                    left.start_byte(),
+                    assignment_namespace,
+                    imports,
+                    node_text(left, text),
+                )
+            });
+        if let Some(expected) = expected
+            && let Some(actual) =
+                inferred_assigned_return_type(right, text, assignment_namespace, imports)
+            && expected != actual
+        {
+            diagnostics.push(Diagnostic {
+                range: range_for_bytes(text, right.start_byte(), right.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: format!(
+                    "assignment type mismatch for {}: expected {}, got {}",
+                    node_text(left, text),
+                    expected.display,
+                    actual.display
+                ),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
     }
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_assignment_type_mismatches(
+            root,
             declaration,
             child,
             text,
-            namespace,
             imports,
             expected_types,
             diagnostics,
         );
     }
+}
+
+fn phpdoc_variable_type_at_byte(
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    variable_name: &str,
+) -> Option<ComparableReturnType> {
+    let mut types = HashMap::new();
+    collect_phpdoc_var_types(text, byte_offset, namespace, imports, &mut types);
+    types
+        .get(variable_name)
+        .and_then(|type_name| comparable_parameter_type(type_name, namespace, imports))
 }
 
 fn collect_return_expressions<'tree>(
