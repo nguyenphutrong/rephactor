@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
-    CompletionResponse, DocumentSymbol, DocumentSymbolResponse, GotoDefinitionResponse, Hover,
-    HoverContents, Location, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel,
-    Position, Range, SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit,
-    Url, WorkspaceEdit,
+    CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentSymbol, DocumentSymbolResponse,
+    GotoDefinitionResponse, Hover, HoverContents, Location, MarkupContent, MarkupKind,
+    ParameterInformation, ParameterLabel, Position, Range, SignatureHelp, SignatureInformation,
+    SymbolInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -167,6 +167,18 @@ pub struct ReferencesAnalysis {
     pub locations: Vec<Location>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
+}
+
+pub fn analyze_parse_diagnostics(text: &str) -> Vec<Diagnostic> {
+    let Some(tree) = parse_php_allowing_errors(text) else {
+        return vec![Diagnostic::new_simple(
+            Range::default(),
+            "Unable to parse PHP document".to_string(),
+        )];
+    };
+    let mut diagnostics = Vec::new();
+    collect_parse_error_diagnostics(tree.root_node(), text, &mut diagnostics);
+    diagnostics
 }
 
 enum CodeActionOutcome {
@@ -683,6 +695,33 @@ fn document_symbols_for_text(text: &str) -> Result<DocumentSymbolResponse, SkipR
     Ok(DocumentSymbolResponse::Nested(symbols))
 }
 
+fn collect_parse_error_diagnostics(node: Node, text: &str, diagnostics: &mut Vec<Diagnostic>) {
+    if node.is_error() || node.is_missing() {
+        diagnostics.push(Diagnostic {
+            range: range_for_bytes(text, node.start_byte(), node.end_byte())
+                .unwrap_or_else(|_| Range::default()),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("rephactor".to_string()),
+            message: "PHP parse error".to_string(),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+        return;
+    }
+
+    if !node.has_error() {
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_parse_error_diagnostics(child, text, diagnostics);
+    }
+}
+
 fn references_for_position(
     uri: &Url,
     text: &str,
@@ -743,12 +782,16 @@ fn references_for_position(
 }
 
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
+    let tree = parse_php_allowing_errors(text)?;
+    (!tree.root_node().has_error()).then_some(tree)
+}
+
+fn parse_php_allowing_errors(text: &str) -> Option<tree_sitter::Tree> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_php::LANGUAGE_PHP.into())
         .ok()?;
-    let tree = parser.parse(text, None)?;
-    (!tree.root_node().has_error()).then_some(tree)
+    parser.parse(text, None)
 }
 
 impl ImportMap {

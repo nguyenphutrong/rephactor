@@ -259,6 +259,15 @@ impl LspProcess {
         }
     }
 
+    fn read_notification(&mut self, method: &str) -> Value {
+        loop {
+            let message = self.read_message();
+            if message.get("method").and_then(Value::as_str) == Some(method) {
+                return message;
+            }
+        }
+    }
+
     fn read_message(&mut self) -> Value {
         let mut content_length = None;
 
@@ -620,6 +629,25 @@ fn lsp_returns_workspace_references_for_function_name() {
             .filter(|reference| reference["uri"] == caller_uri)
             .count(),
         2
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_publishes_parse_diagnostics_for_open_document() {
+    let root = temp_project("diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nfunction broken( {\n");
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    assert!(
+        !notification["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics array")
+            .is_empty()
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

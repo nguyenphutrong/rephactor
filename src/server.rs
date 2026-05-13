@@ -5,7 +5,7 @@ use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
-    analyze_document_symbols, analyze_hover_for_position_with_cache,
+    analyze_document_symbols, analyze_hover_for_position_with_cache, analyze_parse_diagnostics,
     analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
     analyze_workspace_symbols,
 };
@@ -37,6 +37,22 @@ impl RephactorLanguageServer {
             index_cache: Arc::new(RwLock::new(ProjectIndexCache::default())),
             root_uri: Arc::new(RwLock::new(None)),
         }
+    }
+
+    async fn publish_diagnostics_for_open_document(&self, uri: Url) {
+        let document = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).cloned()
+        };
+        let Some(document) = document else {
+            self.client.publish_diagnostics(uri, Vec::new(), None).await;
+            return;
+        };
+
+        let diagnostics = analyze_parse_diagnostics(&document.text);
+        self.client
+            .publish_diagnostics(uri, diagnostics, Some(document.version))
+            .await;
     }
 }
 
@@ -101,24 +117,30 @@ impl LanguageServer for RephactorLanguageServer {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri.clone();
         self.documents
             .write()
             .expect("document lock poisoned")
             .open(params);
+        self.publish_diagnostics_for_open_document(uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri.clone();
         self.documents
             .write()
             .expect("document lock poisoned")
             .change(params);
+        self.publish_diagnostics_for_open_document(uri).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri.clone();
         self.documents
             .write()
             .expect("document lock poisoned")
             .close(params);
+        self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {

@@ -94,4 +94,5 @@
 - [x] Implement `textDocument/documentSymbol`.
 - [x] Implement `workspace/symbol`.
 - [x] Implement `textDocument/references`.
-- [ ] Implement diagnostics for open files.
+- [x] Implement parser diagnostics for open files.
+- [ ] Implement semantic diagnostics for open files.
