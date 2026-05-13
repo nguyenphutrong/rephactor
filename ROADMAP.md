@@ -126,6 +126,7 @@
 - [x] Implement whitespace-only `textDocument/formatting`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
 - [x] Implement inferred return-type `textDocument/inlayHint`.
+- [x] Implement variable lookup `textDocument/inlineValue`.
 - [x] Implement `textDocument/documentLink` for include/require paths.
 - [x] Implement syntax-tree `textDocument/selectionRange`.
 - [x] Implement unresolved type-annotation diagnostics for open files.

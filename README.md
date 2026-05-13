@@ -224,6 +224,8 @@ Inlay Hint V1 shows parameter names for resolved positional call arguments. It
 also shows conservative return-type hints for function-like declarations without
 a declared return type when they consistently return `new ClassName(...)`.
 
+Inline Value V1 returns PHP variable lookup ranges for debugger inline values.
+
 Document Link V1 links literal relative `include`/`require` paths to files on
 disk.
 
@@ -286,6 +288,7 @@ files that are not open in the editor are picked up on the next request.
 - Parameter-name inlay hints for resolved positional call arguments.
 - Inferred return-type inlay hints for function-like declarations that return
   one `new ClassName(...)` type.
+- Inline value variable lookups for PHP variables in debugger ranges.
 - Document links for literal relative include/require paths.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.

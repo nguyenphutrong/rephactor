@@ -13,7 +13,7 @@ use crate::php::{
     analyze_rename_for_position_with_cache, analyze_selection_ranges,
     analyze_signature_help_for_position_with_cache,
     analyze_type_definition_for_position_with_cache, analyze_workspace_symbols,
-    formatting_edits_for_text,
+    formatting_edits_for_text, inline_values_for_range,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::request::{
@@ -30,8 +30,9 @@ use tower_lsp::lsp_types::{
     FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
     ImplementationProviderCapability, InitializeParams, InitializeResult, InlayHint,
-    InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location, MessageType, OneOf,
-    ReferenceParams, RenameParams, SelectionRange, SelectionRangeParams,
+    InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, InlineValue,
+    InlineValueOptions, InlineValueParams, InlineValueServerCapabilities, Location, MessageType,
+    OneOf, ReferenceParams, RenameParams, SelectionRange, SelectionRangeParams,
     SelectionRangeProviderCapability, ServerCapabilities, ServerInfo, SignatureHelp,
     SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, TypeDefinitionProviderCapability, Url, WorkspaceEdit,
@@ -127,6 +128,11 @@ fn server_capabilities() -> ServerCapabilities {
         inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
             InlayHintOptions {
                 resolve_provider: Some(false),
+                work_done_progress_options: Default::default(),
+            },
+        ))),
+        inline_value_provider: Some(OneOf::Right(InlineValueServerCapabilities::Options(
+            InlineValueOptions {
                 work_done_progress_options: Default::default(),
             },
         ))),
@@ -1152,6 +1158,36 @@ impl LanguageServer for RephactorLanguageServer {
             .await;
 
         Ok((!edits.is_empty()).then_some(edits))
+    }
+
+    async fn inline_value(&self, params: InlineValueParams) -> Result<Option<Vec<InlineValue>>> {
+        let uri = params.text_document.uri;
+        let range = params.range;
+        let started_at = Instant::now();
+        let document_text = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.get(&uri).map(|document| document.text.clone())
+        };
+
+        let values = document_text
+            .as_deref()
+            .map(|text| inline_values_for_range(text, range))
+            .unwrap_or_default();
+        let elapsed = started_at.elapsed();
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "Rephactor inlineValue {} -> {} value(s) in {}ms",
+                    uri,
+                    values.len(),
+                    elapsed.as_millis()
+                ),
+            )
+            .await;
+
+        Ok((!values.is_empty()).then_some(values))
     }
 }
 

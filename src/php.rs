@@ -8,9 +8,10 @@ use tower_lsp::lsp_types::{
     CompletionItemKind, CompletionResponse, Diagnostic, DiagnosticSeverity, DiagnosticTag,
     DocumentHighlight, DocumentHighlightKind, DocumentLink, DocumentSymbol, DocumentSymbolResponse,
     FoldingRange, FoldingRangeKind, GotoDefinitionResponse, Hover, HoverContents, InlayHint,
-    InlayHintKind, InlayHintLabel, Location, MarkupContent, MarkupKind, ParameterInformation,
-    ParameterLabel, Position, Range, SelectionRange, SignatureHelp, SignatureInformation,
-    SymbolInformation, SymbolKind, TextEdit, Url, WorkspaceEdit,
+    InlayHintKind, InlayHintLabel, InlineValue, InlineValueVariableLookup, Location, MarkupContent,
+    MarkupKind, ParameterInformation, ParameterLabel, Position, Range, SelectionRange,
+    SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url,
+    WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -766,6 +767,22 @@ pub fn formatting_edits_for_text(text: &str) -> Vec<TextEdit> {
         },
         formatted,
     )]
+}
+
+pub fn inline_values_for_range(text: &str, range: Range) -> Vec<InlineValue> {
+    let Some(start_byte) = byte_offset_for_lsp_position(text, range.start) else {
+        return Vec::new();
+    };
+    let Some(end_byte) = byte_offset_for_lsp_position(text, range.end) else {
+        return Vec::new();
+    };
+    let Some(tree) = parse_php(text) else {
+        return Vec::new();
+    };
+
+    let mut variables = Vec::new();
+    collect_variable_inline_values(tree.root_node(), text, start_byte, end_byte, &mut variables);
+    variables
 }
 
 fn named_argument_code_action_with_cache(
@@ -1710,6 +1727,34 @@ fn collect_new_return_type_names(node: Node, text: &str, names: &mut Vec<String>
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_new_return_type_names(child, text, names);
+    }
+}
+
+fn collect_variable_inline_values(
+    node: Node,
+    text: &str,
+    start_byte: usize,
+    end_byte: usize,
+    values: &mut Vec<InlineValue>,
+) {
+    if node.end_byte() < start_byte || node.start_byte() > end_byte {
+        return;
+    }
+
+    if node.kind() == "variable_name"
+        && let Ok(range) = range_for_bytes(text, node.start_byte(), node.end_byte())
+    {
+        values.push(InlineValue::VariableLookup(InlineValueVariableLookup {
+            range,
+            variable_name: Some(node_text(node, text).to_string()),
+            case_sensitive_lookup: true,
+        }));
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_variable_inline_values(child, text, start_byte, end_byte, values);
     }
 }
 

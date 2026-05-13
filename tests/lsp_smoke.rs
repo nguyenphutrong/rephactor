@@ -104,6 +104,7 @@ impl LspProcess {
             initialize["result"]["capabilities"]["documentFormattingProvider"],
             json!(true)
         );
+        assert!(initialize["result"]["capabilities"]["inlineValueProvider"].is_object());
         assert_eq!(
             initialize["result"]["capabilities"]["selectionRangeProvider"],
             json!(true)
@@ -440,6 +441,30 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("formatting edits array")
+            .clone()
+    }
+
+    fn inline_values(&mut self, uri: &str, start_line: u32, end_line: u32) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/inlineValue",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": {
+                    "start": { "line": start_line, "character": 0 },
+                    "end": { "line": end_line, "character": 0 }
+                },
+                "context": {
+                    "frameId": 1,
+                    "stoppedLocation": {
+                        "start": { "line": start_line, "character": 0 },
+                        "end": { "line": end_line, "character": 0 }
+                    }
+                }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("inline values array")
             .clone()
     }
 
@@ -1507,6 +1532,31 @@ fn lsp_formats_trailing_whitespace_and_final_newline() {
         edits[0]["range"]["start"],
         json!({ "line": 0, "character": 0 })
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_inline_value_variable_lookups() {
+    let root = temp_project("inline-values");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction run($invoice) {\n    $total = $invoice->total();\n    return $total;\n}\n",
+    );
+
+    let values = server.inline_values(&uri, 2, 4);
+
+    assert!(values.iter().any(|value| {
+        value["variableName"] == "$total"
+            && value["caseSensitiveLookup"] == true
+            && value["range"]["start"] == json!({ "line": 2, "character": 4 })
+    }));
+    assert!(values.iter().any(|value| {
+        value["variableName"] == "$invoice"
+            && value["caseSensitiveLookup"] == true
+            && value["range"]["start"] == json!({ "line": 2, "character": 13 })
+    }));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
