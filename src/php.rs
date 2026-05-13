@@ -3502,7 +3502,8 @@ fn property_type_in_class(
         }
     }
 
-    None
+    phpdoc_property_types_before(text, class_node.start_byte(), namespace, imports)
+        .remove(property_name)
 }
 
 fn inferred_assigned_variable_type(
@@ -6941,6 +6942,28 @@ fn phpdoc_properties_before(
             })
         })
         .collect()
+}
+
+fn phpdoc_property_types_before(
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> HashMap<String, ComparableReturnType> {
+    let mut types = HashMap::new();
+    for tag in ["@property", "@property-read", "@property-write"] {
+        for record in phpdoc_tag_line_records_before(text, byte_offset, tag) {
+            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+            let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) else {
+                continue;
+            };
+            let Some(expected) = comparable_parameter_type(type_name, namespace, imports) else {
+                continue;
+            };
+            types.insert(variable_name.trim_start_matches('$').to_string(), expected);
+        }
+    }
+    types
 }
 
 fn phpdoc_method_signature(method_text: &str) -> Option<Signature> {
