@@ -4354,6 +4354,20 @@ fn declaration_signature_return_type(
         .child_by_field_name("return_type")
         .and_then(|type_node| single_named_type(type_node, text))
         .and_then(|type_name| comparable_parameter_type(&type_name, namespace, imports))
+        .or_else(|| phpdoc_return_type_before(text, declaration.start_byte(), namespace, imports))
+}
+
+fn phpdoc_return_type_before(
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let return_line = phpdoc_tag_lines_before(text, byte_offset, "@return")
+        .into_iter()
+        .next()?;
+    let return_type = return_line.split_whitespace().next()?.trim();
+    comparable_parameter_type(return_type, namespace, imports)
 }
 
 fn parameters_node_has_variadic(parameters_node: Node) -> bool {

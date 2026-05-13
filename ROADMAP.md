@@ -138,6 +138,7 @@
 - [x] Implement conservative argument-type mismatch diagnostics for open files.
 - [x] Implement assigned-variable argument-type mismatch diagnostics for open files.
 - [x] Implement returned-call argument-type mismatch diagnostics for open files.
+- [x] Implement PHPDoc `@return` call argument-type mismatch diagnostics for open files.
 - [x] Implement assigned-call argument-type mismatch diagnostics for open files.
 - [x] Implement conservative assignment-type mismatch diagnostics for open files.
 - [x] Implement returned-call assignment-type mismatch diagnostics for open files.
