@@ -148,6 +148,7 @@
 - [x] Implement returned-call return-type mismatch diagnostics for open files.
 - [x] Implement assigned-call return-type mismatch diagnostics for open files.
 - [x] Implement conservative argument-type mismatch diagnostics for open files.
+- [x] Cover constructor argument-type mismatch diagnostics for open files.
 - [x] Resolve native `self`, `static`, and direct `parent` parameter contracts in diagnostics.
 - [x] Implement assigned-variable argument-type mismatch diagnostics for open files.
 - [x] Implement returned-call argument-type mismatch diagnostics for open files.

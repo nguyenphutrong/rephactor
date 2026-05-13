@@ -327,6 +327,8 @@ files that are not open in the editor are picked up on the next request.
 - Conservative argument-type mismatch diagnostics for resolved calls with typed
   parameters and obvious literal, object-creation, or previously assigned
   variable arguments.
+- Conservative argument-type mismatch diagnostics for resolved constructor
+  calls.
 - Conservative argument-type mismatch diagnostics for native `self`, `static`,
   and direct `parent` parameter contracts.
 - Conservative argument-type mismatch diagnostics for PHPDoc `@param`
