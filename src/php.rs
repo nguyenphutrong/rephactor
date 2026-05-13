@@ -6074,6 +6074,11 @@ fn replace_fqcn_with_import_action(
             return Err(SkipReason::AmbiguousCallable(fqn));
         }
         ImportKind::Const
+    } else if let Some(signatures) = index.functions.get(&normalized_fqn) {
+        if signatures.len() != 1 || signatures[0].name != fqn {
+            return Err(SkipReason::AmbiguousCallable(fqn));
+        }
+        ImportKind::Function
     } else {
         return Err(SkipReason::UnresolvedCallable(fqn));
     };

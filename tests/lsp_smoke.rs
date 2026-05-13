@@ -3324,6 +3324,22 @@ fn lsp_returns_import_refactor_for_fully_qualified_constant_name() {
 }
 
 #[test]
+fn lsp_returns_import_refactor_for_fully_qualified_function_name() {
+    let root = temp_project("function-import-refactor");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App\\Http;\n\\App\\Support\\send_invoice($invoice);\nnamespace App\\Support;\nfunction send_invoice($invoice) {}\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 2, 20);
+
+    assert!(actions.iter().any(|action| {
+        action["title"] == "[Rephactor] Add import for 'App\\Support\\send_invoice'"
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_handles_grouped_import_static_method() {
     let root = temp_project("grouped-import");
     let mut server = LspProcess::start(&root);

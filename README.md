@@ -413,6 +413,8 @@ files that are not open in the editor are picked up on the next request.
   concatenated literals.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
+- Conservative function import refactors for normal
+  `use function Foo\bar;` declarations.
 - Conservative constant import refactors for normal `use const Foo\BAR;`
   declarations.
 - Code action to implement missing methods from directly implemented indexed
