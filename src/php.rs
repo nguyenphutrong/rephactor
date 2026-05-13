@@ -2470,17 +2470,16 @@ fn inferred_argument_expression_type(
         return inferred_argument_expression_type(root, inner, text, namespace, imports);
     }
     if kind == "variable_name" {
-        if let Some(declaration) =
-            find_function_like_declaration_at_byte(root, expression.start_byte())
-            && let Some(return_type) = local_variable_return_type_at_byte(
-                declaration,
-                text,
-                expression.start_byte(),
-                namespace,
-                imports,
-                node_text(expression, text),
-            )
-        {
+        let scope =
+            find_function_like_declaration_at_byte(root, expression.start_byte()).unwrap_or(root);
+        if let Some(return_type) = local_variable_return_type_at_byte(
+            scope,
+            text,
+            expression.start_byte(),
+            namespace,
+            imports,
+            node_text(expression, text),
+        ) {
             return Some(return_type);
         }
         return None;

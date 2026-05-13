@@ -134,5 +134,6 @@
 - [x] Implement conservative return-type mismatch diagnostics for open files.
 - [x] Implement local-variable return-type mismatch diagnostics for open files.
 - [x] Implement conservative argument-type mismatch diagnostics for open files.
+- [x] Implement assigned-variable argument-type mismatch diagnostics for open files.
 - [x] Implement conservative assignment-type mismatch diagnostics for open files.
-- [ ] Implement broader type-flow semantic diagnostics beyond local returns and obvious assignments/arguments.
+- [ ] Implement broader type-flow semantic diagnostics beyond obvious assignments/arguments.
