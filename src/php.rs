@@ -1573,8 +1573,15 @@ fn completion_for_position_with_cache(
     let items = if let Some((class_name, method_prefix)) =
         static_method_completion_context(text, byte_offset)
     {
-        let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
-        else {
+        let Some(class_info) = resolve_static_completion_class(
+            &index,
+            root,
+            text,
+            byte_offset,
+            &class_name,
+            namespace.as_deref(),
+            &imports,
+        ) else {
             return Err(SkipReason::UnresolvedCallable(class_name));
         };
         static_scope_completion_items(&index, class_info, &method_prefix)
@@ -6963,6 +6970,36 @@ fn static_scope_completion_items(
     items.extend(class_constant_completion_items(index, class_info, prefix));
     items.sort_by_key(|item| item.label.to_ascii_lowercase());
     items
+}
+
+fn resolve_static_completion_class<'a>(
+    index: &'a SymbolIndex,
+    root: Node,
+    text: &str,
+    byte_offset: usize,
+    class_name: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<&'a ClassInfo> {
+    if class_name.eq_ignore_ascii_case("self") || class_name.eq_ignore_ascii_case("static") {
+        let class_node = find_class_declaration_at_byte(root, byte_offset)?;
+        let name_node = class_node.child_by_field_name("name")?;
+        let class_namespace = namespace_at_byte(root, text, class_node.start_byte());
+        let current_fqn = qualify_name(node_text(name_node, text), class_namespace.as_deref());
+        return index.classes.get(&normalize_symbol_key(&current_fqn));
+    }
+
+    if class_name.eq_ignore_ascii_case("parent") {
+        let class_node = find_class_declaration_at_byte(root, byte_offset)?;
+        let name_node = class_node.child_by_field_name("name")?;
+        let class_namespace = namespace_at_byte(root, text, class_node.start_byte());
+        let current_fqn = qualify_name(node_text(name_node, text), class_namespace.as_deref());
+        let current_info = index.classes.get(&normalize_symbol_key(&current_fqn))?;
+        let parent_name = current_info.parents.first()?;
+        return index.classes.get(&normalize_symbol_key(parent_name));
+    }
+
+    index.resolve_class(class_name, namespace, imports)
 }
 
 fn class_constant_completion_items(

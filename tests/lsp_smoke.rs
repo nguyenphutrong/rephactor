@@ -1240,6 +1240,34 @@ fn lsp_returns_method_completion_after_static_scope() {
 }
 
 #[test]
+fn lsp_returns_static_scope_completion_for_self_and_parent() {
+    let root = temp_project("completion-static-scope-keywords");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass BaseRecord { const STATUS_OPEN = 'open'; public static function baseSync() {} }\nclass CustomerRecord extends BaseRecord { const STATUS_PAID = 'paid'; public static function syncOrder() {} public function run() {\n    self::syncOrder();\n    parent::baseSync();\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let self_items = server.completion(&uri, 3, 10);
+    let parent_items = server.completion(&uri, 4, 12);
+    let constant_kind =
+        serde_json::to_value(CompletionItemKind::CONSTANT).expect("constant kind json");
+
+    assert!(self_items.iter().any(|item| item["label"] == "syncOrder"));
+    assert!(
+        self_items
+            .iter()
+            .any(|item| { item["label"] == "STATUS_PAID" && item["kind"] == constant_kind })
+    );
+    assert!(parent_items.iter().any(|item| item["label"] == "baseSync"));
+    assert!(
+        parent_items
+            .iter()
+            .any(|item| { item["label"] == "STATUS_OPEN" && item["kind"] == constant_kind })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_related_instance_method_completions() {
     let root = temp_project("completion-related-methods");
     let mut server = LspProcess::start(&root);
