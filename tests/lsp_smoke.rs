@@ -1206,6 +1206,27 @@ fn lsp_returns_named_argument_code_action_for_open_document() {
 }
 
 #[test]
+fn lsp_returns_phpdoc_code_action_for_function_declaration() {
+    let root = temp_project("phpdoc-action");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction send_invoice(int $invoice, $notify): string { return ''; }\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 1, 12);
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == "[Rephactor] Add PHPDoc")
+        .expect("PHPDoc action");
+
+    assert_eq!(
+        insert_texts(action, &uri),
+        vec!["/**\n * @param int $invoice\n * @param mixed $notify\n * @return string\n */\n"]
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_import_refactor_for_fully_qualified_class_name() {
     let root = temp_project("import-refactor");
     let mut server = LspProcess::start(&root);
@@ -1302,12 +1323,12 @@ fn lsp_resolves_inherited_method() {
     let uri = server.open_php(&file, text);
 
     let actions = server.code_actions(&uri, 4, 15);
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == "[Rephactor] Add names to arguments")
+        .expect("named argument action");
 
-    assert_eq!(actions.len(), 1);
-    assert_eq!(
-        insert_texts(&actions[0], &uri),
-        vec!["invoice: ", "notify: "]
-    );
+    assert_eq!(insert_texts(action, &uri), vec!["invoice: ", "notify: "]);
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

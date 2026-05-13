@@ -30,6 +30,8 @@ of the same resolver and project index.
 - Return `WorkspaceEdit` changes that insert `parameter_name: ` before
   positional arguments.
 - Provide conservative class import refactor code actions.
+- Provide conservative PHPDoc creation code actions for function-like
+  declarations.
 - Provide `textDocument/signatureHelp` for resolved callables.
 - Provide `textDocument/definition` for resolved project symbols.
 - Provide `textDocument/typeDefinition` for locally typed variables.
@@ -123,11 +125,11 @@ run Rephactor alongside it:
 ```
 
 Rephactor currently provides named-argument and class-import refactor code
-actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1,
-Go To Type Definition V1, Go To Implementation V1, Document Symbol V1,
-Workspace Symbol V1, References V1, Diagnostics V1, Document Highlight V1,
-Rename V1, Folding Range V1, Inlay Hint V1, Document Link V1, and Selection
-Range V1. Code Lens V1 shows declaration reference counts.
+actions, PHPDoc creation V1, Signature Help V1, Go To Definition V1, Hover V1,
+Completion V1, Go To Type Definition V1, Go To Implementation V1, Document
+Symbol V1, Workspace Symbol V1, References V1, Diagnostics V1, Document
+Highlight V1, Rename V1, Folding Range V1, Inlay Hint V1, Document Link V1,
+and Selection Range V1. Code Lens V1 shows declaration reference counts.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -175,6 +177,9 @@ rename files or folders.
 
 Code Lens V1 shows exact-reference counts for function, class, interface,
 trait, and method declarations.
+
+PHPDoc creation V1 adds `@param` tags for function and method parameters and
+an `@return` tag when a non-void return type is declared.
 
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
@@ -240,6 +245,8 @@ file watcher is intentionally deferred.
 - Document links for literal relative include/require paths.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
+- PHPDoc creation for function and method declarations with parameter and
+  return tags.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.

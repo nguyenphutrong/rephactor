@@ -380,6 +380,13 @@ pub fn analyze_code_actions_for_position_with_cache(
         Err(_) => {}
     }
 
+    match phpdoc_code_action(uri, text, position) {
+        Ok(Some(action)) => actions.push(CodeActionOrCommand::CodeAction(action)),
+        Ok(None) => {}
+        Err(reason) if actions.is_empty() && skip_reason.is_none() => skip_reason = Some(reason),
+        Err(_) => {}
+    }
+
     CodeActionAnalysis {
         skip_reason: actions.is_empty().then_some(skip_reason).flatten(),
         actions,
@@ -777,6 +784,43 @@ fn import_code_actions_with_cache(
     } else {
         Ok(actions)
     }
+}
+
+fn phpdoc_code_action(
+    uri: &Url,
+    text: &str,
+    position: Position,
+) -> Result<Option<CodeAction>, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let Some(declaration) = find_function_like_declaration_at_byte(root, byte_offset) else {
+        return Ok(None);
+    };
+    if phpdoc_summary_before(text, declaration.start_byte()).is_some() {
+        return Ok(None);
+    }
+
+    let docblock = phpdoc_for_declaration(text, declaration);
+    if docblock.is_empty() {
+        return Ok(None);
+    }
+    let Some(position) = lsp_position_for_byte_offset(text, declaration.start_byte()) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let edit = TextEdit::new(
+        Range {
+            start: position,
+            end: position,
+        },
+        docblock,
+    );
+
+    Ok(Some(code_action("[Rephactor] Add PHPDoc", uri, vec![edit])))
 }
 
 fn signature_help_for_position_with_cache(
@@ -2723,6 +2767,24 @@ fn find_variable_name_at_byte(node: Node, text: &str, byte_offset: usize) -> Opt
     (node.kind() == "variable_name").then(|| node_text(node, text).to_string())
 }
 
+fn find_function_like_declaration_at_byte<'tree>(
+    node: Node<'tree>,
+    byte_offset: usize,
+) -> Option<Node<'tree>> {
+    if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
+        return None;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = find_function_like_declaration_at_byte(child, byte_offset) {
+            return Some(found);
+        }
+    }
+
+    matches!(node.kind(), "function_definition" | "method_declaration").then_some(node)
+}
+
 fn find_smallest_call<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {
     if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
         return None;
@@ -3514,6 +3576,68 @@ fn phpdoc_summary_before(text: &str, byte_offset: usize) -> Option<String> {
         })
         .find(|line| !line.is_empty())
         .map(str::to_string)
+}
+
+fn phpdoc_for_declaration(text: &str, declaration: Node) -> String {
+    let indent = line_indent_before(text, declaration.start_byte());
+    let mut lines = Vec::new();
+
+    if let Some(parameters) = declaration.child_by_field_name("parameters") {
+        let mut cursor = parameters.walk();
+        for parameter in parameters.named_children(&mut cursor) {
+            if parameter.kind() != "simple_parameter" {
+                continue;
+            }
+            let Some(name_node) = parameter.child_by_field_name("name") else {
+                continue;
+            };
+            let parameter_name = node_text(name_node, text);
+            let parameter_type = parameter
+                .child_by_field_name("type")
+                .map(|type_node| phpdoc_type_text(type_node, text))
+                .filter(|type_name| !type_name.is_empty())
+                .unwrap_or_else(|| "mixed".to_string());
+            lines.push(format!(
+                "{indent} * @param {parameter_type} {parameter_name}"
+            ));
+        }
+    }
+
+    if let Some(return_type) = declaration.child_by_field_name("return_type") {
+        let return_type = phpdoc_type_text(return_type, text);
+        if !return_type.is_empty() && return_type != "void" {
+            lines.push(format!("{indent} * @return {return_type}"));
+        }
+    }
+
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut docblock = format!("{indent}/**\n");
+    docblock.push_str(&lines.join("\n"));
+    docblock.push('\n');
+    docblock.push_str(&format!("{indent} */\n"));
+    docblock
+}
+
+fn line_indent_before(text: &str, byte_offset: usize) -> String {
+    let line_start = text
+        .get(..byte_offset)
+        .and_then(|before| before.rfind('\n').map(|index| index + 1))
+        .unwrap_or_default();
+    text[line_start..byte_offset]
+        .chars()
+        .take_while(|character| character.is_whitespace() && *character != '\n')
+        .collect()
+}
+
+fn phpdoc_type_text(type_node: Node, text: &str) -> String {
+    clean_name_text(node_text(type_node, text))
+        .trim_start_matches(':')
+        .trim_start_matches('?')
+        .trim()
+        .to_string()
 }
 
 fn completion_prefix(text: &str, byte_offset: usize) -> String {
