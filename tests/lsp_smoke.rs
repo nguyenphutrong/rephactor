@@ -2015,6 +2015,37 @@ fn lsp_returns_superglobal_completions() {
 }
 
 #[test]
+fn lsp_returns_internal_class_completions() {
+    let root = temp_project("completion-internal-class");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nnew DateTimeImm;\nThr;\n");
+
+    let class_items = server.completion(&uri, 1, 15);
+    let class_kind = serde_json::to_value(CompletionItemKind::CLASS).expect("class kind json");
+    let class_item = class_items
+        .iter()
+        .find(|item| item["label"] == "DateTimeImmutable")
+        .expect("DateTimeImmutable completion");
+
+    assert_eq!(class_item["kind"], class_kind);
+    assert_eq!(class_item["detail"], "PHP internal symbol");
+    assert!(class_item.get("additionalTextEdits").is_none());
+
+    let interface_items = server.completion(&uri, 2, 3);
+    let interface_kind =
+        serde_json::to_value(CompletionItemKind::INTERFACE).expect("interface kind json");
+    let interface_item = interface_items
+        .iter()
+        .find(|item| item["label"] == "Throwable")
+        .expect("Throwable completion");
+
+    assert_eq!(interface_item["kind"], interface_kind);
+    assert!(interface_item.get("additionalTextEdits").is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_method_completion_after_static_scope() {
     let root = temp_project("completion-static-method");
     let mut server = LspProcess::start(&root);

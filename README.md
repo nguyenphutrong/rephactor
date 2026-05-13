@@ -173,8 +173,9 @@ returns no hover for ambiguous or dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
 matches for indexed class names, indexed project functions and constants,
-seeded PHP internal functions and constants, PHP superglobals, static methods,
-class constants, and static properties from indexed classes and related parents/interfaces/traits after
+seeded PHP internal functions and constants, PHP internal class/interface
+symbols, PHP superglobals, static methods, class constants, and static
+properties from indexed classes and related parents/interfaces/traits after
 `ClassName::`, and instance methods and properties when the receiver type is
 locally obvious, flows through a simple local variable alias, is `$this` inside
 a class, or comes from a resolved call with a class return type. Static scope
@@ -332,6 +333,7 @@ files that are not open in the editor are picked up on the next request.
   completions.
 - Project constant completions.
 - Seeded PHP internal constant completions and hover.
+- PHP internal class/interface symbol completions.
 - PHP superglobal completions for `$GLOBALS`, `$_GET`, `$_POST`, `$_SERVER`,
   and related built-ins.
 - Class constant completions after `ClassName::`.

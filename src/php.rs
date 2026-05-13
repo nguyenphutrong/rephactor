@@ -8013,6 +8013,22 @@ fn class_completion_items(
             item
         })
         .collect::<Vec<_>>();
+    let internal_items = internal_class_symbols()
+        .into_iter()
+        .filter(|(name, _)| prefix_matches(name, prefix))
+        .filter(|(name, _)| {
+            !items
+                .iter()
+                .any(|item| item.label.eq_ignore_ascii_case(name))
+        })
+        .map(|(name, kind)| CompletionItem {
+            label: name.to_string(),
+            kind: Some(kind),
+            detail: Some("PHP internal symbol".to_string()),
+            ..CompletionItem::default()
+        })
+        .collect::<Vec<_>>();
+    items.extend(internal_items);
     items.sort_by_key(|item| item.label.to_ascii_lowercase());
     items
 }
@@ -9613,6 +9629,50 @@ fn php_superglobals() -> Vec<&'static str> {
         "$_REQUEST",
         "$_SERVER",
         "$_SESSION",
+    ]
+}
+
+fn internal_class_symbols() -> Vec<(&'static str, CompletionItemKind)> {
+    vec![
+        ("ArgumentCountError", CompletionItemKind::CLASS),
+        ("ArrayAccess", CompletionItemKind::INTERFACE),
+        ("ArrayIterator", CompletionItemKind::CLASS),
+        ("ArrayObject", CompletionItemKind::CLASS),
+        ("BadFunctionCallException", CompletionItemKind::CLASS),
+        ("BadMethodCallException", CompletionItemKind::CLASS),
+        ("Closure", CompletionItemKind::CLASS),
+        ("Countable", CompletionItemKind::INTERFACE),
+        ("DateInterval", CompletionItemKind::CLASS),
+        ("DatePeriod", CompletionItemKind::CLASS),
+        ("DateTime", CompletionItemKind::CLASS),
+        ("DateTimeImmutable", CompletionItemKind::CLASS),
+        ("DateTimeInterface", CompletionItemKind::INTERFACE),
+        ("DateTimeZone", CompletionItemKind::CLASS),
+        ("DomainException", CompletionItemKind::CLASS),
+        ("Error", CompletionItemKind::CLASS),
+        ("Exception", CompletionItemKind::CLASS),
+        ("Generator", CompletionItemKind::CLASS),
+        ("InvalidArgumentException", CompletionItemKind::CLASS),
+        ("Iterator", CompletionItemKind::INTERFACE),
+        ("IteratorAggregate", CompletionItemKind::INTERFACE),
+        ("LengthException", CompletionItemKind::CLASS),
+        ("LogicException", CompletionItemKind::CLASS),
+        ("OutOfBoundsException", CompletionItemKind::CLASS),
+        ("OutOfRangeException", CompletionItemKind::CLASS),
+        ("OverflowException", CompletionItemKind::CLASS),
+        ("RangeException", CompletionItemKind::CLASS),
+        ("RecursiveIterator", CompletionItemKind::INTERFACE),
+        ("RuntimeException", CompletionItemKind::CLASS),
+        ("SeekableIterator", CompletionItemKind::INTERFACE),
+        ("SplFileInfo", CompletionItemKind::CLASS),
+        ("SplFileObject", CompletionItemKind::CLASS),
+        ("Throwable", CompletionItemKind::INTERFACE),
+        ("Traversable", CompletionItemKind::INTERFACE),
+        ("TypeError", CompletionItemKind::CLASS),
+        ("UnderflowException", CompletionItemKind::CLASS),
+        ("UnexpectedValueException", CompletionItemKind::CLASS),
+        ("ValueError", CompletionItemKind::CLASS),
+        ("stdClass", CompletionItemKind::CLASS),
     ]
 }
 
