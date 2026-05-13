@@ -2236,22 +2236,27 @@ fn lsp_returns_inferred_return_type_inlay_hints() {
     let file = root.join("example.php");
     let uri = server.open_php(
         &file,
-        "<?php\nclass InvoiceSender {}\nfunction make_sender() { return new InvoiceSender(); }\nfunction declared_sender(): InvoiceSender { return new InvoiceSender(); }\n",
+        "<?php\nclass InvoiceSender {}\nfunction object_sender() { return new InvoiceSender(); }\nfunction make_sender(): InvoiceSender { return new InvoiceSender(); }\nfunction alias_sender() { return make_sender(); }\nfunction declared_sender(): InvoiceSender { return new InvoiceSender(); }\n",
     );
 
-    let hints = server.inlay_hints(&uri, 0, 0, 4, 0);
+    let hints = server.inlay_hints(&uri, 0, 0, 6, 0);
 
     assert!(hints.iter().any(|hint| {
         hint["label"] == ": InvoiceSender"
             && hint["kind"] == 1
-            && hint["position"] == json!({ "line": 2, "character": 22 })
+            && hint["position"] == json!({ "line": 2, "character": 24 })
+    }));
+    assert!(hints.iter().any(|hint| {
+        hint["label"] == ": InvoiceSender"
+            && hint["kind"] == 1
+            && hint["position"] == json!({ "line": 4, "character": 23 })
     }));
     assert_eq!(
         hints
             .iter()
             .filter(|hint| hint["label"] == ": InvoiceSender")
             .count(),
-        1
+        2
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

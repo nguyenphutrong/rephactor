@@ -1674,7 +1674,15 @@ fn inlay_hints_for_range(
     let mut call_nodes = Vec::new();
     collect_supported_call_nodes(root, start_byte, end_byte, &mut call_nodes);
     let mut hints = Vec::new();
-    collect_return_type_inlay_hints(root, text, start_byte, end_byte, &mut hints);
+    let return_hint_context = ReturnTypeInlayContext {
+        root,
+        text,
+        start_byte,
+        end_byte,
+        imports: &imports,
+        index: &index,
+    };
+    collect_return_type_inlay_hints(root, &return_hint_context, &mut hints);
 
     for call_node in call_nodes {
         let byte_offset = call_node.start_byte();
@@ -1719,22 +1727,35 @@ fn inlay_hints_for_range(
     Ok(hints)
 }
 
-fn collect_return_type_inlay_hints(
-    node: Node,
-    text: &str,
+struct ReturnTypeInlayContext<'a, 'tree> {
+    root: Node<'tree>,
+    text: &'a str,
     start_byte: usize,
     end_byte: usize,
+    imports: &'a ImportMap,
+    index: &'a SymbolIndex,
+}
+
+fn collect_return_type_inlay_hints(
+    node: Node,
+    context: &ReturnTypeInlayContext<'_, '_>,
     hints: &mut Vec<InlayHint>,
 ) {
-    if node.end_byte() < start_byte || node.start_byte() > end_byte {
+    if node.end_byte() < context.start_byte || node.start_byte() > context.end_byte {
         return;
     }
 
     if matches!(node.kind(), "function_definition" | "method_declaration")
         && node.child_by_field_name("return_type").is_none()
         && let Some(parameters) = node.child_by_field_name("parameters")
-        && let Some(return_type) = inferred_new_return_type(node, text)
-        && let Some(position) = lsp_position_for_byte_offset(text, parameters.end_byte())
+        && let Some(return_type) = inferred_declaration_return_type(
+            context.root,
+            node,
+            context.text,
+            context.imports,
+            context.index,
+        )
+        && let Some(position) = lsp_position_for_byte_offset(context.text, parameters.end_byte())
     {
         hints.push(InlayHint {
             position,
@@ -1750,31 +1771,38 @@ fn collect_return_type_inlay_hints(
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_return_type_inlay_hints(child, text, start_byte, end_byte, hints);
+        collect_return_type_inlay_hints(child, context, hints);
     }
 }
 
-fn inferred_new_return_type(node: Node, text: &str) -> Option<String> {
-    let mut names = Vec::new();
-    collect_new_return_type_names(node, text, &mut names);
+fn inferred_declaration_return_type(
+    root: Node,
+    declaration: Node,
+    text: &str,
+    imports: &ImportMap,
+    index: &SymbolIndex,
+) -> Option<String> {
+    let namespace = namespace_at_byte(root, text, declaration.start_byte());
+    let mut returned = Vec::new();
+    collect_return_expressions(declaration, declaration, &mut returned);
+    let mut names = returned
+        .into_iter()
+        .filter_map(|expression| {
+            inferred_return_expression_type(
+                root,
+                declaration,
+                expression,
+                text,
+                namespace.as_deref(),
+                imports,
+                Some(index),
+            )
+            .map(|return_type| return_type.display)
+        })
+        .collect::<Vec<_>>();
     names.sort_by_key(|name| name.to_ascii_lowercase());
     names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
     (names.len() == 1).then(|| names.remove(0))
-}
-
-fn collect_new_return_type_names(node: Node, text: &str, names: &mut Vec<String>) {
-    if node.kind() == "return_statement"
-        && let Some(object_creation) = find_descendant_kind(node, "object_creation_expression")
-        && let Some(class_node) = class_name_for_object_creation(object_creation)
-        && is_name_node(class_node)
-    {
-        names.push(clean_name_text(node_text(class_node, text)));
-    }
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_new_return_type_names(child, text, names);
-    }
 }
 
 fn collect_variable_inline_values(

@@ -136,6 +136,7 @@
 - [x] Implement whitespace-only `textDocument/rangeFormatting`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
 - [x] Implement inferred return-type `textDocument/inlayHint`.
+- [x] Infer return-type inlay hints from resolved calls and local variables.
 - [x] Implement variable lookup `textDocument/inlineValue`.
 - [x] Implement `textDocument/documentLink` for include/require paths.
 - [x] Implement syntax-tree `textDocument/selectionRange`.

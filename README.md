@@ -253,7 +253,8 @@ structural formatting is still deferred.
 
 Inlay Hint V1 shows parameter names for resolved positional call arguments. It
 also shows conservative return-type hints for function-like declarations without
-a declared return type when they consistently return `new ClassName(...)`.
+a declared return type when returned expressions infer to one type, including
+object creation expressions, local variables, and resolved calls.
 
 Inline Value V1 returns PHP variable lookup ranges for debugger inline values.
 
@@ -365,7 +366,7 @@ files that are not open in the editor are picked up on the next request.
   documents also get a final newline.
 - Parameter-name inlay hints for resolved positional call arguments.
 - Inferred return-type inlay hints for function-like declarations that return
-  one `new ClassName(...)` type.
+  one obvious or resolved type.
 - Inline value variable lookups for PHP variables in debugger ranges.
 - Document links for literal relative include/require paths.
 - Syntax-tree selection ranges.
