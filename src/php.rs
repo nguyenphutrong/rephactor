@@ -1652,6 +1652,14 @@ fn hover_for_position_with_cache(
         ));
     }
 
+    if is_internal_constant_name(&symbol_name) {
+        return Ok(hover_from_parts(
+            format!("const {}", symbol_name.to_ascii_uppercase()),
+            None,
+            None,
+        ));
+    }
+
     Err(SkipReason::UnresolvedCallable(symbol_name))
 }
 
@@ -7359,6 +7367,22 @@ fn constant_completion_items(
             item
         })
         .collect::<Vec<_>>();
+    let internal_items = internal_constant_names()
+        .into_iter()
+        .filter(|name| prefix_matches(name, prefix))
+        .filter(|name| {
+            !items
+                .iter()
+                .any(|item| item.label.eq_ignore_ascii_case(name))
+        })
+        .map(|name| CompletionItem {
+            label: name.to_string(),
+            kind: Some(CompletionItemKind::CONSTANT),
+            detail: Some("PHP internal constant".to_string()),
+            ..CompletionItem::default()
+        })
+        .collect::<Vec<_>>();
+    items.extend(internal_items);
     items.sort_by_key(|item| item.label.to_ascii_lowercase());
     items
 }
@@ -8600,6 +8624,22 @@ fn internal_function_names() -> Vec<&'static str> {
         "sprintf",
         "trim",
     ]
+}
+
+fn internal_constant_names() -> Vec<&'static str> {
+    vec![
+        "DIRECTORY_SEPARATOR",
+        "PHP_EOL",
+        "PHP_OS",
+        "PHP_SAPI",
+        "PHP_VERSION",
+    ]
+}
+
+fn is_internal_constant_name(name: &str) -> bool {
+    internal_constant_names()
+        .into_iter()
+        .any(|constant| constant.eq_ignore_ascii_case(name))
 }
 
 fn php_keywords() -> Vec<&'static str> {

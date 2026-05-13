@@ -1061,6 +1061,21 @@ fn lsp_returns_php_manual_link_for_internal_function_hover() {
 }
 
 #[test]
+fn lsp_returns_hover_for_internal_constant() {
+    let root = temp_project("hover-internal-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\necho PHP_VERSION;\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 1, 8).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("const PHP_VERSION"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_expanded_internal_function_metadata() {
     let root = temp_project("expanded-internal-functions");
     let mut server = LspProcess::start(&root);
@@ -1420,6 +1435,27 @@ fn lsp_adds_use_const_declaration_for_unambiguous_constant_completion() {
         item["additionalTextEdits"][0]["range"]["start"],
         json!({ "line": 2, "character": 0 })
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_internal_constant_completions() {
+    let root = temp_project("completion-internal-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nPHP_VER;\n");
+
+    let items = server.completion(&uri, 1, 7);
+    let constant_kind =
+        serde_json::to_value(CompletionItemKind::CONSTANT).expect("constant kind json");
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "PHP_VERSION")
+        .expect("PHP_VERSION completion");
+
+    assert_eq!(item["kind"], constant_kind);
+    assert_eq!(item["detail"], "PHP internal constant");
+    assert!(item.get("additionalTextEdits").is_none());
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

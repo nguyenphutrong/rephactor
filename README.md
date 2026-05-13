@@ -164,15 +164,16 @@ classes.
 Hover V1 shows a concise PHP signature, class FQN, constant FQN, class constant
 label, or property label, source location, and the nearest PHPDoc summary plus
 tag lines when available. Hover for seeded PHP internal functions links to the
-official PHP manual. Seeded internal functions include conservative parameter and return
+official PHP manual, and seeded PHP internal constants show concise constant
+labels. Seeded internal functions include conservative parameter and return
 metadata for simple scalar/array contracts. It intentionally avoids rich PHPDoc
 rendering and
 returns no hover for ambiguous or dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
 matches for indexed class names, indexed project functions and constants,
-seeded PHP internal functions, static methods, class constants, and static
-properties from indexed classes and related parents/interfaces/traits after
+seeded PHP internal functions and constants, static methods, class constants,
+and static properties from indexed classes and related parents/interfaces/traits after
 `ClassName::`, and instance methods and properties when the receiver type is
 locally obvious, flows through a simple local variable alias, is `$this` inside
 a class, or comes from a resolved call with a class return type. Static scope
@@ -312,6 +313,7 @@ files that are not open in the editor are picked up on the next request.
 - Basic class, function, static method, and locally obvious instance method
   completions.
 - Project constant completions.
+- Seeded PHP internal constant completions and hover.
 - Class constant completions after `ClassName::`.
 - Static property completions after `ClassName::$`.
 - Static-scope completion after `self::`, `static::`, and direct `parent::`.
