@@ -1285,6 +1285,68 @@ fn lsp_returns_filesystem_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_filesystem_io_internal_function_metadata() {
+    let root = temp_project("filesystem-io-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nfile_get;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 8);
+
+    assert!(
+        items
+            .iter()
+            .any(|item| item["label"] == "file_get_contents")
+    );
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nfile_get_contents([], 'bad', null, 'bad');\nfile_put_contents([], 'data', 'bad');\nfunction takes_string(string $value) {}\ntakes_string(filesize('/tmp/file'));\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for filename: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for use_include_path: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for offset: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got int"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(
+        markdown.contains(
+            "file_get_contents($filename, $use_include_path, $context, $offset, $length)"
+        )
+    );
+    assert!(markdown.contains("[PHP manual](https://www.php.net/file_get_contents)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_string_internal_function_metadata() {
     let root = temp_project("string-internal-functions");
     let mut server = LspProcess::start(&root);
