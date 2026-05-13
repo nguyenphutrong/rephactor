@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeLens, Command, CompletionItem,
     CompletionItemKind, CompletionResponse, Diagnostic, DiagnosticSeverity, DiagnosticTag,
-    DocumentHighlight, DocumentHighlightKind, DocumentLink, DocumentSymbol, DocumentSymbolResponse,
-    FoldingRange, FoldingRangeKind, GotoDefinitionResponse, Hover, HoverContents, InlayHint,
-    InlayHintKind, InlayHintLabel, InlineValue, InlineValueVariableLookup, Location, MarkupContent,
-    MarkupKind, ParameterInformation, ParameterLabel, Position, Range, SelectionRange,
+    DocumentChangeOperation, DocumentChanges, DocumentHighlight, DocumentHighlightKind,
+    DocumentLink, DocumentSymbol, DocumentSymbolResponse, FoldingRange, FoldingRangeKind,
+    GotoDefinitionResponse, Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel,
+    InlineValue, InlineValueVariableLookup, Location, MarkupContent, MarkupKind,
+    ParameterInformation, ParameterLabel, Position, Range, RenameFile, ResourceOp, SelectionRange,
     SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url,
     WorkspaceEdit,
 };
@@ -3471,12 +3472,54 @@ fn rename_for_position(
     for edits in changes.values_mut() {
         edits.sort_by_key(|edit| (edit.range.start.line, edit.range.start.character));
     }
+    let document_changes = class_like_file_rename_operation(uri, text, position, new_name)
+        .map(|operation| DocumentChanges::Operations(vec![operation]));
 
     Ok(WorkspaceEdit {
         changes: Some(changes),
-        document_changes: None,
+        document_changes,
         change_annotations: None,
     })
+}
+
+fn class_like_file_rename_operation(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    new_name: &str,
+) -> Option<DocumentChangeOperation> {
+    let byte_offset = byte_offset_for_lsp_position(text, position)?;
+    let tree = parse_php(text)?;
+    let name_node = find_reference_name_at_byte(tree.root_node(), text, byte_offset)?;
+    let declaration = name_node.parent()?;
+    if !matches!(
+        declaration.kind(),
+        "class_declaration" | "interface_declaration" | "trait_declaration"
+    ) || declaration.child_by_field_name("name") != Some(name_node)
+    {
+        return None;
+    }
+
+    let old_name = clean_name_text(node_text(name_node, text));
+    let path = uri.to_file_path().ok()?;
+    if path.extension().and_then(|extension| extension.to_str()) != Some("php")
+        || path.file_stem().and_then(|stem| stem.to_str()) != Some(old_name.as_str())
+    {
+        return None;
+    }
+
+    let mut new_path = path;
+    new_path.set_file_name(format!("{new_name}.php"));
+    let new_uri = Url::from_file_path(new_path).ok()?;
+
+    Some(DocumentChangeOperation::Op(ResourceOp::Rename(
+        RenameFile {
+            old_uri: uri.clone(),
+            new_uri,
+            options: None,
+            annotation_id: None,
+        },
+    )))
 }
 
 fn is_valid_rename_identifier(name: &str) -> bool {

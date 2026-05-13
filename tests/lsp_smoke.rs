@@ -901,6 +901,39 @@ fn lsp_returns_workspace_edit_for_rename() {
 }
 
 #[test]
+fn lsp_renames_matching_class_file_for_class_rename() {
+    let root = temp_project("rename-class-file");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("CustomerRecord.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass CustomerRecord {}\nnew CustomerRecord();\n",
+    );
+
+    let edit = server.rename(&uri, 1, 8, "ClientRecord");
+    let edits = edit["changes"]
+        .get(&uri)
+        .expect("rename edits for uri")
+        .as_array()
+        .expect("rename edits for uri");
+    let operations = edit["documentChanges"]
+        .as_array()
+        .expect("document change operations");
+
+    assert_eq!(edits.len(), 2);
+    assert!(edits.iter().all(|edit| edit["newText"] == "ClientRecord"));
+    assert!(operations.iter().any(|operation| {
+        operation["kind"] == "rename"
+            && operation["oldUri"] == uri
+            && operation["newUri"]
+                .as_str()
+                .expect("new uri")
+                .ends_with("/ClientRecord.php")
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_hover_for_dynamic_call() {
     let root = temp_project("hover-unsupported");
     let mut server = LspProcess::start(&root);

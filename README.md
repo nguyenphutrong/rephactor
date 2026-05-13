@@ -187,8 +187,9 @@ References V1 finds exact matching AST name references across Composer-indexed
 PHP files and open document overlays. It is intentionally conservative and does
 not yet perform full type-aware disambiguation.
 
-Rename V1 returns a workspace edit for exact AST symbol references. It does not
-rename files or folders.
+Rename V1 returns a workspace edit for exact AST symbol references. When a
+class-like declaration is renamed from a matching `ClassName.php` file, it also
+adds a file rename operation for the PHP file. Folder renames are still skipped.
 
 Code Lens V1 shows exact-reference counts for function, class, interface,
 trait, and method declarations.
@@ -299,6 +300,8 @@ files that are not open in the editor are picked up on the next request.
 - Workspace symbols for indexed functions, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
+- Matching class-like PHP file rename operations for class/interface/trait
+  declaration renames.
 - Exact-reference code lenses for declarations.
 - Method declaration lookup for interface/base-class implementations.
 - Type definitions for locally typed variables and parameters.
