@@ -112,6 +112,7 @@
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement duplicate declaration diagnostics for open files.
 - [x] Implement duplicate parameter diagnostics for open files.
+- [x] Implement duplicate named-argument diagnostics for open files.
 - [x] Implement unknown named-argument diagnostics for open files.
 - [x] Implement unused-import diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.

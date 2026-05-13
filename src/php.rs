@@ -257,6 +257,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
             &imports,
         ) {
             Ok(signature) => {
+                diagnostics.extend(duplicate_named_argument_diagnostics(text, &call));
                 diagnostics.extend(unknown_named_argument_diagnostics(text, &call, &signature));
             }
             Err(
@@ -1658,6 +1659,36 @@ fn unknown_named_argument_diagnostics(
             })
         })
         .collect()
+}
+
+fn duplicate_named_argument_diagnostics(text: &str, call: &CallInfo) -> Vec<Diagnostic> {
+    let mut seen = HashSet::new();
+    let mut diagnostics = Vec::new();
+
+    for argument in &call.arguments {
+        let Some(argument_name) = &argument.name else {
+            continue;
+        };
+        let argument_key = argument_name.to_ascii_lowercase();
+        if seen.insert(argument_key) {
+            continue;
+        }
+
+        diagnostics.push(Diagnostic {
+            range: range_for_bytes(text, argument.start_byte, argument.end_byte)
+                .unwrap_or_else(|_| Range::default()),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("rephactor".to_string()),
+            message: format!("duplicate named argument {argument_name}"),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+    }
+
+    diagnostics
 }
 
 fn collect_function_like_declarations<'tree>(
