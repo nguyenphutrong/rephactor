@@ -816,6 +816,8 @@ fn completion_for_position_with_cache(
     } else {
         let mut items = class_completion_items(&index, &prefix);
         items.extend(function_completion_items(&index, &prefix));
+        items.extend(keyword_completion_items(&prefix));
+        items.sort_by_key(|item| item.label.to_ascii_lowercase());
         items
     };
 
@@ -3065,6 +3067,18 @@ fn method_completion_items(class_info: &ClassInfo, prefix: &str) -> Vec<Completi
         .collect()
 }
 
+fn keyword_completion_items(prefix: &str) -> Vec<CompletionItem> {
+    php_keywords()
+        .into_iter()
+        .filter(|keyword| prefix_matches(keyword, prefix))
+        .map(|keyword| CompletionItem {
+            label: keyword.to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
 fn prefix_matches(name: &str, prefix: &str) -> bool {
     prefix.is_empty()
         || name
@@ -3408,6 +3422,58 @@ fn internal_function_names() -> Vec<&'static str> {
         "str_replace",
         "strlen",
         "trim",
+    ]
+}
+
+fn php_keywords() -> Vec<&'static str> {
+    vec![
+        "abstract",
+        "array",
+        "as",
+        "break",
+        "callable",
+        "case",
+        "catch",
+        "class",
+        "clone",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "echo",
+        "else",
+        "elseif",
+        "enum",
+        "extends",
+        "final",
+        "finally",
+        "for",
+        "foreach",
+        "function",
+        "global",
+        "if",
+        "implements",
+        "include",
+        "include_once",
+        "interface",
+        "match",
+        "namespace",
+        "new",
+        "private",
+        "protected",
+        "public",
+        "readonly",
+        "require",
+        "require_once",
+        "return",
+        "static",
+        "switch",
+        "throw",
+        "trait",
+        "try",
+        "use",
+        "while",
+        "yield",
     ]
 }
 

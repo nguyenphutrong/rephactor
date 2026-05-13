@@ -140,7 +140,8 @@ rendering and returns no hover for ambiguous or dynamic symbols.
 Completion V1 returns deterministic prefix matches for indexed class names,
 indexed project functions, seeded PHP internal functions, static methods after
 `ClassName::`, and instance methods when the receiver type is locally obvious.
-It intentionally avoids snippets and fuzzy ranking.
+It also includes common PHP keyword completions. It intentionally avoids
+snippets and fuzzy ranking.
 
 Document Symbol V1 returns functions, classes, interfaces, traits, and class
 methods for editor outline and breadcrumb UIs.
@@ -193,6 +194,7 @@ file watcher is intentionally deferred.
 - Same-file functions.
 - Basic class, function, static method, and locally obvious instance method
   completions.
+- PHP keyword completions.
 - Document symbols for functions, class-like declarations, and methods.
 - Workspace symbols for indexed functions, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.

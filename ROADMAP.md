@@ -88,6 +88,7 @@
 - [x] Implement import refactor code actions.
 - [x] Implement hover for resolved symbols.
 - [x] Implement deterministic completion V1.
+- [x] Implement PHP keyword completion.
 
 ## Phase 12: Intelephense Parity Foundations
 

@@ -582,6 +582,14 @@ fn lsp_returns_class_and_function_completions() {
             .iter()
             .any(|item| item["label"] == "customer_report")
     );
+
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass CustomerRecord {}\nfunction customer_report($shop) {}\nforeach ($items as $item) {}\n",
+    );
+    let keyword_items = server.completion(&uri, 3, 4);
+
+    assert!(keyword_items.iter().any(|item| item["label"] == "foreach"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
