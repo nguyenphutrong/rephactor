@@ -84,7 +84,7 @@
 
 - [x] Document Rephactor's primary PHP LSP direction.
 - [x] Implement `textDocument/signatureHelp` for resolved callables.
-- [ ] Implement `textDocument/definition`.
+- [x] Implement `textDocument/definition`.
 - [ ] Implement import refactor code actions.
 - [ ] Implement hover for resolved symbols.
 - [ ] Implement deterministic completion V1.

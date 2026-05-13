@@ -46,6 +46,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["signatureHelpProvider"]["triggerCharacters"],
             json!(["(", ",", ":"])
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["definitionProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -119,6 +123,20 @@ impl LspProcess {
     fn signature_help(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
         let response = self.request(
             "textDocument/signatureHelp",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response
+            .get("result")
+            .filter(|result| !result.is_null())
+            .cloned()
+    }
+
+    fn definition(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
+        let response = self.request(
+            "textDocument/definition",
             json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character }
@@ -257,6 +275,71 @@ fn lsp_returns_null_signature_help_for_dynamic_call() {
 }
 
 #[test]
+fn lsp_returns_definition_for_same_file_function_call() {
+    let root = temp_project("definition-same-file");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text =
+        "<?php\nfunction send_invoice($invoice, $notify) {}\nsend_invoice($invoice, true);\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server.definition(&uri, 2, 5).expect("definition result");
+
+    assert_eq!(definition["uri"], uri);
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 9 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_definition_for_classmap_static_method() {
+    let root = temp_project("definition-classmap");
+    let legacy_dir = root.join("legacy");
+    let app_dir = root.join("app");
+    std::fs::create_dir_all(&legacy_dir).expect("create legacy dir");
+    std::fs::create_dir_all(&app_dir).expect("create app dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"classmap":["legacy/CustomerSupplier.php"]}}"#,
+    )
+    .expect("write composer");
+    let service_path = legacy_dir.join("CustomerSupplier.php");
+    std::fs::write(
+        &service_path,
+        "<?php\nnamespace Legacy;\nclass CustomerSupplier { public static function sync($shop_id, $customer_id) {} }\n",
+    )
+    .expect("write classmap class");
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(
+        &app_dir.join("Caller.php"),
+        "<?php\nnamespace App;\nuse Legacy\\CustomerSupplier;\nCustomerSupplier::sync($shop_id, $customer_id);\n",
+    );
+
+    let definition = server.definition(&uri, 3, 25).expect("definition result");
+
+    assert_eq!(definition["uri"], file_uri(&service_path));
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 2, "character": 48 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_null_definition_for_dynamic_call() {
+    let root = temp_project("definition-unsupported");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction send_invoice($invoice, $notify) {}\n$fn($invoice, true);\n";
+    let uri = server.open_php(&file, text);
+
+    assert!(server.definition(&uri, 2, 2).is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_named_argument_code_action_for_open_document() {
     let root = temp_project("same-file");
     let mut server = LspProcess::start(&root);
@@ -268,7 +351,7 @@ fn lsp_returns_named_argument_code_action_for_open_document() {
     let actions = server.code_actions(&uri, 2, 5);
 
     assert_eq!(actions.len(), 1);
-    assert_eq!(actions[0]["title"], "Rephactor: Add names to arguments");
+    assert_eq!(actions[0]["title"], "[Rephactor] Add names to arguments");
     assert_eq!(actions[0]["kind"], "refactor.rewrite");
     assert_eq!(
         insert_texts(&actions[0], &uri),
@@ -308,7 +391,7 @@ fn lsp_handles_partial_named_argument() {
     assert_eq!(actions.len(), 1);
     assert_eq!(
         actions[0]["title"],
-        "Rephactor: Add name identifier 'exchange_gift'"
+        "[Rephactor] Add name identifier 'exchange_gift'"
     );
     assert_eq!(insert_texts(&actions[0], &uri), vec!["exchange_gift: "]);
     std::fs::remove_dir_all(root).expect("remove temp root");

@@ -4,15 +4,15 @@ use std::time::Instant;
 use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
-    analyze_signature_help_for_position_with_cache,
+    analyze_definition_for_position_with_cache, analyze_signature_help_for_position_with_cache,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, MessageType, ServerCapabilities,
-    ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
+    InitializeResult, MessageType, OneOf, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -47,6 +47,7 @@ fn server_capabilities() -> ServerCapabilities {
             retrigger_characters: Some(vec![",".to_string(), ":".to_string()]),
             work_done_progress_options: Default::default(),
         }),
+        definition_provider: Some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -207,6 +208,63 @@ impl LanguageServer for RephactorLanguageServer {
 
         Ok(analysis.signature_help)
     }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_definition_for_position_with_cache(
+                &uri,
+                &document_text,
+                position,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::DefinitionAnalysis {
+                definition: None,
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+        let definition_count = usize::from(analysis.definition.is_some());
+
+        let mut log_message = format!(
+            "Rephactor definition {}:{}:{} -> {} location(s) in {}ms ({})",
+            uri,
+            position.line,
+            position.character,
+            definition_count,
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if definition_count == 0
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(analysis.definition)
+    }
 }
 
 #[cfg(test)]
@@ -232,5 +290,6 @@ mod tests {
             })) if kinds == vec![CodeActionKind::REFACTOR_REWRITE]
         ));
         assert!(capabilities.signature_help_provider.is_some());
+        assert_eq!(capabilities.definition_provider, Some(OneOf::Left(true)));
     }
 }

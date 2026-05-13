@@ -4,27 +4,36 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, ParameterInformation, ParameterLabel,
-    Position, Range, SignatureHelp, SignatureInformation, TextEdit, Url, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, GotoDefinitionResponse, Location,
+    ParameterInformation, ParameterLabel, Position, Range, SignatureHelp, SignatureInformation,
+    TextEdit, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
 use crate::document::{byte_offset_for_lsp_position, lsp_position_for_byte_offset};
 
-const ACTION_TITLE: &str = "Rephactor: Add names to arguments";
+const ACTION_TITLE: &str = "[Rephactor] Add names to arguments";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Signature {
     parameters: Vec<String>,
+    location: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ClassInfo {
+    location: Option<SourceLocation>,
     methods: HashMap<String, Signature>,
     constructor: Option<Signature>,
     parents: Vec<String>,
     interfaces: Vec<String>,
     traits: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceLocation {
+    path: PathBuf,
+    byte_offset: usize,
 }
 
 #[derive(Debug, Default)]
@@ -99,6 +108,13 @@ pub struct CodeActionAnalysis {
 #[derive(Debug)]
 pub struct SignatureHelpAnalysis {
     pub signature_help: Option<SignatureHelp>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct DefinitionAnalysis {
+    pub definition: Option<GotoDefinitionResponse>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
 }
@@ -178,6 +194,28 @@ pub fn analyze_signature_help_for_position_with_cache(
         },
         Err(reason) => SignatureHelpAnalysis {
             signature_help: None,
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_definition_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> DefinitionAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match definition_for_position_with_cache(uri, text, position, open_documents, cache) {
+        Ok(definition) => DefinitionAnalysis {
+            definition: Some(definition),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => DefinitionAnalysis {
+            definition: None,
             skip_reason: Some(reason),
             index_cache_status,
         },
@@ -287,6 +325,49 @@ fn signature_help_for_position_with_cache(
     ))
 }
 
+fn definition_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<GotoDefinitionResponse, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let open_paths = open_project_documents(open_documents);
+
+    if let Ok(call) = find_call_at_byte(root, text, byte_offset) {
+        let signature = index.resolve(
+            &call.target,
+            root,
+            text,
+            byte_offset,
+            namespace.as_deref(),
+            &imports,
+        )?;
+        return location_response(signature.location.as_ref(), &open_paths);
+    }
+
+    let Some(name_node) = find_smallest_name(root, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let class_name = clean_name_text(node_text(name_node, text));
+    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+        return Err(SkipReason::UnresolvedCallable(class_name));
+    };
+
+    location_response(class_info.location.as_ref(), &open_paths)
+}
+
 fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
     let mut parser = Parser::new();
     parser
@@ -359,14 +440,14 @@ impl SymbolIndex {
         }
 
         if let Some(open_text) = open_documents.get(path) {
-            self.index_text(open_text);
+            self.index_text_at_path(open_text, Some(path));
             return;
         }
 
         let Ok(text) = fs::read_to_string(path) else {
             return;
         };
-        self.index_text(&text);
+        self.index_text_at_path(&text, Some(path));
     }
 
     fn index_php_files(&mut self, root: &Path, open_documents: &HashMap<PathBuf, String>) {
@@ -386,12 +467,17 @@ impl SymbolIndex {
         }
     }
 
+    #[cfg(test)]
     fn index_text(&mut self, text: &str) {
+        self.index_text_at_path(text, None);
+    }
+
+    fn index_text_at_path(&mut self, text: &str, path: Option<&Path>) {
         let Some(tree) = parse_php(text) else {
             return;
         };
 
-        index_children(self, tree.root_node(), text, None);
+        index_children(self, tree.root_node(), text, path, None);
     }
 
     fn add_function(&mut self, fqn: String, signature: Signature) {
@@ -564,7 +650,8 @@ impl ProjectIndexCache {
     ) -> SymbolIndex {
         let Some(project_root) = project_root_for_uri(uri) else {
             let mut index = SymbolIndex::default();
-            index.index_text(text);
+            let path = uri.to_file_path().ok();
+            index.index_text_at_path(text, path.as_deref());
             return index;
         };
 
@@ -574,11 +661,12 @@ impl ProjectIndexCache {
             .or_insert_with(|| SymbolIndex::for_project(&project_root));
         let mut index = disk_index.clone();
 
-        for open_text in open_project_documents(open_documents).values() {
-            index.index_text(open_text);
+        for (path, open_text) in open_project_documents(open_documents) {
+            index.index_text_at_path(&open_text, Some(&path));
         }
 
-        index.index_text(text);
+        let path = uri.to_file_path().ok();
+        index.index_text_at_path(text, path.as_deref());
         index
     }
 }
@@ -720,7 +808,13 @@ fn use_clause_has_alias(clause: Node, text: &str) -> bool {
         .any(|part| part.eq_ignore_ascii_case("as"))
 }
 
-fn index_children(index: &mut SymbolIndex, node: Node, text: &str, namespace: Option<String>) {
+fn index_children(
+    index: &mut SymbolIndex,
+    node: Node,
+    text: &str,
+    path: Option<&Path>,
+    namespace: Option<String>,
+) {
     let mut cursor = node.walk();
     let mut active_namespace = namespace;
 
@@ -733,23 +827,29 @@ fn index_children(index: &mut SymbolIndex, node: Node, text: &str, namespace: Op
                     .filter(|name| !name.is_empty());
 
                 if let Some(body) = child.child_by_field_name("body") {
-                    index_children(index, body, text, namespace_name);
+                    index_children(index, body, text, path, namespace_name);
                 } else {
                     active_namespace = namespace_name;
                 }
             }
             "function_definition" => {
-                index_function(index, child, text, active_namespace.as_deref());
+                index_function(index, child, text, path, active_namespace.as_deref());
             }
             "class_declaration" | "interface_declaration" | "trait_declaration" => {
-                index_class(index, child, text, active_namespace.as_deref());
+                index_class(index, child, text, path, active_namespace.as_deref());
             }
-            _ => index_children(index, child, text, active_namespace.clone()),
+            _ => index_children(index, child, text, path, active_namespace.clone()),
         }
     }
 }
 
-fn index_function(index: &mut SymbolIndex, node: Node, text: &str, namespace: Option<&str>) {
+fn index_function(
+    index: &mut SymbolIndex,
+    node: Node,
+    text: &str,
+    path: Option<&Path>,
+    namespace: Option<&str>,
+) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
     };
@@ -760,11 +860,18 @@ fn index_function(index: &mut SymbolIndex, node: Node, text: &str, namespace: Op
     let name = qualify_name(node_text(name_node, text), namespace);
     let signature = Signature {
         parameters: parameter_names(parameters_node, text),
+        location: source_location(path, name_node.start_byte()),
     };
     index.add_function(name, signature);
 }
 
-fn index_class(index: &mut SymbolIndex, node: Node, text: &str, namespace: Option<&str>) {
+fn index_class(
+    index: &mut SymbolIndex,
+    node: Node,
+    text: &str,
+    path: Option<&Path>,
+    namespace: Option<&str>,
+) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
     };
@@ -773,6 +880,7 @@ fn index_class(index: &mut SymbolIndex, node: Node, text: &str, namespace: Optio
     };
 
     let mut class_info = ClassInfo {
+        location: source_location(path, name_node.start_byte()),
         parents: class_like_names_from_direct_child(node, "base_clause", text, namespace),
         interfaces: class_like_names_from_direct_child(
             node,
@@ -796,7 +904,7 @@ fn index_class(index: &mut SymbolIndex, node: Node, text: &str, namespace: Optio
             continue;
         }
 
-        index_method(&mut class_info, child, text);
+        index_method(&mut class_info, child, text, path);
     }
 
     index.add_class(
@@ -805,7 +913,7 @@ fn index_class(index: &mut SymbolIndex, node: Node, text: &str, namespace: Optio
     );
 }
 
-fn index_method(class_info: &mut ClassInfo, node: Node, text: &str) {
+fn index_method(class_info: &mut ClassInfo, node: Node, text: &str, path: Option<&Path>) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
     };
@@ -816,6 +924,7 @@ fn index_method(class_info: &mut ClassInfo, node: Node, text: &str) {
     let method_name = node_text(name_node, text).to_string();
     let signature = Signature {
         parameters: parameter_names(parameters_node, text),
+        location: source_location(path, name_node.start_byte()),
     };
 
     if method_name.eq_ignore_ascii_case("__construct") {
@@ -908,6 +1017,21 @@ fn find_call_at_byte(root: Node, text: &str, byte_offset: usize) -> Result<CallI
     };
 
     call_info(node, text)
+}
+
+fn find_smallest_name<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {
+    if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
+        return None;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = find_smallest_name(child, byte_offset) {
+            return Some(found);
+        }
+    }
+
+    is_name_node(node).then_some(node)
 }
 
 fn find_smallest_call<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {
@@ -1127,10 +1251,38 @@ fn action_title_for_edits(edits: &[TextEdit]) -> String {
     if edits.len() == 1
         && let Some(parameter_name) = edits[0].new_text.strip_suffix(": ")
     {
-        return format!("Rephactor: Add name identifier '{parameter_name}'");
+        return format!("[Rephactor] Add name identifier '{parameter_name}'");
     }
 
     ACTION_TITLE.to_string()
+}
+
+fn location_response(
+    location: Option<&SourceLocation>,
+    open_documents: &HashMap<PathBuf, String>,
+) -> Result<GotoDefinitionResponse, SkipReason> {
+    let Some(location) = location else {
+        return Err(SkipReason::UnresolvedCallable("definition".to_string()));
+    };
+    let Some(uri) = Url::from_file_path(&location.path).ok() else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let text = open_documents
+        .get(&location.path)
+        .cloned()
+        .or_else(|| fs::read_to_string(&location.path).ok())
+        .ok_or(SkipReason::InvalidCursorPosition)?;
+    let Some(position) = lsp_position_for_byte_offset(&text, location.byte_offset) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    Ok(GotoDefinitionResponse::Scalar(Location::new(
+        uri,
+        Range {
+            start: position,
+            end: position,
+        },
+    )))
 }
 
 fn active_parameter_for_call(
@@ -1537,6 +1689,14 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
             .iter()
             .map(|parameter| parameter.to_string())
             .collect(),
+        location: None,
+    })
+}
+
+fn source_location(path: Option<&Path>, byte_offset: usize) -> Option<SourceLocation> {
+    path.map(|path| SourceLocation {
+        path: path.to_path_buf(),
+        byte_offset,
     })
 }
 
@@ -2182,7 +2342,7 @@ mod tests {
 
         assert_eq!(
             action.title,
-            "Rephactor: Add name identifier 'exchange_gift'"
+            "[Rephactor] Add name identifier 'exchange_gift'"
         );
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "exchange_gift: ");

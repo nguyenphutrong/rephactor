@@ -30,12 +30,13 @@ of the same resolver and project index.
 - Return `WorkspaceEdit` changes that insert `parameter_name: ` before
   positional arguments.
 - Provide `textDocument/signatureHelp` for resolved callables.
+- Provide `textDocument/definition` for resolved project symbols.
 - Skip cases where conversion could change behavior or where symbol resolution
   is ambiguous.
 
 ## Non-goals
 
-- Providing diagnostics, completion, hover, formatting, or navigation.
+- Providing diagnostics, completion, hover, or formatting.
 - Converting dynamic calls before semantic resolution is robust.
 - Guessing parameter names from text when the callable cannot be resolved.
 
@@ -104,14 +105,20 @@ run Rephactor alongside it:
 }
 ```
 
-Rephactor currently provides one refactor code action and Signature Help V1.
-The code action is titled `Add names to arguments` when multiple identifiers
-can be inserted. When only one positional argument is missing a name, the title
-names that identifier, for example `Add name identifier 'exchange_gift'`.
+Rephactor currently provides one refactor code action, Signature Help V1, and
+Go To Definition V1.
+The code action is titled `[Rephactor] Add names to arguments` when multiple
+identifiers can be inserted. When only one positional argument is missing a
+name, the title names that identifier, for example
+`[Rephactor] Add name identifier 'exchange_gift'`.
 
 Signature Help V1 shows parameter names for resolved functions, static methods,
 constructors, and locally obvious instance methods. It intentionally returns no
 signature for unsupported or ambiguous calls instead of guessing.
+
+Go To Definition V1 navigates to resolved functions, classes, methods, static
+methods, constructors, traits, interfaces, and imports that are present in the
+project index. It returns no location for dynamic or ambiguous symbols.
 
 Zed currently applies LSP code actions directly. It does not show a PHPStorm-
 style diff preview when moving through code action menu items; the aside popover
