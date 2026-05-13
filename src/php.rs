@@ -2846,9 +2846,6 @@ fn assignment_type_mismatches_for_declaration(
         .zip(parameter_types)
         .filter_map(|(parameter, parameter_type)| Some((format!("${parameter}"), parameter_type?)))
         .collect::<HashMap<_, _>>();
-    if expected_types.is_empty() {
-        return Vec::new();
-    }
 
     let mut diagnostics = Vec::new();
     let context = AssignmentTypeMismatchContext {
@@ -2896,45 +2893,31 @@ fn collect_assignment_type_mismatches(
             node.child_by_field_name("left"),
             node.child_by_field_name("right"),
         )
-        && left.kind() == "variable_name"
     {
         let assignment_namespace = namespace_at_byte(context.root, context.text, node.start_byte());
         let assignment_namespace = assignment_namespace.as_deref();
-        let expected = context
-            .expected_types
-            .get(node_text(left, context.text))
-            .cloned()
-            .or_else(|| {
-                phpdoc_variable_type_at_byte(
-                    context.text,
-                    left.start_byte(),
-                    assignment_namespace,
-                    context.imports,
-                    node_text(left, context.text),
-                )
-            });
-        let actual = inferred_assigned_return_type(
-            right,
-            context.text,
-            assignment_namespace,
-            context.imports,
-        )
-        .or_else(|| {
-            let call_context = CallAssignmentInference {
-                root: context.root,
-                text: context.text,
-                byte_offset: right.end_byte(),
-                namespace: assignment_namespace,
-                imports: context.imports,
-                index: context.index,
-            };
-            inferred_call_return_type(right, &call_context)
-        })
-        .or_else(|| {
-            inferred_assigned_variable_type(declaration, right, context, assignment_namespace)
-        });
+        let expected = expected_assignment_type_for_left(left, context, assignment_namespace);
         if let Some(expected) = expected
-            && let Some(actual) = actual
+            && let Some(actual) = inferred_assigned_return_type(
+                right,
+                context.text,
+                assignment_namespace,
+                context.imports,
+            )
+            .or_else(|| {
+                let call_context = CallAssignmentInference {
+                    root: context.root,
+                    text: context.text,
+                    byte_offset: right.end_byte(),
+                    namespace: assignment_namespace,
+                    imports: context.imports,
+                    index: context.index,
+                };
+                inferred_call_return_type(right, &call_context)
+            })
+            .or_else(|| {
+                inferred_assigned_variable_type(declaration, right, context, assignment_namespace)
+            })
             && !types_compatible(&expected, &actual)
         {
             diagnostics.push(Diagnostic {
@@ -2961,6 +2944,98 @@ fn collect_assignment_type_mismatches(
     for child in node.named_children(&mut cursor) {
         collect_assignment_type_mismatches(declaration, child, context, diagnostics);
     }
+}
+
+fn expected_assignment_type_for_left(
+    left: Node,
+    context: &AssignmentTypeMismatchContext<'_, '_>,
+    namespace: Option<&str>,
+) -> Option<ComparableReturnType> {
+    if left.kind() == "variable_name" {
+        return context
+            .expected_types
+            .get(node_text(left, context.text))
+            .cloned()
+            .or_else(|| {
+                phpdoc_variable_type_at_byte(
+                    context.text,
+                    left.start_byte(),
+                    namespace,
+                    context.imports,
+                    node_text(left, context.text),
+                )
+            });
+    }
+
+    if left.kind() == "member_access_expression" {
+        return property_assignment_type(left, context.text, namespace, context.imports);
+    }
+
+    None
+}
+
+fn property_assignment_type(
+    left: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let object = left.child_by_field_name("object")?;
+    if object.kind() != "variable_name" || node_text(object, text) != "$this" {
+        return None;
+    }
+
+    let property = left.child_by_field_name("name")?;
+    if !matches!(property.kind(), "name" | "variable_name") {
+        return None;
+    }
+
+    let class_node = containing_class_like_declaration(left)?;
+    property_type_in_class(
+        class_node,
+        clean_name_text(node_text(property, text)).trim_start_matches('$'),
+        text,
+        namespace,
+        imports,
+    )
+}
+
+fn property_type_in_class(
+    class_node: Node,
+    property_name: &str,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let body = class_node.child_by_field_name("body")?;
+    let mut cursor = body.walk();
+
+    for child in body.named_children(&mut cursor) {
+        if child.kind() != "property_declaration" {
+            continue;
+        }
+        let Some(type_node) = child.child_by_field_name("type") else {
+            continue;
+        };
+
+        let mut property_cursor = child.walk();
+        for property in child.named_children(&mut property_cursor) {
+            if property.kind() != "property_element" {
+                continue;
+            }
+            let Some(name_node) = property.child_by_field_name("name") else {
+                continue;
+            };
+            let declared_name = node_text(name_node, text).trim_start_matches('$');
+            if declared_name.eq_ignore_ascii_case(property_name) {
+                return comparable_declaration_parameter_type_node(
+                    child, type_node, text, namespace, imports,
+                );
+            }
+        }
+    }
+
+    None
 }
 
 fn inferred_assigned_variable_type(

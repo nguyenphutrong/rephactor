@@ -160,4 +160,4 @@
 - [x] Implement PHPDoc `@var` assignment-type mismatch diagnostics for open files.
 - [x] Implement PHPDoc `@var` returned-call assignment-type mismatch diagnostics for open files.
 - [x] Implement local variable alias type-flow diagnostics for open files.
-- [ ] Implement broader type-flow semantic diagnostics beyond obvious assignments/arguments.
+- [x] Implement broader type-flow semantic diagnostics beyond obvious assignments/arguments.
