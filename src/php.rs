@@ -20,6 +20,9 @@ struct Signature {
 struct ClassInfo {
     methods: HashMap<String, Signature>,
     constructor: Option<Signature>,
+    parents: Vec<String>,
+    interfaces: Vec<String>,
+    traits: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -241,12 +244,7 @@ impl SymbolIndex {
             CallTarget::Function(name) => self.resolve_function(name, namespace),
             CallTarget::StaticMethod { class_name, method } => self
                 .resolve_class(class_name, namespace, imports)
-                .and_then(|class_info| {
-                    class_info
-                        .methods
-                        .get(&normalize_method_key(method))
-                        .cloned()
-                }),
+                .and_then(|class_info| self.resolve_method(class_info, method)),
             CallTarget::Constructor { class_name } => self
                 .resolve_class(class_name, namespace, imports)
                 .and_then(|class_info| class_info.constructor.clone()),
@@ -255,12 +253,7 @@ impl SymbolIndex {
                     variable_types_at_byte(root, text, byte_offset, namespace, imports);
                 let class_name = variable_types.get(variable)?;
                 self.resolve_class(class_name, namespace, imports)
-                    .and_then(|class_info| {
-                        class_info
-                            .methods
-                            .get(&normalize_method_key(method))
-                            .cloned()
-                    })
+                    .and_then(|class_info| self.resolve_method(class_info, method))
             }
         }
     }
@@ -290,6 +283,65 @@ impl SymbolIndex {
         }
 
         None
+    }
+
+    fn resolve_method(&self, class_info: &ClassInfo, method: &str) -> Option<Signature> {
+        let method_key = normalize_method_key(method);
+        if let Some(signature) = class_info.methods.get(&method_key) {
+            return Some(signature.clone());
+        }
+
+        let mut signatures = Vec::new();
+        let mut visited = Vec::new();
+
+        for related_name in class_info
+            .parents
+            .iter()
+            .chain(class_info.interfaces.iter())
+            .chain(class_info.traits.iter())
+        {
+            self.collect_related_method_signatures(
+                related_name,
+                &method_key,
+                &mut visited,
+                &mut signatures,
+            );
+        }
+
+        (signatures.len() == 1).then(|| signatures.remove(0))
+    }
+
+    fn collect_related_method_signatures(
+        &self,
+        class_name: &str,
+        method_key: &str,
+        visited: &mut Vec<String>,
+        signatures: &mut Vec<Signature>,
+    ) {
+        let class_key = normalize_symbol_key(class_name);
+        if visited.contains(&class_key) {
+            return;
+        }
+        visited.push(class_key.clone());
+
+        let Some(class_info) = self.classes.get(&class_key) else {
+            return;
+        };
+
+        if let Some(signature) = class_info.methods.get(method_key)
+            && !signatures.contains(signature)
+        {
+            signatures.push(signature.clone());
+        }
+
+        for related_name in class_info
+            .parents
+            .iter()
+            .chain(class_info.interfaces.iter())
+            .chain(class_info.traits.iter())
+        {
+            self.collect_related_method_signatures(related_name, method_key, visited, signatures);
+        }
     }
 }
 
@@ -461,39 +513,78 @@ fn index_class(index: &mut SymbolIndex, node: Node, text: &str, namespace: Optio
         return;
     };
 
-    let mut class_info = ClassInfo::default();
+    let mut class_info = ClassInfo {
+        parents: class_like_names_from_direct_child(node, "base_clause", text, namespace),
+        interfaces: class_like_names_from_direct_child(
+            node,
+            "class_interface_clause",
+            text,
+            namespace,
+        ),
+        ..ClassInfo::default()
+    };
     let mut cursor = body.walk();
 
     for child in body.named_children(&mut cursor) {
+        if child.kind() == "use_declaration" {
+            class_info
+                .traits
+                .extend(class_like_names(child, text, namespace));
+            continue;
+        }
+
         if child.kind() != "method_declaration" {
             continue;
         }
 
-        let Some(name_node) = child.child_by_field_name("name") else {
-            continue;
-        };
-        let Some(parameters_node) = child.child_by_field_name("parameters") else {
-            continue;
-        };
-
-        let method_name = node_text(name_node, text).to_string();
-        let signature = Signature {
-            parameters: parameter_names(parameters_node, text),
-        };
-
-        if method_name.eq_ignore_ascii_case("__construct") {
-            class_info.constructor = Some(signature);
-        } else {
-            class_info
-                .methods
-                .insert(normalize_method_key(&method_name), signature);
-        }
+        index_method(&mut class_info, child, text);
     }
 
     index.add_class(
         qualify_name(node_text(name_node, text), namespace),
         class_info,
     );
+}
+
+fn index_method(class_info: &mut ClassInfo, node: Node, text: &str) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Some(parameters_node) = node.child_by_field_name("parameters") else {
+        return;
+    };
+
+    let method_name = node_text(name_node, text).to_string();
+    let signature = Signature {
+        parameters: parameter_names(parameters_node, text),
+    };
+
+    if method_name.eq_ignore_ascii_case("__construct") {
+        class_info.constructor = Some(signature);
+    } else {
+        class_info
+            .methods
+            .insert(normalize_method_key(&method_name), signature);
+    }
+}
+
+fn class_like_names_from_direct_child(
+    node: Node,
+    child_kind: &str,
+    text: &str,
+    namespace: Option<&str>,
+) -> Vec<String> {
+    direct_child_kind(node, child_kind)
+        .map(|child| class_like_names(child, text, namespace))
+        .unwrap_or_default()
+}
+
+fn class_like_names(node: Node, text: &str, namespace: Option<&str>) -> Vec<String> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| is_name_node(*child))
+        .map(|child| qualify_name(node_text(child, text), namespace))
+        .collect()
 }
 
 fn parameter_names(parameters_node: Node, text: &str) -> Vec<String> {
@@ -1154,6 +1245,49 @@ mod tests {
             apply_edits(text, &edits),
             "<?php\nclass InvoiceSender { public function dispatch($invoice, $notify) {} }\nfunction run(InvoiceSender $sender, $invoice) {\n    $sender->dispatch(invoice: $invoice, notify: true);\n}\n"
         );
+    }
+
+    #[test]
+    fn resolves_static_method_from_parent_class() {
+        let text = "<?php\nclass BaseSender { public static function dispatch($invoice, $notify) {} }\nclass InvoiceSender extends BaseSender {}\nInvoiceSender::dispatch($invoice, true);\n";
+
+        let edits = action_edits(text, 3, 25);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nclass BaseSender { public static function dispatch($invoice, $notify) {} }\nclass InvoiceSender extends BaseSender {}\nInvoiceSender::dispatch(invoice: $invoice, notify: true);\n"
+        );
+    }
+
+    #[test]
+    fn resolves_instance_method_from_implemented_interface() {
+        let text = "<?php\ninterface Sender { public function dispatch($invoice, $notify); }\nclass InvoiceSender implements Sender {}\nfunction run(InvoiceSender $sender, $invoice) {\n    $sender->dispatch($invoice, true);\n}\n";
+
+        let edits = action_edits(text, 4, 15);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\ninterface Sender { public function dispatch($invoice, $notify); }\nclass InvoiceSender implements Sender {}\nfunction run(InvoiceSender $sender, $invoice) {\n    $sender->dispatch(invoice: $invoice, notify: true);\n}\n"
+        );
+    }
+
+    #[test]
+    fn resolves_instance_method_from_used_trait() {
+        let text = "<?php\ntrait Dispatchable { public function dispatch($invoice, $notify) {} }\nclass InvoiceSender { use Dispatchable; }\n$sender = new InvoiceSender();\n$sender->dispatch($invoice, true);\n";
+
+        let edits = action_edits(text, 4, 15);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\ntrait Dispatchable { public function dispatch($invoice, $notify) {} }\nclass InvoiceSender { use Dispatchable; }\n$sender = new InvoiceSender();\n$sender->dispatch(invoice: $invoice, notify: true);\n"
+        );
+    }
+
+    #[test]
+    fn skips_inherited_method_when_signatures_conflict() {
+        let text = "<?php\ninterface FirstSender { public function dispatch($invoice); }\ninterface SecondSender { public function dispatch($invoice, $notify); }\nclass InvoiceSender implements FirstSender, SecondSender {}\n$sender = new InvoiceSender();\n$sender->dispatch($invoice, true);\n";
+
+        assert!(named_argument_code_action(&uri(), text, position(5, 15)).is_none());
     }
 
     #[test]

@@ -44,7 +44,7 @@
 - [x] Resolve instance methods when the receiver type is known locally.
 - [x] Resolve static method calls.
 - [x] Resolve constructors for `new ClassName(...)`.
-- [ ] Handle inherited methods and implemented interfaces conservatively.
+- [x] Handle inherited methods, implemented interfaces, and traits conservatively.
 
 ## Phase 6: Editor Integration
 
