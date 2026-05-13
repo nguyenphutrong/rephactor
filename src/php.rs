@@ -38,12 +38,18 @@ struct ClassInfo {
     location: Option<SourceLocation>,
     doc_summary: Option<String>,
     methods: HashMap<String, Signature>,
-    constants: Vec<String>,
+    constants: Vec<ClassConstantInfo>,
     constructor: Option<Signature>,
     parents: Vec<String>,
     interfaces: Vec<String>,
     traits: Vec<String>,
     mixins: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClassConstantInfo {
+    name: String,
+    location: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1164,6 +1170,13 @@ fn definition_for_position_with_cache(
         return location_response(signature.location.as_ref(), &open_paths);
     }
 
+    if let Some((class_name, constant_name)) = static_constant_reference_context(text, byte_offset)
+        && let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
+        && let Some(constant_info) = class_constant_info(class_info, &constant_name)
+    {
+        return location_response(constant_info.location.as_ref(), &open_paths);
+    }
+
     let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
         return Err(SkipReason::NoSupportedCall);
     };
@@ -1497,6 +1510,17 @@ fn hover_for_position_with_cache(
             signature_label(&call.target, &signature),
             signature.location.as_ref(),
             signature.doc_summary.as_deref(),
+        ));
+    }
+
+    if let Some((class_name, constant_name)) = static_constant_reference_context(text, byte_offset)
+        && let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
+        && let Some(constant_info) = class_constant_info(class_info, &constant_name)
+    {
+        return Ok(hover_from_parts(
+            format!("const {}::{}", class_info.fqn, constant_info.name),
+            constant_info.location.as_ref(),
+            None,
         ));
     }
 
@@ -4807,7 +4831,7 @@ fn index_class(
         if child.kind() == "const_declaration" {
             class_info
                 .constants
-                .extend(class_constant_names(child, text));
+                .extend(class_constant_infos(child, text, path));
             continue;
         }
 
@@ -4821,8 +4845,8 @@ fn index_class(
     index.add_class(fqn, class_info);
 }
 
-fn class_constant_names(node: Node, text: &str) -> Vec<String> {
-    let mut names = Vec::new();
+fn class_constant_infos(node: Node, text: &str, path: Option<&Path>) -> Vec<ClassConstantInfo> {
+    let mut constants = Vec::new();
     let mut cursor = node.walk();
 
     for constant in node
@@ -4830,11 +4854,14 @@ fn class_constant_names(node: Node, text: &str) -> Vec<String> {
         .filter(|child| child.kind() == "const_element")
     {
         if let Some(name_node) = first_named_child_kind(constant, "name") {
-            names.push(node_text(name_node, text).to_string());
+            constants.push(ClassConstantInfo {
+                name: node_text(name_node, text).to_string(),
+                location: source_location(path, name_node.start_byte()),
+            });
         }
     }
 
-    names
+    constants
 }
 
 fn index_method(
@@ -6639,6 +6666,64 @@ fn static_method_completion_context(text: &str, byte_offset: usize) -> Option<(S
     (!class_name.is_empty()).then(|| (class_name, completion_prefix(text, byte_offset)))
 }
 
+fn static_constant_reference_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
+    let (member_start, member_end) = identifier_bounds_at_byte(text, byte_offset)?;
+    if member_start < 2 || text.get(member_start.saturating_sub(2)..member_start)? != "::" {
+        return None;
+    }
+
+    let next = text.get(member_end..)?.trim_start().chars().next();
+    if next == Some('(') {
+        return None;
+    }
+
+    let class_end = member_start - 2;
+    let class_start = text
+        .get(..class_end)?
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!is_qualified_name_character(character)).then_some(index + character.len_utf8())
+        })
+        .unwrap_or(0);
+    let class_name = text.get(class_start..class_end)?.trim();
+    let member_name = text.get(member_start..member_end)?.trim();
+
+    (!class_name.is_empty() && !member_name.is_empty())
+        .then(|| (class_name.to_string(), member_name.to_string()))
+}
+
+fn identifier_bounds_at_byte(text: &str, byte_offset: usize) -> Option<(usize, usize)> {
+    if byte_offset > text.len() {
+        return None;
+    }
+
+    let start = text
+        .get(..byte_offset)?
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!is_identifier_character(character)).then_some(index + character.len_utf8())
+        })
+        .unwrap_or(0);
+    let end = byte_offset
+        + text
+            .get(byte_offset..)?
+            .char_indices()
+            .find_map(|(index, character)| (!is_identifier_character(character)).then_some(index))
+            .unwrap_or_else(|| text.len() - byte_offset);
+
+    (start < end).then_some((start, end))
+}
+
+fn is_identifier_character(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
+}
+
+fn is_qualified_name_character(character: char) -> bool {
+    is_identifier_character(character) || character == '\\'
+}
+
 fn instance_method_completion_context(text: &str, byte_offset: usize) -> Option<(String, String)> {
     let before = text.get(..byte_offset)?;
     let arrow = before.rfind("->")?;
@@ -6848,8 +6933,8 @@ fn class_constant_completion_items(class_info: &ClassInfo, prefix: &str) -> Vec<
     let mut labels = class_info
         .constants
         .iter()
+        .map(|constant| constant.name.clone())
         .filter(|name| prefix_matches(name, prefix))
-        .cloned()
         .collect::<Vec<_>>();
     labels.sort_by_key(|label| label.to_ascii_lowercase());
     labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
@@ -6861,6 +6946,16 @@ fn class_constant_completion_items(class_info: &ClassInfo, prefix: &str) -> Vec<
             ..CompletionItem::default()
         })
         .collect()
+}
+
+fn class_constant_info<'a>(
+    class_info: &'a ClassInfo,
+    constant_name: &str,
+) -> Option<&'a ClassConstantInfo> {
+    class_info
+        .constants
+        .iter()
+        .find(|constant| constant.name.eq_ignore_ascii_case(constant_name))
 }
 
 fn keyword_completion_items(prefix: &str) -> Vec<CompletionItem> {

@@ -700,6 +700,24 @@ fn lsp_returns_definition_for_imported_constant() {
 }
 
 #[test]
+fn lsp_returns_definition_for_class_constant() {
+    let root = temp_project("definition-class-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass CustomerRecord { const STATUS_PAID = 'paid'; }\necho CustomerRecord::STATUS_PAID;\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server.definition(&uri, 2, 25).expect("definition result");
+
+    assert_eq!(definition["uri"], uri);
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 29 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_definition_for_dynamic_call() {
     let root = temp_project("definition-unsupported");
     let mut server = LspProcess::start(&root);
@@ -743,6 +761,22 @@ fn lsp_returns_hover_for_imported_constant() {
 
     assert_eq!(hover["contents"]["kind"], "markdown");
     assert!(markdown.contains("const App\\Config\\API_VERSION"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_hover_for_class_constant() {
+    let root = temp_project("hover-class-constant");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass CustomerRecord { const STATUS_PAID = 'paid'; }\necho CustomerRecord::STATUS_PAID;\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 2, 25).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert_eq!(hover["contents"]["kind"], "markdown");
+    assert!(markdown.contains("const CustomerRecord::STATUS_PAID"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

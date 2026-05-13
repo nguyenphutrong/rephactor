@@ -141,10 +141,10 @@ Signature Help V1 shows parameter names for resolved functions, static methods,
 constructors, and locally obvious instance methods. It intentionally returns no
 signature for unsupported or ambiguous calls instead of guessing.
 
-Go To Definition V1 navigates to resolved functions, constants, classes,
-methods, static methods, constructors, traits, interfaces, and imports that are
-present in the project index. It returns no location for dynamic or ambiguous
-symbols.
+Go To Definition V1 navigates to resolved functions, constants, class
+constants, classes, methods, static methods, constructors, traits, interfaces,
+and imports that are present in the project index. It returns no location for
+dynamic or ambiguous symbols.
 
 Go To Declaration V1 navigates from a class method implementation to the
 matching interface or base-class method declaration when that relationship is
@@ -159,11 +159,12 @@ extend or implement the class/interface under the cursor. On interface/base
 method declarations, it returns matching implementation methods from derived
 classes.
 
-Hover V1 shows a concise PHP signature, class FQN, or constant FQN, source
-location, and the nearest PHPDoc summary plus tag lines when available. Hover
-for seeded PHP internal functions links to the official PHP manual. Seeded
-internal functions include conservative parameter and return metadata for simple
-scalar/array contracts. It intentionally avoids rich PHPDoc rendering and
+Hover V1 shows a concise PHP signature, class FQN, constant FQN, or class
+constant label, source location, and the nearest PHPDoc summary plus tag lines
+when available. Hover for seeded PHP internal functions links to the official
+PHP manual. Seeded internal functions include conservative parameter and return
+metadata for simple scalar/array contracts. It intentionally avoids rich PHPDoc
+rendering and
 returns no hover for ambiguous or dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
@@ -315,6 +316,8 @@ files that are not open in the editor are picked up on the next request.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
 - Matching class-like PHP file rename operations for class/interface/trait
   declaration renames.
+- Class constant hover and definition lookup for direct `ClassName::CONSTANT`
+  references.
 - Exact-reference and implementation-count code lenses for declarations,
   including constants and properties.
 - Method declaration lookup for interface/base-class implementations.
