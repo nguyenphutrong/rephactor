@@ -89,6 +89,7 @@
 - [x] Implement hover for resolved symbols.
 - [x] Implement deterministic completion V1.
 - [x] Implement PHP keyword completion.
+- [x] Add conservative auto-import edits for class completions.
 
 ## Phase 12: Intelephense Parity Foundations
 

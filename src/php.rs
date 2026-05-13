@@ -814,7 +814,15 @@ fn completion_for_position_with_cache(
         };
         method_completion_items(class_info, &method_prefix)
     } else {
-        let mut items = class_completion_items(&index, &prefix);
+        let import_declarations = import_declarations(root, text);
+        let mut items = class_completion_items(
+            text,
+            root,
+            namespace.as_deref(),
+            &import_declarations,
+            &index,
+            &prefix,
+        );
         items.extend(function_completion_items(&index, &prefix));
         items.extend(keyword_completion_items(&prefix));
         items.sort_by_key(|item| item.label.to_ascii_lowercase());
@@ -3011,20 +3019,73 @@ fn instance_method_completion_context(text: &str, byte_offset: usize) -> Option<
         .then(|| (variable, completion_prefix(text, byte_offset)))
 }
 
-fn class_completion_items(index: &SymbolIndex, prefix: &str) -> Vec<CompletionItem> {
+fn class_completion_items(
+    text: &str,
+    root: Node,
+    namespace: Option<&str>,
+    imports: &[ImportDeclaration],
+    index: &SymbolIndex,
+    prefix: &str,
+) -> Vec<CompletionItem> {
     let mut items = index
         .classes
         .values()
         .filter(|class_info| prefix_matches(last_name_segment(&class_info.fqn), prefix))
-        .map(|class_info| CompletionItem {
-            label: last_name_segment(&class_info.fqn).to_string(),
-            kind: Some(CompletionItemKind::CLASS),
-            detail: Some(class_info.fqn.clone()),
-            ..CompletionItem::default()
+        .map(|class_info| {
+            let mut item = CompletionItem {
+                label: last_name_segment(&class_info.fqn).to_string(),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some(class_info.fqn.clone()),
+                ..CompletionItem::default()
+            };
+            if let Some(edit) =
+                completion_import_edit(text, root, namespace, imports, &class_info.fqn)
+            {
+                item.additional_text_edits = Some(vec![edit]);
+            }
+            item
         })
         .collect::<Vec<_>>();
     items.sort_by_key(|item| item.label.to_ascii_lowercase());
     items
+}
+
+fn completion_import_edit(
+    text: &str,
+    root: Node,
+    namespace: Option<&str>,
+    imports: &[ImportDeclaration],
+    fqn: &str,
+) -> Option<TextEdit> {
+    if !fqn.contains('\\') {
+        return None;
+    }
+
+    let short_name = last_name_segment(fqn);
+    if namespace
+        .filter(|namespace| !namespace.is_empty())
+        .is_some_and(|namespace| fqn == format!("{namespace}\\{short_name}"))
+    {
+        return None;
+    }
+
+    let normalized_fqn = normalize_symbol_key(fqn);
+    if imports
+        .iter()
+        .any(|import| normalize_symbol_key(&import.fqn) == normalized_fqn)
+    {
+        return None;
+    }
+
+    let normalized_short_name = normalize_symbol_key(short_name);
+    if imports
+        .iter()
+        .any(|import| normalize_symbol_key(&import.alias) == normalized_short_name)
+    {
+        return None;
+    }
+
+    insert_import_edit(text, root, imports, fqn).ok()
 }
 
 fn function_completion_items(index: &SymbolIndex, prefix: &str) -> Vec<CompletionItem> {

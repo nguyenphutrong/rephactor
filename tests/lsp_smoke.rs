@@ -594,6 +594,60 @@ fn lsp_returns_class_and_function_completions() {
 }
 
 #[test]
+fn lsp_adds_use_declaration_for_unambiguous_class_completion() {
+    let root = temp_project("completion-auto-import");
+    let model_dir = root.join("src/Models");
+    let controller_dir = root.join("src/Http");
+    std::fs::create_dir_all(&model_dir).expect("create model dir");
+    std::fs::create_dir_all(&controller_dir).expect("create controller dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    std::fs::write(
+        model_dir.join("CustomerRecord.php"),
+        "<?php\nnamespace App\\Models;\nclass CustomerRecord {}\n",
+    )
+    .expect("write model");
+    let mut server = LspProcess::start(&root);
+    let file = controller_dir.join("Controller.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App\\Http;\nCustomerRecord::sync();\n",
+    );
+
+    let items = server.completion(&uri, 2, 4);
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "CustomerRecord")
+        .expect("CustomerRecord completion");
+
+    assert_eq!(item["detail"], "App\\Models\\CustomerRecord");
+    assert_eq!(
+        item["additionalTextEdits"][0]["newText"],
+        "use App\\Models\\CustomerRecord;\n"
+    );
+    assert_eq!(
+        item["additionalTextEdits"][0]["range"]["start"],
+        json!({ "line": 2, "character": 0 })
+    );
+
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App\\Http;\nuse Vendor\\CustomerRecord;\nCustomerRecord::sync();\n",
+    );
+    let items = server.completion(&uri, 3, 4);
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "CustomerRecord")
+        .expect("CustomerRecord completion");
+
+    assert!(item.get("additionalTextEdits").is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_method_completion_after_static_scope() {
     let root = temp_project("completion-static-method");
     let mut server = LspProcess::start(&root);

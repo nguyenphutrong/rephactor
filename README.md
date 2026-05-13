@@ -34,6 +34,7 @@ of the same resolver and project index.
 - Provide `textDocument/definition` for resolved project symbols.
 - Provide `textDocument/hover` for resolved symbols.
 - Provide deterministic `textDocument/completion` for basic symbols.
+- Add conservative `use` declaration edits for unambiguous class completions.
 - Provide `textDocument/documentSymbol` for outline and breadcrumbs.
 - Provide `workspace/symbol` for Composer-indexed project symbols.
 - Provide `textDocument/references` for exact AST symbol references.
@@ -47,7 +48,7 @@ of the same resolver and project index.
 
 ## Non-goals
 
-- Providing diagnostics, completion, hover, or formatting.
+- Providing formatting or full static analysis.
 - Converting dynamic calls before semantic resolution is robust.
 - Guessing parameter names from text when the callable cannot be resolved.
 
@@ -117,8 +118,8 @@ run Rephactor alongside it:
 ```
 
 Rephactor currently provides named-argument and class-import refactor code
-actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1, and
-Document Symbol V1, Workspace Symbol V1, References V1, Diagnostics V1, and
+actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1,
+Document Symbol V1, Workspace Symbol V1, References V1, Diagnostics V1,
 Document Highlight V1, Folding Range V1, Inlay Hint V1, and Document Link V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
@@ -140,8 +141,10 @@ rendering and returns no hover for ambiguous or dynamic symbols.
 Completion V1 returns deterministic prefix matches for indexed class names,
 indexed project functions, seeded PHP internal functions, static methods after
 `ClassName::`, and instance methods when the receiver type is locally obvious.
-It also includes common PHP keyword completions. It intentionally avoids
-snippets and fuzzy ranking.
+It also includes common PHP keyword completions and adds a `use` declaration
+edit for unambiguous namespaced class completions when the short name is not
+already imported or shadowed. It intentionally avoids snippets and fuzzy
+ranking.
 
 Document Symbol V1 returns functions, classes, interfaces, traits, and class
 methods for editor outline and breadcrumb UIs.
