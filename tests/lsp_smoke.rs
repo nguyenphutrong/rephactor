@@ -799,6 +799,23 @@ fn lsp_returns_definition_for_this_property() {
 }
 
 #[test]
+fn lsp_returns_definition_for_this_method_call() {
+    let root = temp_project("definition-this-method");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass Sender { public function dispatch($invoice) {} public function run() {\n    $this->dispatch($invoice);\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server.definition(&uri, 2, 15).expect("definition result");
+
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 31 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_definition_for_dynamic_call() {
     let root = temp_project("definition-unsupported");
     let mut server = LspProcess::start(&root);
@@ -933,6 +950,21 @@ fn lsp_returns_hover_for_this_property() {
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
 
     assert!(markdown.contains("property Sender::$transport"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_hover_for_this_method_call() {
+    let root = temp_project("hover-this-method");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass Sender { public function dispatch($invoice) {} public function run() {\n    $this->dispatch($invoice);\n} }\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 2, 15).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("dispatch($invoice)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

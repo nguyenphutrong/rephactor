@@ -324,6 +324,7 @@ files that are not open in the editor are picked up on the next request.
   declaration renames.
 - Class constant hover and definition lookup for direct, inherited, `self::`,
   `static::`, and direct `parent::` constant references.
+- Instance method hover and definition lookup for `$this` receivers.
 - Instance property hover and definition lookup for `$this`, typed receivers,
   and inherited indexed properties.
 - Exact-reference and implementation-count code lenses for declarations,
