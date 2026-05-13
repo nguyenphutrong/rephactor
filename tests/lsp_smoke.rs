@@ -55,6 +55,10 @@ impl LspProcess {
             json!(true)
         );
         assert_eq!(
+            initialize["result"]["capabilities"]["implementationProvider"],
+            json!(true)
+        );
+        assert_eq!(
             initialize["result"]["capabilities"]["hoverProvider"],
             json!(true)
         );
@@ -185,6 +189,20 @@ impl LspProcess {
     fn type_definition(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
         let response = self.request(
             "textDocument/typeDefinition",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response
+            .get("result")
+            .filter(|result| !result.is_null())
+            .cloned()
+    }
+
+    fn implementation(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
+        let response = self.request(
+            "textDocument/implementation",
             json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character }
@@ -577,6 +595,30 @@ fn lsp_returns_type_definition_for_typed_variable() {
     assert_eq!(
         definition["range"]["start"],
         json!({ "line": 1, "character": 6 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_implementations_for_interface() {
+    let root = temp_project("implementation-interface");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\ninterface Sender {}\nclass EmailSender implements Sender {}\nclass OtherSender {}\n";
+    let uri = server.open_php(&file, text);
+
+    let implementations = server
+        .implementation(&uri, 1, 12)
+        .expect("implementation result")
+        .as_array()
+        .expect("implementation array")
+        .clone();
+
+    assert_eq!(implementations.len(), 1);
+    assert_eq!(implementations[0]["uri"], uri);
+    assert_eq!(
+        implementations[0]["range"]["start"],
+        json!({ "line": 2, "character": 6 })
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

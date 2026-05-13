@@ -98,6 +98,7 @@
 - [x] Implement `workspace/symbol`.
 - [x] Implement `textDocument/references`.
 - [x] Implement `textDocument/typeDefinition` for locally typed variables.
+- [x] Implement `textDocument/implementation` for class/interface inheritance.
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.

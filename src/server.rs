@@ -7,12 +7,16 @@ use crate::php::{
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
     analyze_diagnostics_for_document_with_cache, analyze_document_highlights,
     analyze_document_links, analyze_document_symbols, analyze_folding_ranges,
-    analyze_hover_for_position_with_cache, analyze_inlay_hints_for_range_with_cache,
-    analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
+    analyze_hover_for_position_with_cache, analyze_implementation_for_position_with_cache,
+    analyze_inlay_hints_for_range_with_cache, analyze_references_for_position_with_cache,
+    analyze_signature_help_for_position_with_cache,
     analyze_type_definition_for_position_with_cache, analyze_workspace_symbols,
 };
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
+use tower_lsp::lsp_types::request::{
+    GotoImplementationParams, GotoImplementationResponse, GotoTypeDefinitionParams,
+    GotoTypeDefinitionResponse,
+};
 use tower_lsp::lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
     CodeActionResponse, CompletionOptions, CompletionParams, CompletionResponse,
@@ -20,11 +24,12 @@ use tower_lsp::lsp_types::{
     DocumentHighlight, DocumentHighlightParams, DocumentLink, DocumentLinkOptions,
     DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
     FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, InlayHint, InlayHintOptions, InlayHintParams, InlayHintServerCapabilities,
-    Location, MessageType, OneOf, ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp,
-    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TypeDefinitionProviderCapability, Url, WorkspaceSymbolParams,
+    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability,
+    ImplementationProviderCapability, InitializeParams, InitializeResult, InlayHint,
+    InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location, MessageType, OneOf,
+    ReferenceParams, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TypeDefinitionProviderCapability, Url, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -91,6 +96,7 @@ fn server_capabilities() -> ServerCapabilities {
         }),
         definition_provider: Some(OneOf::Left(true)),
         type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+        implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         completion_provider: Some(CompletionOptions {
             trigger_characters: Some(vec![
@@ -378,6 +384,63 @@ impl LanguageServer for RephactorLanguageServer {
 
         let mut log_message = format!(
             "Rephactor typeDefinition {}:{}:{} -> {} location(s) in {}ms ({})",
+            uri,
+            position.line,
+            position.character,
+            definition_count,
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if definition_count == 0
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok(analysis.definition)
+    }
+
+    async fn goto_implementation(
+        &self,
+        params: GotoImplementationParams,
+    ) -> Result<Option<GotoImplementationResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_implementation_for_position_with_cache(
+                &uri,
+                &document_text,
+                position,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::DefinitionAnalysis {
+                definition: None,
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+        let definition_count = usize::from(analysis.definition.is_some());
+
+        let mut log_message = format!(
+            "Rephactor implementation {}:{}:{} -> {} result(s) in {}ms ({})",
             uri,
             position.line,
             position.character,

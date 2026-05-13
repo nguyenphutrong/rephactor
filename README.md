@@ -33,6 +33,7 @@ of the same resolver and project index.
 - Provide `textDocument/signatureHelp` for resolved callables.
 - Provide `textDocument/definition` for resolved project symbols.
 - Provide `textDocument/typeDefinition` for locally typed variables.
+- Provide `textDocument/implementation` for class/interface inheritance.
 - Provide `textDocument/hover` for resolved symbols.
 - Provide deterministic `textDocument/completion` for basic symbols.
 - Add conservative `use` declaration edits for unambiguous class completions.
@@ -120,9 +121,9 @@ run Rephactor alongside it:
 
 Rephactor currently provides named-argument and class-import refactor code
 actions, Signature Help V1, Go To Definition V1, Hover V1, Completion V1,
-Go To Type Definition V1, Document Symbol V1, Workspace Symbol V1,
-References V1, Diagnostics V1, Document Highlight V1, Folding Range V1, Inlay
-Hint V1, and Document Link V1.
+Go To Type Definition V1, Go To Implementation V1, Document Symbol V1,
+Workspace Symbol V1, References V1, Diagnostics V1, Document Highlight V1,
+Folding Range V1, Inlay Hint V1, and Document Link V1.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -139,6 +140,9 @@ project index. It returns no location for dynamic or ambiguous symbols.
 Go To Type Definition V1 navigates from locally typed variables and parameters
 to the resolved class definition when the type can be inferred from a parameter
 or nearby object creation assignment.
+
+Go To Implementation V1 returns indexed classes that directly or transitively
+extend or implement the class/interface under the cursor.
 
 Hover V1 shows a concise PHP signature or class FQN, source location, and the
 nearest PHPDoc summary when available. It intentionally avoids full PHPDoc
@@ -209,6 +213,7 @@ file watcher is intentionally deferred.
 - Workspace symbols for indexed functions, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.
 - Type definitions for locally typed variables and parameters.
+- Class/interface implementation lookup across indexed PHP files.
 - Parse diagnostics for open PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Unresolved type-annotation diagnostics for open PHP documents.

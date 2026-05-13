@@ -433,6 +433,28 @@ pub fn analyze_type_definition_for_position_with_cache(
     }
 }
 
+pub fn analyze_implementation_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> DefinitionAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match implementation_for_position_with_cache(uri, text, position, open_documents, cache) {
+        Ok(definition) => DefinitionAnalysis {
+            definition: Some(definition),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => DefinitionAnalysis {
+            definition: None,
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
 pub fn analyze_hover_for_position_with_cache(
     uri: &Url,
     text: &str,
@@ -823,6 +845,76 @@ fn type_definition_for_position_with_cache(
     };
 
     location_response(class_info.location.as_ref(), &open_paths)
+}
+
+fn implementation_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<GotoDefinitionResponse, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let open_paths = open_project_documents(open_documents);
+    let Some(name_node) = find_name_reference_at_byte(root, text, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let class_name = clean_name_text(node_text(name_node, text));
+    let Some(target) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+        return Err(SkipReason::UnresolvedCallable(class_name));
+    };
+
+    let mut locations = index
+        .classes
+        .values()
+        .filter(|class_info| {
+            normalize_symbol_key(&class_info.fqn) != normalize_symbol_key(&target.fqn)
+        })
+        .filter(|class_info| {
+            class_derives_from(&index, class_info, &target.fqn, &mut HashSet::new())
+        })
+        .filter_map(|class_info| location_for_source(class_info.location.as_ref()?, &open_paths))
+        .collect::<Vec<_>>();
+    locations.sort_by_key(|location| location.uri.to_string());
+
+    if locations.is_empty() {
+        Err(SkipReason::NoEdits)
+    } else {
+        Ok(GotoDefinitionResponse::Array(locations))
+    }
+}
+
+fn class_derives_from(
+    index: &SymbolIndex,
+    class_info: &ClassInfo,
+    target_fqn: &str,
+    visited: &mut HashSet<String>,
+) -> bool {
+    if !visited.insert(normalize_symbol_key(&class_info.fqn)) {
+        return false;
+    }
+
+    class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+        .any(|related| normalize_symbol_key(related) == normalize_symbol_key(target_fqn))
+        || class_info
+            .parents
+            .iter()
+            .chain(class_info.interfaces.iter())
+            .filter_map(|related| index.classes.get(&normalize_symbol_key(related)))
+            .any(|related| class_derives_from(index, related, target_fqn, visited))
 }
 
 fn hover_for_position_with_cache(
