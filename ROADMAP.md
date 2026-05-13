@@ -108,6 +108,7 @@
 - [x] Implement PHPDoc creation code actions for function-like declarations.
 - [x] Add direct thrown-exception tags to PHPDoc creation.
 - [x] Resolve local PHPDoc `@var` variable types.
+- [x] Resolve PHPDoc `@param` parameter types.
 - [x] Resolve PHPDoc `@mixin` methods for instance method resolution.
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.

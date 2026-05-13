@@ -4429,6 +4429,7 @@ fn variable_types_at_byte(
 ) -> HashMap<String, String> {
     let mut types = HashMap::new();
     collect_parameter_types(root, text, byte_offset, namespace, imports, &mut types);
+    collect_phpdoc_param_types(root, text, byte_offset, namespace, imports, &mut types);
     collect_assignment_types(root, text, byte_offset, namespace, imports, &mut types);
     collect_phpdoc_var_types(text, byte_offset, namespace, imports, &mut types);
     types
@@ -4476,6 +4477,76 @@ fn collect_parameter_types(
     for child in node.named_children(&mut cursor) {
         collect_parameter_types(child, text, byte_offset, namespace, imports, types);
     }
+}
+
+fn collect_phpdoc_param_types(
+    node: Node,
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    types: &mut HashMap<String, String>,
+) {
+    if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
+        return;
+    }
+
+    if matches!(node.kind(), "function_definition" | "method_declaration") {
+        for (variable_name, type_name) in
+            phpdoc_param_types_before(text, node.start_byte(), namespace, imports)
+        {
+            types.entry(variable_name).or_insert(type_name);
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_phpdoc_param_types(child, text, byte_offset, namespace, imports, types);
+    }
+}
+
+fn phpdoc_param_types_before(
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Vec<(String, String)> {
+    let Some(before) = text.get(..byte_offset) else {
+        return Vec::new();
+    };
+    let Some(comment_start) = before.rfind("/**") else {
+        return Vec::new();
+    };
+    let Some(between) = before.get(comment_start..) else {
+        return Vec::new();
+    };
+    let Some(comment_end) = between.rfind("*/") else {
+        return Vec::new();
+    };
+    if comment_start + comment_end + 2 < before.trim_end().len() {
+        return Vec::new();
+    }
+
+    between
+        .lines()
+        .filter_map(|line| {
+            let line = line
+                .trim()
+                .trim_start_matches("/**")
+                .trim_start_matches('*')
+                .trim_end_matches("*/")
+                .trim();
+            let param_offset = line.find("@param")?;
+            let tokens = line[param_offset + 6..]
+                .split_whitespace()
+                .collect::<Vec<_>>();
+            let (type_name, variable_name) = phpdoc_var_tokens(&tokens)?;
+            Some((
+                variable_name.to_string(),
+                qualify_type_name(type_name, namespace, imports),
+            ))
+        })
+        .collect()
 }
 
 fn collect_assignment_types(
