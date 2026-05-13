@@ -1333,6 +1333,23 @@ fn type_definition_for_position_with_cache(
     let index = cache.index_for_document(uri, text, open_documents);
     let open_paths = open_project_documents(open_documents);
 
+    if let Some((variable, property_name)) = instance_property_reference_context(text, byte_offset)
+        && variable == "$this"
+        && let Some(class_node) = find_class_declaration_at_byte(root, byte_offset)
+        && let Some(property_type) = property_type_in_class_with_phpdoc_tags(
+            class_node,
+            &property_name,
+            text,
+            namespace.as_deref(),
+            &imports,
+            &["@property", "@property-read", "@property-write"],
+        )
+        && let Some(class_info) =
+            index.resolve_class(&property_type.display, namespace.as_deref(), &imports)
+    {
+        return location_response(class_info.location.as_ref(), &open_paths);
+    }
+
     if let Some(variable) = find_variable_name_at_byte(root, text, byte_offset) {
         let variable_types = variable_types_at_byte(
             root,
@@ -3534,6 +3551,24 @@ fn property_type_in_class(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<ComparableReturnType> {
+    property_type_in_class_with_phpdoc_tags(
+        class_node,
+        property_name,
+        text,
+        namespace,
+        imports,
+        &["@property", "@property-write"],
+    )
+}
+
+fn property_type_in_class_with_phpdoc_tags(
+    class_node: Node,
+    property_name: &str,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    phpdoc_tags: &[&str],
+) -> Option<ComparableReturnType> {
     let body = class_node.child_by_field_name("body")?;
     let mut cursor = body.walk();
 
@@ -3562,8 +3597,14 @@ fn property_type_in_class(
         }
     }
 
-    phpdoc_writable_property_types_before(text, class_node.start_byte(), namespace, imports)
-        .remove(property_name)
+    phpdoc_property_types_before(
+        text,
+        class_node.start_byte(),
+        namespace,
+        imports,
+        phpdoc_tags,
+    )
+    .remove(property_name)
 }
 
 fn inferred_assigned_variable_type(
@@ -7004,14 +7045,15 @@ fn phpdoc_properties_before(
         .collect()
 }
 
-fn phpdoc_writable_property_types_before(
+fn phpdoc_property_types_before(
     text: &str,
     byte_offset: usize,
     namespace: Option<&str>,
     imports: &ImportMap,
+    tags: &[&str],
 ) -> HashMap<String, ComparableReturnType> {
     let mut types = HashMap::new();
-    for tag in ["@property", "@property-write"] {
+    for tag in tags {
         for record in phpdoc_tag_line_records_before(text, byte_offset, tag) {
             let tokens = record.text.split_whitespace().collect::<Vec<_>>();
             let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) else {

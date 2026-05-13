@@ -1045,6 +1045,46 @@ fn lsp_returns_type_definition_for_typed_variable() {
 }
 
 #[test]
+fn lsp_returns_type_definition_for_this_property() {
+    let root = temp_project("type-definition-this-property");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass CustomerRecord {}\nclass Sender { private CustomerRecord $customer; public function handle() { return $this->customer; } }\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server
+        .type_definition(&uri, 2, 92)
+        .expect("type definition result");
+
+    assert_eq!(definition["uri"], uri);
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 6 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_type_definition_for_phpdoc_this_property() {
+    let root = temp_project("type-definition-phpdoc-this-property");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass CustomerRecord {}\n/** @property-read CustomerRecord $customer */\nclass Sender { public function handle() { return $this->customer; } }\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server
+        .type_definition(&uri, 3, 58)
+        .expect("type definition result");
+
+    assert_eq!(definition["uri"], uri);
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 6 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_php_manual_link_for_internal_function_hover() {
     let root = temp_project("hover-internal-function");
     let mut server = LspProcess::start(&root);

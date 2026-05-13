@@ -152,9 +152,10 @@ Go To Declaration V1 navigates from a class method implementation to the
 matching interface or base-class method declaration when that relationship is
 unambiguous.
 
-Go To Type Definition V1 navigates from locally typed variables and parameters
-to the resolved class definition when the type can be inferred from a parameter
-or nearby object creation assignment.
+Go To Type Definition V1 navigates from locally typed variables, parameters,
+and `$this->property` access to the resolved class definition when the type can
+be inferred from a parameter, nearby object creation assignment, native property
+declaration, or class-level PHPDoc magic property annotation.
 
 Go To Implementation V1 returns indexed classes that directly or transitively
 extend or implement the class/interface under the cursor. On interface/base
@@ -345,7 +346,8 @@ files that are not open in the editor are picked up on the next request.
 - Exact-reference, implementation-count, trait-usage, and method-parent code
   lenses for declarations, including constants and properties.
 - Method declaration lookup for interface/base-class implementations.
-- Type definitions for locally typed variables and parameters.
+- Type definitions for locally typed variables, parameters, and typed
+  `$this->property` access.
 - Class/interface implementation lookup across indexed PHP files.
 - Interface/base method implementation lookup across indexed PHP files.
 - Parse diagnostics for open PHP documents.
