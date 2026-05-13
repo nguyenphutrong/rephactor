@@ -210,8 +210,9 @@ for resolved calls, too-many-argument diagnostics for resolved non-variadic
 calls, and conservative unused-import diagnostics for normal non-aliased class
 imports. It also reports conservative return-type mismatches when a declared
 return type conflicts with a directly returned scalar literal, array literal, or
-object creation expression. Broader static analysis is still deferred until the
-type model is stronger.
+object creation expression, including local variables assigned one of those
+obvious values before return. Broader static analysis is still deferred until
+the type model is stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -285,8 +286,9 @@ files that are not open in the editor are picked up on the next request.
   documents.
 - Conservative unused-import diagnostics for normal non-aliased class imports in
   open PHP documents.
-- Conservative return-type mismatch diagnostics for directly returned literals
-  and object creation expressions.
+- Conservative return-type mismatch diagnostics for directly returned literals,
+  object creation expressions, and local variables assigned those obvious values
+  before return.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Whole-document and range whitespace formatting for trailing whitespace; whole

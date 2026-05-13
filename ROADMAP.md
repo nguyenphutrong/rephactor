@@ -132,4 +132,5 @@
 - [x] Implement syntax-tree `textDocument/selectionRange`.
 - [x] Implement unresolved type-annotation diagnostics for open files.
 - [x] Implement conservative return-type mismatch diagnostics for open files.
-- [ ] Implement broader type-flow semantic diagnostics beyond direct returns.
+- [x] Implement local-variable return-type mismatch diagnostics for open files.
+- [ ] Implement broader type-flow semantic diagnostics beyond local returns.

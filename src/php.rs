@@ -2137,8 +2137,13 @@ fn return_type_mismatches_for_declaration(
     returned
         .into_iter()
         .filter_map(|expression| {
-            let actual =
-                inferred_return_expression_type(expression, text, namespace.as_deref(), imports)?;
+            let actual = inferred_return_expression_type(
+                declaration,
+                expression,
+                text,
+                namespace.as_deref(),
+                imports,
+            )?;
             (declared != actual).then(|| Diagnostic {
                 range: range_for_bytes(text, expression.start_byte(), expression.end_byte())
                     .unwrap_or_else(|_| Range::default()),
@@ -2185,6 +2190,7 @@ fn comparable_return_type(
 }
 
 fn inferred_return_expression_type(
+    declaration: Node,
     expression: Node,
     text: &str,
     namespace: Option<&str>,
@@ -2194,7 +2200,7 @@ fn inferred_return_expression_type(
     if kind == "expression" {
         let mut cursor = expression.walk();
         let inner = expression.named_children(&mut cursor).next()?;
-        return inferred_return_expression_type(inner, text, namespace, imports);
+        return inferred_return_expression_type(declaration, inner, text, namespace, imports);
     }
     if matches!(
         kind,
@@ -2236,8 +2242,110 @@ fn inferred_return_expression_type(
             imports,
         ));
     }
+    if kind == "variable_name" {
+        return local_variable_return_type_at_byte(
+            declaration,
+            text,
+            expression.start_byte(),
+            namespace,
+            imports,
+            node_text(expression, text),
+        );
+    }
 
     None
+}
+
+fn local_variable_return_type_at_byte(
+    declaration: Node,
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    variable_name: &str,
+) -> Option<ComparableReturnType> {
+    let mut types = HashMap::new();
+    collect_local_assignment_return_types(
+        declaration,
+        declaration,
+        text,
+        byte_offset,
+        namespace,
+        imports,
+        &mut types,
+    );
+    types.get(variable_name).cloned()
+}
+
+fn collect_local_assignment_return_types(
+    declaration: Node,
+    node: Node,
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    types: &mut HashMap<String, ComparableReturnType>,
+) {
+    if node.start_byte() >= byte_offset {
+        return;
+    }
+    if node != declaration
+        && matches!(
+            node.kind(),
+            "function_definition"
+                | "method_declaration"
+                | "anonymous_function_creation_expression"
+                | "arrow_function"
+                | "class_declaration"
+                | "interface_declaration"
+                | "trait_declaration"
+        )
+    {
+        return;
+    }
+
+    if node.kind() == "assignment_expression"
+        && let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        )
+        && left.kind() == "variable_name"
+        && let Some(return_type) = inferred_assigned_return_type(right, text, namespace, imports)
+    {
+        types.insert(node_text(left, text).to_string(), return_type);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_local_assignment_return_types(
+            declaration,
+            child,
+            text,
+            byte_offset,
+            namespace,
+            imports,
+            types,
+        );
+    }
+}
+
+fn inferred_assigned_return_type(
+    expression: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<ComparableReturnType> {
+    let kind = expression.kind();
+    if kind == "expression" {
+        let mut cursor = expression.walk();
+        let inner = expression.named_children(&mut cursor).next()?;
+        return inferred_assigned_return_type(inner, text, namespace, imports);
+    }
+    if matches!(kind, "variable_name" | "assignment_expression") {
+        return None;
+    }
+
+    inferred_return_expression_type(expression, expression, text, namespace, imports)
 }
 
 fn collect_return_expressions<'tree>(
