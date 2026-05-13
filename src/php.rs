@@ -1172,7 +1172,8 @@ fn definition_for_position_with_cache(
 
     if let Some((class_name, constant_name)) = static_constant_reference_context(text, byte_offset)
         && let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
-        && let Some(constant_info) = class_constant_info(class_info, &constant_name)
+        && let Some((_, constant_info)) =
+            resolve_class_constant_info(&index, class_info, &constant_name)
     {
         return location_response(constant_info.location.as_ref(), &open_paths);
     }
@@ -1515,10 +1516,11 @@ fn hover_for_position_with_cache(
 
     if let Some((class_name, constant_name)) = static_constant_reference_context(text, byte_offset)
         && let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
-        && let Some(constant_info) = class_constant_info(class_info, &constant_name)
+        && let Some((owner, constant_info)) =
+            resolve_class_constant_info(&index, class_info, &constant_name)
     {
         return Ok(hover_from_parts(
-            format!("const {}::{}", class_info.fqn, constant_info.name),
+            format!("const {}::{}", owner.fqn, constant_info.name),
             constant_info.location.as_ref(),
             None,
         ));
@@ -7009,6 +7011,49 @@ fn class_constant_info<'a>(
         .constants
         .iter()
         .find(|constant| constant.name.eq_ignore_ascii_case(constant_name))
+}
+
+fn resolve_class_constant_info<'a>(
+    index: &'a SymbolIndex,
+    class_info: &'a ClassInfo,
+    constant_name: &str,
+) -> Option<(&'a ClassInfo, &'a ClassConstantInfo)> {
+    let mut visited = Vec::new();
+    resolve_class_constant_info_inner(index, class_info, constant_name, &mut visited)
+}
+
+fn resolve_class_constant_info_inner<'a>(
+    index: &'a SymbolIndex,
+    class_info: &'a ClassInfo,
+    constant_name: &str,
+    visited: &mut Vec<String>,
+) -> Option<(&'a ClassInfo, &'a ClassConstantInfo)> {
+    let class_key = normalize_symbol_key(&class_info.fqn);
+    if visited.contains(&class_key) {
+        return None;
+    }
+    visited.push(class_key);
+
+    if let Some(constant_info) = class_constant_info(class_info, constant_name) {
+        return Some((class_info, constant_info));
+    }
+
+    for related_name in class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+        .chain(class_info.traits.iter())
+        .chain(class_info.mixins.iter())
+    {
+        if let Some(related_info) = index.classes.get(&normalize_symbol_key(related_name))
+            && let Some(resolved) =
+                resolve_class_constant_info_inner(index, related_info, constant_name, visited)
+        {
+            return Some(resolved);
+        }
+    }
+
+    None
 }
 
 fn keyword_completion_items(prefix: &str) -> Vec<CompletionItem> {
