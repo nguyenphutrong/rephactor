@@ -1738,7 +1738,7 @@ fn completion_for_position_with_cache(
     } else if let Some((class_name, method_prefix)) =
         static_method_completion_context(text, byte_offset)
     {
-        let Some(class_info) = resolve_static_scope_class(
+        if let Some(class_info) = resolve_static_scope_class(
             &index,
             root,
             text,
@@ -1746,10 +1746,15 @@ fn completion_for_position_with_cache(
             &class_name,
             namespace.as_deref(),
             &imports,
-        ) else {
-            return Err(SkipReason::UnresolvedCallable(class_name));
-        };
-        static_scope_completion_items(&index, class_info, &method_prefix)
+        ) {
+            static_scope_completion_items(&index, class_info, &method_prefix)
+        } else {
+            let items = internal_method_completion_items(&class_name, &method_prefix);
+            if items.is_empty() {
+                return Err(SkipReason::UnresolvedCallable(class_name));
+            }
+            items
+        }
     } else if let Some((variable, method_prefix)) =
         instance_method_completion_context(text, byte_offset)
     {
@@ -1764,11 +1769,15 @@ fn completion_for_position_with_cache(
         let Some(class_name) = variable_types.get(&variable) else {
             return Err(SkipReason::UnresolvedCallable(variable));
         };
-        let Some(class_info) = index.resolve_class(class_name, namespace.as_deref(), &imports)
-        else {
-            return Err(SkipReason::UnresolvedCallable(class_name.clone()));
-        };
-        instance_member_completion_items(&index, class_info, &method_prefix)
+        if let Some(class_info) = index.resolve_class(class_name, namespace.as_deref(), &imports) {
+            instance_member_completion_items(&index, class_info, &method_prefix)
+        } else {
+            let items = internal_method_completion_items(class_name, &method_prefix);
+            if items.is_empty() {
+                return Err(SkipReason::UnresolvedCallable(class_name.clone()));
+            }
+            items
+        }
     } else {
         let import_declarations = import_declarations(root, text);
         let mut items = class_completion_items(
@@ -8288,6 +8297,24 @@ fn method_completion_items(
         .collect()
 }
 
+fn internal_method_completion_items(class_name: &str, prefix: &str) -> Vec<CompletionItem> {
+    let mut labels = internal_method_names(class_name)
+        .into_iter()
+        .filter(|name| prefix_matches(name, prefix))
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.to_ascii_lowercase());
+    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    labels
+        .into_iter()
+        .map(|label| CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: Some("PHP internal method".to_string()),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
 fn static_scope_completion_items(
     index: &SymbolIndex,
     class_info: &ClassInfo,
@@ -9400,6 +9427,14 @@ fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature
             normalized_method
         )),
     })
+}
+
+fn internal_method_names(class_name: &str) -> Vec<&'static str> {
+    match normalize_symbol_key(class_name).as_str() {
+        "datetime" | "datetimeimmutable" => vec!["format", "getTimestamp", "modify"],
+        "datetimeinterface" => vec!["format", "getTimestamp"],
+        _ => Vec::new(),
+    }
 }
 
 fn internal_function_signature(name: &str) -> Option<Signature> {

@@ -2276,6 +2276,26 @@ fn lsp_returns_related_instance_method_completions() {
 }
 
 #[test]
+fn lsp_returns_internal_instance_method_completions() {
+    let root = temp_project("completion-internal-instance-methods");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\n$date = new DateTimeImmutable('now');\n$date->for;\n";
+    let uri = server.open_php(&file, text);
+
+    let items = server.completion(&uri, 2, 10);
+    let method_kind = serde_json::to_value(CompletionItemKind::METHOD).expect("method kind json");
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "format")
+        .expect("format completion");
+
+    assert_eq!(item["kind"], method_kind);
+    assert_eq!(item["detail"], "PHP internal method");
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_instance_property_completions() {
     let root = temp_project("completion-instance-properties");
     let mut server = LspProcess::start(&root);
