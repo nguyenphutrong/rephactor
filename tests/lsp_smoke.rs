@@ -1178,6 +1178,22 @@ fn lsp_returns_php_manual_link_for_internal_class_hover() {
 }
 
 #[test]
+fn lsp_returns_php_manual_link_for_internal_method_hover() {
+    let root = temp_project("hover-internal-method");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\n$date = new DateTimeImmutable('now');\n$date->format('Y-m-d');\n";
+    let uri = server.open_php(&file, text);
+
+    let hover = server.hover(&uri, 2, 9).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("$date->format($format)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/datetimeimmutable.format)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_expanded_internal_function_metadata() {
     let root = temp_project("expanded-internal-functions");
     let mut server = LspProcess::start(&root);
