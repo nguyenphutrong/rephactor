@@ -1,5 +1,7 @@
 use tower_lsp::{LspService, Server};
 
+mod document;
+mod php;
 mod server;
 
 #[tokio::main]

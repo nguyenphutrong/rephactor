@@ -1,0 +1,11 @@
+id = "rephactor"
+name = "Rephactor"
+version = "0.0.1"
+schema_version = 1
+authors = ["Rephactor contributors"]
+description = "Zed integration for the Rephactor PHP language server"
+repository = "https://github.com/nguyenphutrong/rephactor"
+
+[language_servers.rephactor]
+name = "Rephactor"
+languages = ["PHP"]

@@ -40,10 +40,64 @@ language server until the named-arguments workflow is correct and verified.
 ## Development
 
 ```sh
+cargo fmt --check
 cargo check
 cargo test
 ```
 
-The first implementation milestone is a no-op LSP server that advertises code
-actions and returns an empty action list. Semantic conversion comes after that
-baseline is testable.
+## Install
+
+Install the language server binary into Cargo's global bin directory:
+
+```sh
+cargo install --path .
+which rephactor
+```
+
+Zed must be able to find `rephactor` on `PATH`. If `which rephactor` does not
+return a path, add Cargo's bin directory to your shell profile:
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+## Zed Setup
+
+Install the local extension from `zed-extension/` with Zed's
+`zed: install dev extension` command.
+
+Keep a full PHP language server enabled for normal language intelligence and
+run Rephactor alongside it:
+
+```json
+{
+  "languages": {
+    "PHP": {
+      "language_servers": ["intelephense", "rephactor", "..."]
+    }
+  }
+}
+```
+
+Rephactor currently provides only one refactor code action:
+`Add names to arguments`.
+
+## Supported Cases
+
+- Same-file functions.
+- Namespaced same-file functions.
+- Static methods and constructors when the class is indexed.
+- Instance methods when the receiver type is locally obvious from a typed
+  parameter or `$var = new ClassName(...)`.
+- Project symbols under Composer `autoload.psr-4` roots.
+
+## Unsupported Cases
+
+Rephactor returns no action instead of guessing for:
+
+- dynamic calls such as `$fn(...)` or `$object->$method(...)`
+- calls with unpacking (`...$args`)
+- calls with existing named arguments
+- ambiguous symbols
+- unknown parameter names
+- PHP internal functions or Composer classmaps
