@@ -1369,6 +1369,24 @@ fn lsp_resolves_inherited_method() {
 }
 
 #[test]
+fn lsp_resolves_instance_method_from_phpdoc_var() {
+    let root = temp_project("phpdoc-var");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass InvoiceSender { public function dispatch($invoice, $notify) {} }\nfunction run($sender, $invoice) {\n    /** @var InvoiceSender $sender */\n    $sender->dispatch($invoice, true);\n}\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 4, 15);
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == "[Rephactor] Add names to arguments")
+        .expect("named argument action");
+
+    assert_eq!(insert_texts(action, &uri), vec!["invoice: ", "notify: "]);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_empty_for_unsupported_calls() {
     let root = temp_project("unsupported");
     let mut server = LspProcess::start(&root);

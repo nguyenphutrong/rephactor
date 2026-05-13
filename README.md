@@ -187,6 +187,9 @@ trait, and method declarations.
 PHPDoc creation V1 adds `@param` tags for function and method parameters and
 an `@return` tag when a non-void return type is declared.
 
+PHPDoc Type V1 reads local `@var Type $variable` annotations and feeds them
+into method resolution for completion, signature help, and code actions.
+
 Diagnostics V1 publishes parser error diagnostics, unresolved/ambiguous
 callable diagnostics, unresolved type-annotation diagnostics, and duplicate
 function/class-like declaration diagnostics for open documents. Broader static
@@ -254,6 +257,8 @@ files that are not open in the editor are picked up on the next request.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - PHPDoc creation for function and method declarations with parameter and
   return tags.
+- Local PHPDoc `@var Type $variable` annotations for instance method
+  resolution.
 - Namespaced same-file functions.
 - Static methods and constructors when the class is indexed, including class
   names imported with normal, grouped, or aliased `use` declarations.

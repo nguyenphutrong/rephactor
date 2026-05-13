@@ -103,6 +103,7 @@
 - [x] Implement `textDocument/rename` for exact AST symbol references.
 - [x] Implement reference-count `textDocument/codeLens` for declarations.
 - [x] Implement PHPDoc creation code actions for function-like declarations.
+- [x] Resolve local PHPDoc `@var` variable types.
 - [x] Implement parser diagnostics for open files.
 - [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement duplicate declaration diagnostics for open files.

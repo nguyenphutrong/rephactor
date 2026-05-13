@@ -4038,6 +4038,7 @@ fn variable_types_at_byte(
     let mut types = HashMap::new();
     collect_parameter_types(root, text, byte_offset, namespace, imports, &mut types);
     collect_assignment_types(root, text, byte_offset, namespace, imports, &mut types);
+    collect_phpdoc_var_types(text, byte_offset, namespace, imports, &mut types);
     types
 }
 
@@ -4120,6 +4121,53 @@ fn collect_assignment_types(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_assignment_types(child, text, byte_offset, namespace, imports, types);
+    }
+}
+
+fn collect_phpdoc_var_types(
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+    types: &mut HashMap<String, String>,
+) {
+    let Some(before) = text.get(..byte_offset) else {
+        return;
+    };
+
+    for line in before.lines() {
+        let line = line
+            .trim()
+            .trim_start_matches("/**")
+            .trim_start_matches('*')
+            .trim_end_matches("*/")
+            .trim();
+        let Some(var_offset) = line.find("@var") else {
+            continue;
+        };
+        let tokens = line[var_offset + 4..]
+            .split_whitespace()
+            .collect::<Vec<_>>();
+        let Some((type_name, variable_name)) = phpdoc_var_tokens(&tokens) else {
+            continue;
+        };
+
+        types.insert(
+            variable_name.to_string(),
+            qualify_type_name(type_name, namespace, imports),
+        );
+    }
+}
+
+fn phpdoc_var_tokens<'a>(tokens: &'a [&str]) -> Option<(&'a str, &'a str)> {
+    let first = tokens.first()?.trim();
+    let second = tokens.get(1)?.trim();
+    if first.starts_with('$') {
+        Some((second, first))
+    } else if second.starts_with('$') {
+        Some((first, second))
+    } else {
+        None
     }
 }
 
