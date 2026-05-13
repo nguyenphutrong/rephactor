@@ -6924,24 +6924,36 @@ fn php_constraint_token_requires_at_least_8(token: &str) -> bool {
 fn composer_autoload_paths(project_root: &Path) -> Option<Vec<PathBuf>> {
     let composer_text = fs::read_to_string(project_root.join("composer.json")).ok()?;
     let composer_json: serde_json::Value = serde_json::from_str(&composer_text).ok()?;
-    let autoload = composer_json.get("autoload")?;
     let mut roots = Vec::new();
 
+    if let Some(autoload) = composer_json.get("autoload") {
+        collect_composer_autoload_section(project_root, autoload, &mut roots);
+    }
+    if let Some(autoload) = composer_json.get("autoload-dev") {
+        collect_composer_autoload_section(project_root, autoload, &mut roots);
+    }
+
+    (!roots.is_empty()).then_some(roots)
+}
+
+fn collect_composer_autoload_section(
+    project_root: &Path,
+    autoload: &serde_json::Value,
+    roots: &mut Vec<PathBuf>,
+) {
     if let Some(psr4) = autoload.get("psr-4").and_then(|psr4| psr4.as_object()) {
         for value in psr4.values() {
-            collect_composer_paths(project_root, value, &mut roots);
+            collect_composer_paths(project_root, value, roots);
         }
     }
 
     if let Some(classmap) = autoload.get("classmap") {
-        collect_composer_paths(project_root, classmap, &mut roots);
+        collect_composer_paths(project_root, classmap, roots);
     }
 
     if let Some(files) = autoload.get("files") {
-        collect_composer_paths(project_root, files, &mut roots);
+        collect_composer_paths(project_root, files, roots);
     }
-
-    (!roots.is_empty()).then_some(roots)
 }
 
 fn collect_composer_paths(
