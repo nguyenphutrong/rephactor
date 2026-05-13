@@ -3140,6 +3140,26 @@ fn lsp_returns_inferred_return_type_inlay_hints_for_anonymous_functions() {
 }
 
 #[test]
+fn lsp_returns_inferred_return_type_inlay_hints_for_arrow_functions() {
+    let root = temp_project("arrow-return-type-inlay-hints");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass InvoiceSender {}\n$factory = fn() => new InvoiceSender();\n",
+    );
+
+    let hints = server.inlay_hints(&uri, 0, 0, 3, 0);
+
+    assert!(hints.iter().any(|hint| {
+        hint["label"] == ": InvoiceSender"
+            && hint["kind"] == 1
+            && hint["position"] == json!({ "line": 2, "character": 15 })
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_document_links_for_require_paths() {
     let root = temp_project("document-links");
     let mut server = LspProcess::start(&root);

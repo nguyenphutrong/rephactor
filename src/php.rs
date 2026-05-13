@@ -1951,6 +1951,7 @@ fn collect_return_type_inlay_hints(
             | "method_declaration"
             | "anonymous_function"
             | "anonymous_function_creation_expression"
+            | "arrow_function"
     ) && node.child_by_field_name("return_type").is_none()
         && let Some(parameters) = node.child_by_field_name("parameters")
         && let Some(return_type) = inferred_declaration_return_type(
@@ -1988,6 +1989,21 @@ fn inferred_declaration_return_type(
     index: &SymbolIndex,
 ) -> Option<String> {
     let namespace = namespace_at_byte(root, text, declaration.start_byte());
+    if declaration.kind() == "arrow_function"
+        && let Some(body) = declaration.child_by_field_name("body")
+    {
+        return inferred_return_expression_type(
+            root,
+            declaration,
+            body,
+            text,
+            namespace.as_deref(),
+            imports,
+            Some(index),
+        )
+        .map(|return_type| return_type.display);
+    }
+
     let mut returned = Vec::new();
     collect_return_expressions(declaration, declaration, &mut returned);
     let mut names = returned
