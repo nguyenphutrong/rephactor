@@ -179,10 +179,10 @@ a class, or comes from a resolved call with a class return type. Static scope
 completion understands `self`, `static`, and direct `parent` inside class-like
 scopes. Method and property completion includes indexed
 parent, interface, trait, and PHPDoc `@mixin` members. It also includes common
-PHP keyword completions and adds a `use` or `use const` declaration edit for
-unambiguous namespaced class
-and constant completions when the short name is not already imported or
-shadowed. It intentionally avoids snippets and fuzzy ranking.
+PHP keyword completions and adds a `use`, `use function`, or `use const`
+declaration edit for unambiguous namespaced class, function, and constant
+completions when the short name is not already imported or shadowed. It
+intentionally avoids snippets and fuzzy ranking.
 
 Document Symbol V1 returns functions, constants, classes, interfaces, traits,
 and class constants, properties, and methods for editor outline and breadcrumb

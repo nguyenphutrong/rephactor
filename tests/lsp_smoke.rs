@@ -1478,6 +1478,57 @@ fn lsp_returns_static_scope_completion_for_self_and_parent() {
 }
 
 #[test]
+fn lsp_adds_use_function_declaration_for_unambiguous_function_completion() {
+    let root = temp_project("completion-auto-import-function");
+    let support_dir = root.join("src/Support");
+    let controller_dir = root.join("src/Http");
+    std::fs::create_dir_all(&support_dir).expect("create support dir");
+    std::fs::create_dir_all(&controller_dir).expect("create controller dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    std::fs::write(
+        support_dir.join("functions.php"),
+        "<?php\nnamespace App\\Support;\nfunction send_invoice($invoice) {}\n",
+    )
+    .expect("write functions");
+    let mut server = LspProcess::start(&root);
+    let file = controller_dir.join("Controller.php");
+    let uri = server.open_php(&file, "<?php\nnamespace App\\Http;\nsend_invoice();\n");
+
+    let items = server.completion(&uri, 2, 4);
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "send_invoice")
+        .expect("send_invoice completion");
+
+    assert_eq!(item["detail"], "App\\Support\\send_invoice");
+    assert_eq!(
+        item["additionalTextEdits"][0]["newText"],
+        "use function App\\Support\\send_invoice;\n"
+    );
+    assert_eq!(
+        item["additionalTextEdits"][0]["range"]["start"],
+        json!({ "line": 2, "character": 0 })
+    );
+
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App\\Http;\nuse function Vendor\\send_invoice;\nsend_invoice();\n",
+    );
+    let items = server.completion(&uri, 3, 4);
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "send_invoice")
+        .expect("send_invoice completion");
+
+    assert!(item.get("additionalTextEdits").is_none());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_static_property_completions() {
     let root = temp_project("completion-static-properties");
     let mut server = LspProcess::start(&root);

@@ -1741,7 +1741,14 @@ fn completion_for_position_with_cache(
             &index,
             &prefix,
         ));
-        items.extend(function_completion_items(&index, &prefix));
+        items.extend(function_completion_items(
+            text,
+            root,
+            namespace.as_deref(),
+            &import_declarations,
+            &index,
+            &prefix,
+        ));
         items.extend(keyword_completion_items(&prefix));
         items.sort_by_key(|item| item.label.to_ascii_lowercase());
         items
@@ -7169,25 +7176,73 @@ fn completion_import_edit(
     insert_import_edit_with_kind(text, root, imports, fqn, kind).ok()
 }
 
-fn function_completion_items(index: &SymbolIndex, prefix: &str) -> Vec<CompletionItem> {
-    let mut labels = index
+fn function_completion_items(
+    text: &str,
+    root: Node,
+    namespace: Option<&str>,
+    imports: &[ImportDeclaration],
+    index: &SymbolIndex,
+    prefix: &str,
+) -> Vec<CompletionItem> {
+    let mut function_fqns_by_label: HashMap<String, Vec<String>> = HashMap::new();
+    for signature in index
         .functions
         .values()
         .flat_map(|signatures| signatures.iter())
-        .map(|signature| last_name_segment(&signature.name).to_string())
-        .chain(internal_function_names().into_iter().map(str::to_string))
-        .filter(|name| prefix_matches(name, prefix))
-        .collect::<Vec<_>>();
-    labels.sort_by_key(|label| label.to_ascii_lowercase());
-    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-    labels
+    {
+        let label = last_name_segment(&signature.name).to_string();
+        if prefix_matches(&label, prefix) {
+            function_fqns_by_label
+                .entry(label)
+                .or_default()
+                .push(signature.name.clone());
+        }
+    }
+
+    let mut items = function_fqns_by_label
         .into_iter()
-        .map(|label| CompletionItem {
-            label,
+        .map(|(label, mut fqns)| {
+            fqns.sort_by_key(|fqn| fqn.to_ascii_lowercase());
+            fqns.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+            let mut item = CompletionItem {
+                label,
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail: (fqns.len() == 1).then(|| fqns[0].clone()),
+                ..CompletionItem::default()
+            };
+            if fqns.len() == 1
+                && let Some(edit) = completion_import_edit(
+                    text,
+                    root,
+                    namespace,
+                    imports,
+                    &fqns[0],
+                    ImportKind::Function,
+                )
+            {
+                item.additional_text_edits = Some(vec![edit]);
+            }
+            item
+        })
+        .collect::<Vec<_>>();
+
+    let internal_items = internal_function_names()
+        .into_iter()
+        .filter(|name| prefix_matches(name, prefix))
+        .filter(|name| {
+            !items
+                .iter()
+                .any(|item| item.label.eq_ignore_ascii_case(name))
+        })
+        .map(|name| CompletionItem {
+            label: name.to_string(),
             kind: Some(CompletionItemKind::FUNCTION),
             ..CompletionItem::default()
         })
-        .collect()
+        .collect::<Vec<_>>();
+    items.extend(internal_items);
+    items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    items
 }
 
 fn method_completion_items(
