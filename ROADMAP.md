@@ -124,6 +124,7 @@
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
 - [x] Implement whitespace-only `textDocument/formatting`.
+- [x] Implement whitespace-only `textDocument/rangeFormatting`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
 - [x] Implement inferred return-type `textDocument/inlayHint`.
 - [x] Implement variable lookup `textDocument/inlineValue`.

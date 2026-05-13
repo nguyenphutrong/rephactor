@@ -104,6 +104,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["documentFormattingProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["documentRangeFormattingProvider"],
+            json!(true)
+        );
         assert!(initialize["result"]["capabilities"]["inlineValueProvider"].is_object());
         assert_eq!(
             initialize["result"]["capabilities"]["selectionRangeProvider"],
@@ -441,6 +445,27 @@ impl LspProcess {
         response["result"]
             .as_array()
             .expect("formatting edits array")
+            .clone()
+    }
+
+    fn range_formatting(&mut self, uri: &str, start_line: u32, end_line: u32) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/rangeFormatting",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": {
+                    "start": { "line": start_line, "character": 0 },
+                    "end": { "line": end_line, "character": 0 }
+                },
+                "options": {
+                    "tabSize": 4,
+                    "insertSpaces": true
+                }
+            }),
+        );
+        response["result"]
+            .as_array()
+            .expect("range formatting edits array")
             .clone()
     }
 
@@ -1531,6 +1556,31 @@ fn lsp_formats_trailing_whitespace_and_final_newline() {
     assert_eq!(
         edits[0]["range"]["start"],
         json!({ "line": 0, "character": 0 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_range_formats_trailing_whitespace() {
+    let root = temp_project("range-formatting-whitespace");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php   \nfunction run() {\t\n    return true;   \n}\n",
+    );
+
+    let edits = server.range_formatting(&uri, 1, 3);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0]["newText"], "function run() {\n    return true;\n");
+    assert_eq!(
+        edits[0]["range"]["start"],
+        json!({ "line": 1, "character": 0 })
+    );
+    assert_eq!(
+        edits[0]["range"]["end"],
+        json!({ "line": 3, "character": 0 })
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

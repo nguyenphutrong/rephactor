@@ -751,7 +751,7 @@ pub fn formatting_edits_for_text(text: &str) -> Vec<TextEdit> {
         return Vec::new();
     }
 
-    let formatted = trim_trailing_whitespace_and_final_newline(text);
+    let formatted = trim_trailing_whitespace(text, true);
     if formatted == text {
         return Vec::new();
     }
@@ -767,6 +767,29 @@ pub fn formatting_edits_for_text(text: &str) -> Vec<TextEdit> {
         },
         formatted,
     )]
+}
+
+pub fn range_formatting_edits_for_text(text: &str, range: Range) -> Vec<TextEdit> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(start_byte) = byte_offset_for_lsp_position(text, range.start) else {
+        return Vec::new();
+    };
+    let Some(end_byte) = byte_offset_for_lsp_position(text, range.end) else {
+        return Vec::new();
+    };
+    let Some(selected_text) = text.get(start_byte..end_byte) else {
+        return Vec::new();
+    };
+
+    let formatted = trim_trailing_whitespace(selected_text, false);
+    if formatted == selected_text {
+        return Vec::new();
+    }
+
+    vec![TextEdit::new(range, formatted)]
 }
 
 pub fn inline_values_for_range(text: &str, range: Range) -> Vec<InlineValue> {
@@ -4858,7 +4881,7 @@ fn compact_identifier(value: &str) -> String {
         .collect()
 }
 
-fn trim_trailing_whitespace_and_final_newline(text: &str) -> String {
+fn trim_trailing_whitespace(text: &str, ensure_final_newline: bool) -> String {
     let mut formatted = String::with_capacity(text.len() + 1);
 
     for segment in text.split_inclusive('\n') {
@@ -4873,7 +4896,7 @@ fn trim_trailing_whitespace_and_final_newline(text: &str) -> String {
         formatted.push_str(newline);
     }
 
-    if !text.ends_with('\n') {
+    if ensure_final_newline && !text.ends_with('\n') {
         formatted.push('\n');
     }
 
