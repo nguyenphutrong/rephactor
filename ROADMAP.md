@@ -90,6 +90,7 @@
 - [x] Implement deterministic completion V1.
 - [x] Implement PHP keyword completion.
 - [x] Add conservative auto-import edits for class completions.
+- [x] Add camel/underscore-aware matching for completion and workspace symbols.
 
 ## Phase 12: Intelephense Parity Foundations
 

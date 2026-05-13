@@ -570,6 +570,17 @@ fn lsp_returns_class_and_function_completions() {
             .iter()
             .any(|item| item["label"] == "CustomerRecord")
     );
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass CustomerRecord {}\nfunction customer_report($shop) {}\nCR::sync();\n",
+    );
+    let camel_items = server.completion(&uri, 3, 2);
+
+    assert!(
+        camel_items
+            .iter()
+            .any(|item| item["label"] == "CustomerRecord")
+    );
 
     let uri = server.open_php(
         &file,
@@ -579,6 +590,17 @@ fn lsp_returns_class_and_function_completions() {
 
     assert!(
         function_items
+            .iter()
+            .any(|item| item["label"] == "customer_report")
+    );
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass CustomerRecord {}\nfunction customer_report($shop) {}\nc_r($shop);\n",
+    );
+    let underscore_items = server.completion(&uri, 3, 3);
+
+    assert!(
+        underscore_items
             .iter()
             .any(|item| item["label"] == "customer_report")
     );
@@ -719,6 +741,20 @@ fn lsp_returns_workspace_symbols_from_composer_project() {
         symbols
             .iter()
             .any(|symbol| symbol["name"] == "App\\InvoiceSender::dispatch")
+    );
+    let symbols = server.workspace_symbols("IS");
+
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["name"] == "App\\InvoiceSender")
+    );
+    let symbols = server.workspace_symbols("s_i");
+
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["name"] == "App\\send_invoice")
     );
     assert!(
         symbols

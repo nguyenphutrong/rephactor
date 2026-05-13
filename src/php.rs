@@ -2036,9 +2036,9 @@ fn location_for_path_range(
 fn workspace_query_matches(name: &str, query: &str) -> bool {
     let query = query.trim();
     query.is_empty()
-        || name
-            .to_ascii_lowercase()
-            .contains(&query.to_ascii_lowercase())
+        || name_contains_case_insensitive(name, query)
+        || abbreviation_matches(name, query, false)
+        || compact_subsequence_matches(name, query, false)
 }
 
 fn class_like_names_from_direct_child(
@@ -3141,10 +3141,89 @@ fn keyword_completion_items(prefix: &str) -> Vec<CompletionItem> {
 }
 
 fn prefix_matches(name: &str, prefix: &str) -> bool {
+    let prefix = prefix.trim();
     prefix.is_empty()
-        || name
-            .to_ascii_lowercase()
-            .starts_with(&prefix.to_ascii_lowercase())
+        || name_starts_with_case_insensitive(name, prefix)
+        || abbreviation_matches(name, prefix, true)
+        || compact_subsequence_matches(name, prefix, true)
+}
+
+fn name_starts_with_case_insensitive(name: &str, prefix: &str) -> bool {
+    name.to_ascii_lowercase()
+        .starts_with(&prefix.to_ascii_lowercase())
+}
+
+fn name_contains_case_insensitive(name: &str, query: &str) -> bool {
+    name.to_ascii_lowercase()
+        .contains(&query.to_ascii_lowercase())
+}
+
+fn abbreviation_matches(name: &str, query: &str, anchored: bool) -> bool {
+    let abbreviation = word_abbreviation(name);
+    let query = compact_identifier(query);
+    if query.is_empty() || abbreviation.is_empty() {
+        return false;
+    }
+
+    if anchored {
+        abbreviation.starts_with(&query)
+    } else {
+        abbreviation.contains(&query)
+    }
+}
+
+fn compact_subsequence_matches(name: &str, query: &str, anchored: bool) -> bool {
+    let compact_name = compact_identifier(name);
+    let compact_query = compact_identifier(query);
+    if compact_name.is_empty() || compact_query.is_empty() {
+        return false;
+    }
+    if anchored && compact_name.chars().next() != compact_query.chars().next() {
+        return false;
+    }
+
+    compact_query
+        .chars()
+        .try_fold(0, |start, query_char| {
+            compact_name[start..]
+                .find(query_char)
+                .map(|offset| start + offset + query_char.len_utf8())
+        })
+        .is_some()
+}
+
+fn word_abbreviation(name: &str) -> String {
+    let mut abbreviation = String::new();
+    let mut previous = None;
+
+    for character in name.chars() {
+        if !character.is_alphanumeric() {
+            previous = Some(character);
+            continue;
+        }
+
+        let starts_word = previous.is_none_or(|previous| !previous.is_alphanumeric())
+            || previous.is_some_and(|previous| {
+                previous == '_' || previous == '-' || previous == '\\' || previous == ':'
+            })
+            || previous.is_some_and(|previous| previous.is_lowercase() && character.is_uppercase());
+
+        if starts_word {
+            abbreviation.push(character.to_ascii_lowercase());
+        }
+
+        previous = Some(character);
+    }
+
+    abbreviation
+}
+
+fn compact_identifier(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .map(|character| character.to_ascii_lowercase())
+        .collect()
 }
 
 fn variable_types_at_byte(

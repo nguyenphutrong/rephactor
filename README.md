@@ -138,19 +138,19 @@ Hover V1 shows a concise PHP signature or class FQN, source location, and the
 nearest PHPDoc summary when available. It intentionally avoids full PHPDoc
 rendering and returns no hover for ambiguous or dynamic symbols.
 
-Completion V1 returns deterministic prefix matches for indexed class names,
-indexed project functions, seeded PHP internal functions, static methods after
-`ClassName::`, and instance methods when the receiver type is locally obvious.
-It also includes common PHP keyword completions and adds a `use` declaration
-edit for unambiguous namespaced class completions when the short name is not
-already imported or shadowed. It intentionally avoids snippets and fuzzy
-ranking.
+Completion V1 returns deterministic prefix, camel-case, and underscore-aware
+matches for indexed class names, indexed project functions, seeded PHP internal
+functions, static methods after `ClassName::`, and instance methods when the
+receiver type is locally obvious. It also includes common PHP keyword
+completions and adds a `use` declaration edit for unambiguous namespaced class
+completions when the short name is not already imported or shadowed. It
+intentionally avoids snippets and fuzzy ranking.
 
 Document Symbol V1 returns functions, classes, interfaces, traits, and class
 methods for editor outline and breadcrumb UIs.
 
 Workspace Symbol V1 searches Composer-indexed functions, classes, and methods
-with deterministic case-insensitive matching.
+with deterministic case-insensitive, camel-case, and underscore-aware matching.
 
 References V1 finds exact matching AST name references across Composer-indexed
 PHP files and open document overlays. It is intentionally conservative and does
