@@ -97,6 +97,7 @@
 - [x] Implement `textDocument/documentSymbol`.
 - [x] Implement `workspace/symbol`.
 - [x] Implement `textDocument/references`.
+- [x] Implement `textDocument/declaration` for implemented methods.
 - [x] Implement `textDocument/typeDefinition` for locally typed variables.
 - [x] Implement `textDocument/implementation` for class/interface inheritance.
 - [x] Implement `textDocument/rename` for exact AST symbol references.

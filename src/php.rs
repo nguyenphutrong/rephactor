@@ -438,6 +438,28 @@ pub fn analyze_definition_for_position_with_cache(
     }
 }
 
+pub fn analyze_declaration_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> DefinitionAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match declaration_for_position_with_cache(uri, text, position, open_documents, cache) {
+        Ok(declaration) => DefinitionAnalysis {
+            definition: Some(declaration),
+            skip_reason: None,
+            index_cache_status,
+        },
+        Err(reason) => DefinitionAnalysis {
+            definition: None,
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
 pub fn analyze_type_definition_for_position_with_cache(
     uri: &Url,
     text: &str,
@@ -909,6 +931,72 @@ fn definition_for_position_with_cache(
     };
 
     location_response(class_info.location.as_ref(), &open_paths)
+}
+
+fn declaration_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<GotoDefinitionResponse, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let Some(method) = find_method_declaration_at_byte(root, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let Some(method_name) = method.child_by_field_name("name") else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let Some(class_node) = containing_class_like_declaration(method) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let Some(class_name) = class_node.child_by_field_name("name") else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+
+    let namespace = namespace_at_byte(root, text, class_node.start_byte());
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let class_name = clean_name_text(node_text(class_name, text));
+    let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports) else {
+        return Err(SkipReason::UnresolvedCallable(class_name));
+    };
+
+    let method_key = normalize_method_key(node_text(method_name, text));
+    let mut declarations = Vec::new();
+    let mut visited = Vec::new();
+    for related_name in class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+    {
+        index.collect_related_method_signatures(
+            related_name,
+            &method_key,
+            &mut visited,
+            &mut declarations,
+        );
+    }
+
+    match declarations.len() {
+        0 => Err(SkipReason::NoEdits),
+        1 => {
+            let open_paths = open_project_documents(open_documents);
+            location_response(declarations[0].location.as_ref(), &open_paths)
+        }
+        _ => Err(SkipReason::AmbiguousCallable(format!(
+            "{}::{}",
+            class_info.fqn,
+            node_text(method_name, text)
+        ))),
+    }
 }
 
 fn type_definition_for_position_with_cache(
@@ -2791,6 +2879,29 @@ fn find_function_like_declaration_at_byte<'tree>(
     }
 
     matches!(node.kind(), "function_definition" | "method_declaration").then_some(node)
+}
+
+fn find_method_declaration_at_byte<'tree>(
+    node: Node<'tree>,
+    byte_offset: usize,
+) -> Option<Node<'tree>> {
+    let declaration = find_function_like_declaration_at_byte(node, byte_offset)?;
+    (declaration.kind() == "method_declaration").then_some(declaration)
+}
+
+fn containing_class_like_declaration<'tree>(node: Node<'tree>) -> Option<Node<'tree>> {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if matches!(
+            parent.kind(),
+            "class_declaration" | "interface_declaration" | "trait_declaration"
+        ) {
+            return Some(parent);
+        }
+        current = parent;
+    }
+
+    None
 }
 
 fn find_smallest_call<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {

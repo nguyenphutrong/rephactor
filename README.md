@@ -34,6 +34,7 @@ of the same resolver and project index.
   declarations.
 - Provide `textDocument/signatureHelp` for resolved callables.
 - Provide `textDocument/definition` for resolved project symbols.
+- Provide `textDocument/declaration` for implemented methods.
 - Provide `textDocument/typeDefinition` for locally typed variables.
 - Provide `textDocument/implementation` for class/interface inheritance.
 - Provide `textDocument/hover` for resolved symbols.
@@ -125,11 +126,12 @@ run Rephactor alongside it:
 ```
 
 Rephactor currently provides named-argument and class-import refactor code
-actions, PHPDoc creation V1, Signature Help V1, Go To Definition V1, Hover V1,
-Completion V1, Go To Type Definition V1, Go To Implementation V1, Document
-Symbol V1, Workspace Symbol V1, References V1, Diagnostics V1, Document
-Highlight V1, Rename V1, Folding Range V1, Inlay Hint V1, Document Link V1,
-and Selection Range V1. Code Lens V1 shows declaration reference counts.
+actions, PHPDoc creation V1, Signature Help V1, Go To Definition V1, Go To
+Declaration V1, Hover V1, Completion V1, Go To Type Definition V1, Go To
+Implementation V1, Document Symbol V1, Workspace Symbol V1, References V1,
+Diagnostics V1, Document Highlight V1, Rename V1, Folding Range V1, Inlay Hint
+V1, Document Link V1, and Selection Range V1. Code Lens V1 shows declaration
+reference counts.
 The code action is titled `[Rephactor] Add names to arguments` when multiple
 identifiers can be inserted. When only one positional argument is missing a
 name, the title names that identifier, for example
@@ -142,6 +144,10 @@ signature for unsupported or ambiguous calls instead of guessing.
 Go To Definition V1 navigates to resolved functions, classes, methods, static
 methods, constructors, traits, interfaces, and imports that are present in the
 project index. It returns no location for dynamic or ambiguous symbols.
+
+Go To Declaration V1 navigates from a class method implementation to the
+matching interface or base-class method declaration when that relationship is
+unambiguous.
 
 Go To Type Definition V1 navigates from locally typed variables and parameters
 to the resolved class definition when the type can be inferred from a parameter
@@ -232,6 +238,7 @@ files that are not open in the editor are picked up on the next request.
 - Exact AST references across Composer-indexed PHP files.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
 - Exact-reference code lenses for declarations.
+- Method declaration lookup for interface/base-class implementations.
 - Type definitions for locally typed variables and parameters.
 - Class/interface implementation lookup across indexed PHP files.
 - Parse diagnostics for open PHP documents.

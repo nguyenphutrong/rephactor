@@ -51,6 +51,10 @@ impl LspProcess {
             json!(true)
         );
         assert_eq!(
+            initialize["result"]["capabilities"]["declarationProvider"],
+            json!(true)
+        );
+        assert_eq!(
             initialize["result"]["capabilities"]["typeDefinitionProvider"],
             json!(true)
         );
@@ -200,6 +204,20 @@ impl LspProcess {
     fn definition(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
         let response = self.request(
             "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response
+            .get("result")
+            .filter(|result| !result.is_null())
+            .cloned()
+    }
+
+    fn declaration(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
+        let response = self.request(
+            "textDocument/declaration",
             json!({
                 "textDocument": { "uri": uri },
                 "position": { "line": line, "character": character }
@@ -646,6 +664,24 @@ fn lsp_returns_type_definition_for_typed_variable() {
     assert_eq!(
         definition["range"]["start"],
         json!({ "line": 1, "character": 6 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_declaration_for_implemented_method() {
+    let root = temp_project("method-declaration");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\ninterface Sender { public function dispatch($invoice); }\nclass EmailSender implements Sender { public function dispatch($invoice) {} }\n";
+    let uri = server.open_php(&file, text);
+
+    let declaration = server.declaration(&uri, 2, 54).expect("declaration result");
+
+    assert_eq!(declaration["uri"], uri);
+    assert_eq!(
+        declaration["range"]["start"],
+        json!({ "line": 1, "character": 35 })
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
