@@ -152,8 +152,9 @@ References V1 finds exact matching AST name references across Composer-indexed
 PHP files and open document overlays. It is intentionally conservative and does
 not yet perform full type-aware disambiguation.
 
-Diagnostics V1 publishes parser error diagnostics for open documents. Static
-analysis diagnostics are still deferred until the type model is stronger.
+Diagnostics V1 publishes parser error diagnostics and unresolved/ambiguous
+callable diagnostics for open documents. Broader static analysis is still
+deferred until the type model is stronger.
 
 Document Highlight V1 highlights exact matching AST names in the current
 document.
@@ -196,6 +197,7 @@ file watcher is intentionally deferred.
 - Workspace symbols for indexed functions, classes, and methods.
 - Exact AST references across Composer-indexed PHP files.
 - Parse diagnostics for open PHP documents.
+- Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Same-file document highlights for exact AST name matches.
 - Folding ranges for PHP blocks, imports, and comments.
 - Parameter-name inlay hints for resolved positional call arguments.
@@ -227,7 +229,7 @@ Rephactor returns no action instead of guessing for:
 - unknown parameter names
 - PHP internal functions outside the seeded stub set
 - completion for dynamic receivers or unresolved classes
-- static-analysis diagnostics beyond parser errors
+- static-analysis diagnostics beyond parser and callable-resolution errors
 - Composer autoload modes other than `autoload.psr-4` and `autoload.classmap`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols

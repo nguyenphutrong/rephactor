@@ -5,9 +5,9 @@ use crate::document::DocumentStore;
 use crate::php::{
     ProjectIndexCache, analyze_code_actions_for_position_with_cache,
     analyze_completion_for_position_with_cache, analyze_definition_for_position_with_cache,
-    analyze_document_highlights, analyze_document_links, analyze_document_symbols,
-    analyze_folding_ranges, analyze_hover_for_position_with_cache,
-    analyze_inlay_hints_for_range_with_cache, analyze_parse_diagnostics,
+    analyze_diagnostics_for_document_with_cache, analyze_document_highlights,
+    analyze_document_links, analyze_document_symbols, analyze_folding_ranges,
+    analyze_hover_for_position_with_cache, analyze_inlay_hints_for_range_with_cache,
     analyze_references_for_position_with_cache, analyze_signature_help_for_position_with_cache,
     analyze_workspace_symbols,
 };
@@ -54,7 +54,19 @@ impl RephactorLanguageServer {
             return;
         };
 
-        let diagnostics = analyze_parse_diagnostics(&document.text);
+        let open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.texts()
+        };
+        let diagnostics = {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_diagnostics_for_document_with_cache(
+                &uri,
+                &document.text,
+                &open_documents,
+                &mut index_cache,
+            )
+        };
         self.client
             .publish_diagnostics(uri, diagnostics, Some(document.version))
             .await;

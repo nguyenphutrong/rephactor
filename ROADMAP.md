@@ -95,8 +95,9 @@
 - [x] Implement `workspace/symbol`.
 - [x] Implement `textDocument/references`.
 - [x] Implement parser diagnostics for open files.
+- [x] Implement callable-resolution diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.
 - [x] Implement parameter-name `textDocument/inlayHint`.
 - [x] Implement `textDocument/documentLink` for include/require paths.
-- [ ] Implement semantic diagnostics for open files.
+- [ ] Implement broader semantic diagnostics for open files.

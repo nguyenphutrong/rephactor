@@ -208,6 +208,58 @@ pub fn analyze_parse_diagnostics(text: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
+pub fn analyze_diagnostics_for_document_with_cache(
+    uri: &Url,
+    text: &str,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = analyze_parse_diagnostics(text);
+    if !diagnostics.is_empty() {
+        return diagnostics;
+    }
+
+    let Some(tree) = parse_php(text) else {
+        return diagnostics;
+    };
+    let root = tree.root_node();
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let mut call_nodes = Vec::new();
+    collect_supported_call_nodes(root, 0, text.len(), &mut call_nodes);
+
+    for call_node in call_nodes {
+        let Ok(call) = call_info(call_node, text) else {
+            continue;
+        };
+        let namespace = namespace_at_byte(root, text, call_node.start_byte());
+        if let Err(
+            reason @ (SkipReason::UnresolvedCallable(_) | SkipReason::AmbiguousCallable(_)),
+        ) = index.resolve(
+            &call.target,
+            root,
+            text,
+            call_node.start_byte(),
+            namespace.as_deref(),
+            &imports,
+        ) {
+            diagnostics.push(Diagnostic {
+                range: call_target_range(text, call_node).unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: reason.to_string(),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
+    diagnostics
+}
+
 enum CodeActionOutcome {
     Action(Box<CodeAction>),
     NoAction(SkipReason),
@@ -2199,6 +2251,19 @@ fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
     })
 }
 
+fn call_target_range(text: &str, node: Node) -> Result<Range, SkipReason> {
+    let target_node = match node.kind() {
+        "function_call_expression" => node.child_by_field_name("function"),
+        "scoped_call_expression" => member_name_node_for_call(node),
+        "member_call_expression" => member_name_node_for_call(node),
+        "object_creation_expression" => class_name_for_object_creation(node),
+        _ => None,
+    }
+    .ok_or(SkipReason::NoSupportedCall)?;
+
+    range_for_bytes(text, target_node.start_byte(), target_node.end_byte())
+}
+
 fn find_arguments_node(node: Node) -> Option<Node> {
     if let Some(arguments) = node.child_by_field_name("arguments") {
         return Some(arguments);
@@ -2216,6 +2281,10 @@ fn class_name_for_object_creation(node: Node) -> Option<Node> {
 }
 
 fn member_name_for_call(node: Node, text: &str) -> Option<String> {
+    member_name_node_for_call(node).map(|node| node_text(node, text).to_string())
+}
+
+fn member_name_node_for_call(node: Node) -> Option<Node> {
     let mut cursor = node.walk();
 
     for child in node.named_children(&mut cursor) {
@@ -2228,7 +2297,7 @@ fn member_name_for_call(node: Node, text: &str) -> Option<String> {
             continue;
         }
         if child.kind() == "name" {
-            return Some(node_text(child, text).to_string());
+            return Some(child);
         }
     }
 
