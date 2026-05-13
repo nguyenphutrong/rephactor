@@ -1053,6 +1053,45 @@ fn lsp_adds_use_declaration_for_unambiguous_class_completion() {
 }
 
 #[test]
+fn lsp_adds_use_const_declaration_for_unambiguous_constant_completion() {
+    let root = temp_project("completion-auto-import-const");
+    let config_dir = root.join("src/Config");
+    let controller_dir = root.join("src/Http");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::create_dir_all(&controller_dir).expect("create controller dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    std::fs::write(
+        config_dir.join("constants.php"),
+        "<?php\nnamespace App\\Config;\nconst API_VERSION = '1';\n",
+    )
+    .expect("write constants");
+    let mut server = LspProcess::start(&root);
+    let file = controller_dir.join("Controller.php");
+    let uri = server.open_php(&file, "<?php\nnamespace App\\Http;\nAPI_VERSION;\n");
+
+    let items = server.completion(&uri, 2, 4);
+    let item = items
+        .iter()
+        .find(|item| item["label"] == "API_VERSION")
+        .expect("API_VERSION completion");
+
+    assert_eq!(item["detail"], "App\\Config\\API_VERSION");
+    assert_eq!(
+        item["additionalTextEdits"][0]["newText"],
+        "use const App\\Config\\API_VERSION;\n"
+    );
+    assert_eq!(
+        item["additionalTextEdits"][0]["range"]["start"],
+        json!({ "line": 2, "character": 0 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_method_completion_after_static_scope() {
     let root = temp_project("completion-static-method");
     let mut server = LspProcess::start(&root);
@@ -2676,6 +2715,22 @@ fn lsp_returns_import_refactor_for_fully_qualified_class_name() {
             action["title"] == "[Rephactor] Add import for 'App\\Models\\Customer'"
         })
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_import_refactor_for_fully_qualified_constant_name() {
+    let root = temp_project("const-import-refactor");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nnamespace App\\Http;\necho \\App\\Config\\API_VERSION;\nnamespace App\\Config;\nconst API_VERSION = '1';\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 2, 20);
+
+    assert!(actions.iter().any(|action| {
+        action["title"] == "[Rephactor] Add import for 'App\\Config\\API_VERSION'"
+    }));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

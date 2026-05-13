@@ -55,12 +55,20 @@ struct SourceLocation {
 struct ImportMap {
     classes: HashMap<String, String>,
     functions: HashMap<String, String>,
+    constants: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct SymbolIndex {
     functions: HashMap<String, Vec<Signature>>,
     classes: HashMap<String, ClassInfo>,
+    constants: HashMap<String, ConstantInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConstantInfo {
+    fqn: String,
+    location: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +104,14 @@ struct ImportDeclaration {
     end_byte: usize,
     is_grouped: bool,
     has_alias: bool,
+    kind: ImportKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportKind {
+    Class,
+    Function,
+    Const,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1548,6 +1564,14 @@ fn completion_for_position_with_cache(
             &index,
             &prefix,
         );
+        items.extend(constant_completion_items(
+            text,
+            root,
+            namespace.as_deref(),
+            &import_declarations,
+            &index,
+            &prefix,
+        ));
         items.extend(function_completion_items(&index, &prefix));
         items.extend(keyword_completion_items(&prefix));
         items.sort_by_key(|item| item.label.to_ascii_lowercase());
@@ -3416,7 +3440,9 @@ fn unused_import_diagnostics(
 ) -> Vec<Diagnostic> {
     imports
         .iter()
-        .filter(|import| !import.is_grouped && !import.has_alias)
+        .filter(|import| {
+            import.kind == ImportKind::Class && !import.is_grouped && !import.has_alias
+        })
         .filter(|import| {
             !class_name_is_used(
                 root,
@@ -3961,6 +3987,11 @@ impl ImportMap {
             .insert(normalize_symbol_key(&alias), clean_name_text(&fqn));
     }
 
+    fn insert_constant(&mut self, alias: String, fqn: String) {
+        self.constants
+            .insert(normalize_symbol_key(&alias), clean_name_text(&fqn));
+    }
+
     fn resolve_class_name(&self, name: &str, namespace: Option<&str>) -> Vec<String> {
         let name = clean_name_text(name);
         if name.starts_with('\\') {
@@ -4083,6 +4114,11 @@ impl SymbolIndex {
 
     fn add_class(&mut self, fqn: String, class_info: ClassInfo) {
         self.classes.insert(normalize_symbol_key(&fqn), class_info);
+    }
+
+    fn add_constant(&mut self, fqn: String, constant_info: ConstantInfo) {
+        self.constants
+            .insert(normalize_symbol_key(&fqn), constant_info);
     }
 
     fn resolve(
@@ -4400,11 +4436,7 @@ fn collect_import_declarations(node: Node, text: &str, declarations: &mut Vec<Im
 
 fn import_declarations_from_node(node: Node, text: &str) -> Vec<ImportDeclaration> {
     let declaration_text = node_text(node, text).trim_start();
-    if starts_with_use_kind(declaration_text, "function")
-        || starts_with_use_kind(declaration_text, "const")
-    {
-        return Vec::new();
-    }
+    let kind = import_kind_from_text(declaration_text);
 
     if let Some(group) = direct_child_kind(node, "namespace_use_group") {
         let Some(prefix) = direct_child_kind(node, "namespace_name") else {
@@ -4425,6 +4457,7 @@ fn import_declarations_from_node(node: Node, text: &str) -> Vec<ImportDeclaratio
                     end_byte: node.end_byte(),
                     is_grouped: true,
                     has_alias: use_clause_has_alias(clause, text),
+                    kind,
                 })
             })
             .collect();
@@ -4442,6 +4475,7 @@ fn import_declarations_from_node(node: Node, text: &str) -> Vec<ImportDeclaratio
                 end_byte: node.end_byte(),
                 is_grouped: false,
                 has_alias: use_clause_has_alias(clause, text),
+                kind,
             })
         })
         .collect()
@@ -4449,10 +4483,7 @@ fn import_declarations_from_node(node: Node, text: &str) -> Vec<ImportDeclaratio
 
 fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
     let declaration_text = node_text(node, text).trim_start();
-    if starts_with_use_kind(declaration_text, "const") {
-        return;
-    }
-    let is_function_import = starts_with_use_kind(declaration_text, "function");
+    let kind = import_kind_from_text(declaration_text);
 
     if let Some(group) = direct_child_kind(node, "namespace_use_group") {
         let Some(prefix) = direct_child_kind(node, "namespace_name") else {
@@ -4467,10 +4498,10 @@ fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
         {
             if let Some((alias, target)) = use_clause_names(clause, text) {
                 let fqn = qualify_name(&target, Some(&prefix));
-                if is_function_import {
-                    imports.insert_function(alias, fqn);
-                } else {
-                    imports.insert_class(alias, fqn);
+                match kind {
+                    ImportKind::Class => imports.insert_class(alias, fqn),
+                    ImportKind::Function => imports.insert_function(alias, fqn),
+                    ImportKind::Const => imports.insert_constant(alias, fqn),
                 }
             }
         }
@@ -4484,12 +4515,22 @@ fn index_use_declaration(node: Node, text: &str, imports: &mut ImportMap) {
         .filter(|child| child.kind() == "namespace_use_clause")
     {
         if let Some((alias, target)) = use_clause_names(clause, text) {
-            if is_function_import {
-                imports.insert_function(alias, target);
-            } else {
-                imports.insert_class(alias, target);
+            match kind {
+                ImportKind::Class => imports.insert_class(alias, target),
+                ImportKind::Function => imports.insert_function(alias, target),
+                ImportKind::Const => imports.insert_constant(alias, target),
             }
         }
+    }
+}
+
+fn import_kind_from_text(text: &str) -> ImportKind {
+    if starts_with_use_kind(text, "function") {
+        ImportKind::Function
+    } else if starts_with_use_kind(text, "const") {
+        ImportKind::Const
+    } else {
+        ImportKind::Class
     }
 }
 
@@ -4578,6 +4619,9 @@ fn index_children(
                     imports,
                 );
             }
+            "const_declaration" => {
+                index_constants(index, child, text, path, active_namespace.as_deref());
+            }
             "class_declaration" | "interface_declaration" | "trait_declaration" => {
                 index_class(
                     index,
@@ -4626,6 +4670,33 @@ fn index_function(
         doc_summary: phpdoc_hover_before(text, node.start_byte()),
     };
     index.add_function(name, signature);
+}
+
+fn index_constants(
+    index: &mut SymbolIndex,
+    node: Node,
+    text: &str,
+    path: Option<&Path>,
+    namespace: Option<&str>,
+) {
+    let mut cursor = node.walk();
+
+    for constant in node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "const_element")
+    {
+        let Some(name_node) = first_named_child_kind(constant, "name") else {
+            continue;
+        };
+        let fqn = qualify_name(node_text(name_node, text), namespace);
+        index.add_constant(
+            fqn.clone(),
+            ConstantInfo {
+                fqn,
+                location: source_location(path, name_node.start_byte()),
+            },
+        );
+    }
 }
 
 fn index_class(
@@ -4848,6 +4919,20 @@ fn workspace_symbols_for_index(
             {
                 symbols.push(symbol);
             }
+        }
+    }
+
+    for constant_info in index.constants.values() {
+        if workspace_query_matches(&constant_info.fqn, query)
+            && let Some(symbol) = symbol_information(
+                constant_info.fqn.clone(),
+                SymbolKind::CONSTANT,
+                constant_info.location.as_ref(),
+                None,
+                open_documents,
+            )
+        {
+            symbols.push(symbol);
         }
     }
 
@@ -5565,27 +5650,42 @@ fn replace_fqcn_with_import_action(
         return Ok(None);
     }
 
-    let Some(class_info) = index.classes.get(&normalize_symbol_key(&fqn)) else {
+    let normalized_fqn = normalize_symbol_key(&fqn);
+    let import_kind = if let Some(class_info) = index.classes.get(&normalized_fqn) {
+        if class_info.fqn != fqn {
+            return Err(SkipReason::AmbiguousCallable(fqn));
+        }
+        ImportKind::Class
+    } else if let Some(constant_info) = index.constants.get(&normalized_fqn) {
+        if constant_info.fqn != fqn {
+            return Err(SkipReason::AmbiguousCallable(fqn));
+        }
+        ImportKind::Const
+    } else {
         return Err(SkipReason::UnresolvedCallable(fqn));
     };
-    if class_info.fqn != fqn {
-        return Err(SkipReason::AmbiguousCallable(fqn));
-    }
 
     let short_name = last_name_segment(&fqn);
     if imports.iter().any(|import| {
-        normalize_symbol_key(&import.alias) == normalize_symbol_key(short_name)
+        import.kind == import_kind
+            && normalize_symbol_key(&import.alias) == normalize_symbol_key(short_name)
             && normalize_symbol_key(&import.fqn) != normalize_symbol_key(&fqn)
     }) {
         return Err(SkipReason::AmbiguousCallable(short_name.to_string()));
     }
 
     let mut edits = Vec::new();
-    if !imports
-        .iter()
-        .any(|import| normalize_symbol_key(&import.fqn) == normalize_symbol_key(&fqn))
-    {
-        edits.push(insert_import_edit(text, root, imports, &fqn)?);
+    if !imports.iter().any(|import| {
+        import.kind == import_kind
+            && normalize_symbol_key(&import.fqn) == normalize_symbol_key(&fqn)
+    }) {
+        edits.push(insert_import_edit_with_kind(
+            text,
+            root,
+            imports,
+            &fqn,
+            import_kind,
+        )?);
     }
 
     edits.push(TextEdit::new(
@@ -5607,7 +5707,9 @@ fn sort_imports_action(
 ) -> Result<Option<CodeAction>, SkipReason> {
     let normal_imports = imports
         .iter()
-        .filter(|import| !import.is_grouped && !import.has_alias)
+        .filter(|import| {
+            import.kind == ImportKind::Class && !import.is_grouped && !import.has_alias
+        })
         .collect::<Vec<_>>();
     if normal_imports.len() < 2 {
         return Ok(None);
@@ -5667,10 +5769,9 @@ fn remove_unused_import_actions(
 ) -> Result<Vec<CodeAction>, SkipReason> {
     let mut actions = Vec::new();
 
-    for import in imports
-        .iter()
-        .filter(|import| !import.is_grouped && !import.has_alias)
-    {
+    for import in imports.iter().filter(|import| {
+        import.kind == ImportKind::Class && !import.is_grouped && !import.has_alias
+    }) {
         if class_name_is_used(
             root,
             text,
@@ -5699,15 +5800,21 @@ fn remove_unused_import_actions(
     Ok(actions)
 }
 
-fn insert_import_edit(
+fn insert_import_edit_with_kind(
     text: &str,
     root: Node,
     imports: &[ImportDeclaration],
     fqn: &str,
+    kind: ImportKind,
 ) -> Result<TextEdit, SkipReason> {
     let insert_byte = import_insert_byte(text, root, imports);
     let Some(position) = lsp_position_for_byte_offset(text, insert_byte) else {
         return Err(SkipReason::InvalidCursorPosition);
+    };
+    let prefix = match kind {
+        ImportKind::Class => "use",
+        ImportKind::Function => "use function",
+        ImportKind::Const => "use const",
     };
 
     Ok(TextEdit::new(
@@ -5715,7 +5822,7 @@ fn insert_import_edit(
             start: position,
             end: position,
         },
-        format!("use {fqn};\n"),
+        format!("{prefix} {fqn};\n"),
     ))
 }
 
@@ -6422,9 +6529,50 @@ fn class_completion_items(
                 detail: Some(class_info.fqn.clone()),
                 ..CompletionItem::default()
             };
-            if let Some(edit) =
-                completion_import_edit(text, root, namespace, imports, &class_info.fqn)
-            {
+            if let Some(edit) = completion_import_edit(
+                text,
+                root,
+                namespace,
+                imports,
+                &class_info.fqn,
+                ImportKind::Class,
+            ) {
+                item.additional_text_edits = Some(vec![edit]);
+            }
+            item
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    items
+}
+
+fn constant_completion_items(
+    text: &str,
+    root: Node,
+    namespace: Option<&str>,
+    imports: &[ImportDeclaration],
+    index: &SymbolIndex,
+    prefix: &str,
+) -> Vec<CompletionItem> {
+    let mut items = index
+        .constants
+        .values()
+        .filter(|constant_info| prefix_matches(last_name_segment(&constant_info.fqn), prefix))
+        .map(|constant_info| {
+            let mut item = CompletionItem {
+                label: last_name_segment(&constant_info.fqn).to_string(),
+                kind: Some(CompletionItemKind::CONSTANT),
+                detail: Some(constant_info.fqn.clone()),
+                ..CompletionItem::default()
+            };
+            if let Some(edit) = completion_import_edit(
+                text,
+                root,
+                namespace,
+                imports,
+                &constant_info.fqn,
+                ImportKind::Const,
+            ) {
                 item.additional_text_edits = Some(vec![edit]);
             }
             item
@@ -6440,6 +6588,7 @@ fn completion_import_edit(
     namespace: Option<&str>,
     imports: &[ImportDeclaration],
     fqn: &str,
+    kind: ImportKind,
 ) -> Option<TextEdit> {
     if !fqn.contains('\\') {
         return None;
@@ -6456,20 +6605,19 @@ fn completion_import_edit(
     let normalized_fqn = normalize_symbol_key(fqn);
     if imports
         .iter()
-        .any(|import| normalize_symbol_key(&import.fqn) == normalized_fqn)
+        .any(|import| import.kind == kind && normalize_symbol_key(&import.fqn) == normalized_fqn)
     {
         return None;
     }
 
     let normalized_short_name = normalize_symbol_key(short_name);
-    if imports
-        .iter()
-        .any(|import| normalize_symbol_key(&import.alias) == normalized_short_name)
-    {
+    if imports.iter().any(|import| {
+        import.kind == kind && normalize_symbol_key(&import.alias) == normalized_short_name
+    }) {
         return None;
     }
 
-    insert_import_edit(text, root, imports, fqn).ok()
+    insert_import_edit_with_kind(text, root, imports, fqn, kind).ok()
 }
 
 fn function_completion_items(index: &SymbolIndex, prefix: &str) -> Vec<CompletionItem> {

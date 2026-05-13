@@ -172,10 +172,10 @@ receiver type is locally obvious, flows through a simple local variable alias,
 or comes from a resolved call with a class return type. Method completion
 understands native `self`, `static`, and direct `parent` parameter types inside
 class-like scopes. Method completion includes indexed parent, interface, trait,
-and PHPDoc `@mixin` methods. It also includes common PHP keyword completions and adds a
-`use` declaration edit for unambiguous namespaced class completions when the
-short name is not already imported or shadowed. It intentionally avoids snippets
-and fuzzy ranking.
+and PHPDoc `@mixin` methods. It also includes common PHP keyword completions and
+adds a `use` or `use const` declaration edit for unambiguous namespaced class
+and constant completions when the short name is not already imported or
+shadowed. It intentionally avoids snippets and fuzzy ranking.
 
 Document Symbol V1 returns functions, classes, interfaces, traits, and class
 methods for editor outline and breadcrumb UIs.
@@ -271,8 +271,8 @@ Selection Range V1 returns syntax-tree ancestor ranges for smart selection
 expansion.
 
 Import refactors support adding an import for a resolvable fully-qualified
-class name, shortening that usage, sorting simple class imports, and removing
-unused simple class imports. Function imports, const imports, and destructive
+class or constant name, shortening that usage, sorting simple class imports,
+and removing unused simple class imports. Function imports and destructive
 grouped-import rewrites are intentionally skipped.
 
 Zed currently applies LSP code actions directly. It does not show a PHPStorm-
@@ -296,6 +296,7 @@ files that are not open in the editor are picked up on the next request.
 - Same-file functions.
 - Basic class, function, static method, and locally obvious instance method
   completions.
+- Project constant completions.
 - Related instance method completions from indexed parents, interfaces, traits,
   and PHPDoc `@mixin` classes.
 - PHP keyword completions.
@@ -385,6 +386,8 @@ files that are not open in the editor are picked up on the next request.
 - Document links for literal relative include/require paths.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
+- Conservative constant import refactors for normal `use const Foo\BAR;`
+  declarations.
 - Code action to implement missing methods from directly implemented indexed
   interfaces.
 - Code action to implement missing methods from directly extended abstract
@@ -426,7 +429,7 @@ Rephactor returns no action instead of guessing for:
 
 - dynamic calls such as `$fn(...)` or `$object->$method(...)`
 - calls with unpacking (`...$args`)
-- const imports and grouped-import rewrites
+- function imports and grouped-import rewrites
 - calls whose existing named arguments do not match the resolved signature
 - ambiguous symbols
 - unknown parameter names
