@@ -160,8 +160,10 @@ classes.
 
 Hover V1 shows a concise PHP signature or class FQN, source location, and the
 nearest PHPDoc summary when available. Hover for seeded PHP internal functions
-links to the official PHP manual. It intentionally avoids full PHPDoc rendering
-and returns no hover for ambiguous or dynamic symbols.
+links to the official PHP manual. Seeded internal functions include conservative
+parameter and return metadata for simple scalar/array contracts. It
+intentionally avoids full PHPDoc rendering and returns no hover for ambiguous or
+dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
 matches for indexed class names, indexed project functions, seeded PHP internal
@@ -322,6 +324,8 @@ files that are not open in the editor are picked up on the next request.
   parameter contracts.
 - Nullable native and PHPDoc parameter diagnostics that accept `null` for
   `?Type` and `Type|null`.
+- Conservative argument-type mismatch diagnostics for seeded PHP internal
+  function parameter contracts.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments
   with declared return types.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments

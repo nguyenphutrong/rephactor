@@ -122,6 +122,7 @@
 - [x] Implement duplicate named-argument diagnostics for open files.
 - [x] Implement unknown named-argument diagnostics for open files.
 - [x] Implement too-many-argument diagnostics for open files.
+- [x] Add conservative type metadata for seeded PHP internal functions.
 - [x] Implement unused-import diagnostics for open files.
 - [x] Implement `textDocument/documentHighlight`.
 - [x] Implement `textDocument/foldingRange`.

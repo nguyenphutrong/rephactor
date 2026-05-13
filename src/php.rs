@@ -6519,11 +6519,12 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         .iter()
         .map(|parameter| parameter.to_string())
         .collect::<Vec<_>>();
+    let parameter_types = internal_function_parameter_types(&normalized_name, parameters.len());
     Some(Signature {
         name: name.to_string(),
-        parameter_types: vec![None; parameters.len()],
+        parameter_types,
         parameters,
-        return_type: None,
+        return_type: internal_function_return_type(&normalized_name),
         is_variadic: matches!(normalized_name.as_str(), "array_merge"),
         is_abstract: false,
         location: None,
@@ -6531,6 +6532,57 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
             "[PHP manual](https://www.php.net/{normalized_name})"
         )),
     })
+}
+
+fn internal_function_parameter_types(
+    normalized_name: &str,
+    parameter_count: usize,
+) -> Vec<Option<ComparableReturnType>> {
+    let type_names = match normalized_name {
+        "array_filter" => &[Some("array"), None, None][..],
+        "array_key_exists" => &[None, Some("array")],
+        "array_map" => &[None, Some("array"), None],
+        "array_merge" => &[Some("array")],
+        "explode" => &[Some("string"), Some("string"), Some("int")],
+        "implode" => &[Some("string"), Some("array")],
+        "in_array" => &[None, Some("array"), Some("bool")],
+        "is_array" => &[None],
+        "json_decode" => &[Some("string"), Some("bool"), Some("int"), Some("int")],
+        "json_encode" => &[None, Some("int"), Some("int")],
+        "preg_match" => &[
+            Some("string"),
+            Some("string"),
+            None,
+            Some("int"),
+            Some("int"),
+        ],
+        "str_contains" => &[Some("string"), Some("string")],
+        "strlen" => &[Some("string")],
+        "trim" => &[Some("string"), Some("string")],
+        _ => &[][..],
+    };
+    let imports = ImportMap::default();
+
+    (0..parameter_count)
+        .map(|index| {
+            type_names
+                .get(index)
+                .copied()
+                .flatten()
+                .and_then(|type_name| comparable_parameter_type(type_name, None, &imports))
+        })
+        .collect()
+}
+
+fn internal_function_return_type(normalized_name: &str) -> Option<ComparableReturnType> {
+    let type_name = match normalized_name {
+        "array_filter" | "array_map" | "array_merge" | "explode" => "array",
+        "array_key_exists" | "in_array" | "is_array" | "str_contains" => "bool",
+        "count" | "preg_match" | "strlen" => "int",
+        "implode" | "json_encode" | "trim" => "string",
+        _ => return None,
+    };
+    comparable_parameter_type(type_name, None, &ImportMap::default())
 }
 
 fn internal_function_names() -> Vec<&'static str> {
