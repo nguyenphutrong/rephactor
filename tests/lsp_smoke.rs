@@ -1373,17 +1373,17 @@ fn lsp_returns_math_internal_function_metadata() {
     let root = temp_project("math-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nrou;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nsq;\nrou;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
-    let items = server.completion(&completion_uri, 1, 3);
+    let items = server.completion(&completion_uri, 1, 2);
 
-    assert!(items.iter().any(|item| item["label"] == "round"));
+    assert!(items.iter().any(|item| item["label"] == "sqrt"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nround('bad', 'precision');\nfunction takes_string(string $value) {}\ntakes_string(abs(1));\n",
+        "<?php\nround('bad', 'precision');\npow('bad', 'exp');\nfunction takes_string(string $value) {}\ntakes_string(abs(1));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1401,6 +1401,10 @@ fn lsp_returns_math_internal_function_metadata() {
             && diagnostic["severity"] == 1
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for exponent: expected float, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for value: expected string, got int"
             && diagnostic["severity"] == 1
     }));
@@ -1410,6 +1414,14 @@ fn lsp_returns_math_internal_function_metadata() {
 
     assert!(markdown.contains("round($num, $precision, $mode)"));
     assert!(markdown.contains("[PHP manual](https://www.php.net/round)"));
+
+    let pow_hover = server.hover(&diagnostics_uri, 2, 2).expect("hover result");
+    let pow_markdown = pow_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(pow_markdown.contains("pow($num, $exponent)"));
+    assert!(pow_markdown.contains("[PHP manual](https://www.php.net/pow)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
