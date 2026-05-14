@@ -1454,17 +1454,23 @@ fn lsp_returns_filesystem_internal_function_metadata() {
     let root = temp_project("filesystem-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nfile_ex;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nfile_ex;\nscan;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 7);
 
     assert!(items.iter().any(|item| item["label"] == "file_exists"));
+    let directory_items = server.completion(&completion_uri, 2, 4);
+    assert!(
+        directory_items
+            .iter()
+            .any(|item| item["label"] == "scandir")
+    );
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nfile_exists([]);\ndirname('/tmp', 'bad');\n",
+        "<?php\nfile_exists([]);\ndirname('/tmp', 'bad');\nglob([], 'bad');\nscandir([], 'bad');\nopendir([]);\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1481,12 +1487,45 @@ fn lsp_returns_filesystem_internal_function_metadata() {
         diagnostic["message"] == "argument type mismatch for levels: expected int, got string"
             && diagnostic["severity"] == 1
     }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for pattern: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for directory: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for sorting_order: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
 
     let hover = server.hover(&diagnostics_uri, 2, 2).expect("hover result");
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
 
     assert!(markdown.contains("dirname($path, $levels)"));
     assert!(markdown.contains("[PHP manual](https://www.php.net/dirname)"));
+
+    let glob_hover = server.hover(&diagnostics_uri, 3, 2).expect("hover result");
+    let glob_markdown = glob_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(glob_markdown.contains("glob($pattern, $flags)"));
+    assert!(glob_markdown.contains("[PHP manual](https://www.php.net/glob)"));
+
+    let scandir_hover = server.hover(&diagnostics_uri, 4, 2).expect("hover result");
+    let scandir_markdown = scandir_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(scandir_markdown.contains("scandir($directory, $sorting_order, $context)"));
+    assert!(scandir_markdown.contains("[PHP manual](https://www.php.net/scandir)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
