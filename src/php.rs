@@ -8912,7 +8912,11 @@ fn edits_for_call(
 
     let mut edits = Vec::new();
 
-    for (argument, parameter_name) in call.arguments.iter().zip(signature.parameters.iter()) {
+    for (argument_index, argument) in call.arguments.iter().enumerate() {
+        let Some(parameter_name) = signature.parameters.get(argument_index) else {
+            return Err(SkipReason::UnsafeNamedArguments);
+        };
+
         if let Some(argument_name) = &argument.name {
             if !argument_name.eq_ignore_ascii_case(parameter_name) {
                 return Err(SkipReason::UnsafeNamedArguments);
@@ -14815,6 +14819,49 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nfunction send_invoice($invoice, $notify, $priority) {}\nsend_invoice(invoice: $invoice, notify: true, priority: $priority);\n"
+        );
+    }
+
+    #[test]
+    fn get_user_named_argument_omits_optional_parameters_without_arguments() {
+        let text =
+            "<?php\nfunction getUser(int $id, bool $withTrash = false) {}\n$user = getUser(1);\n";
+
+        let edits = action_edits(text, 2, 12);
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "id: ");
+        assert!(edits.iter().all(|edit| edit.new_text != "withTrash: "));
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nfunction getUser(int $id, bool $withTrash = false) {}\n$user = getUser(id: 1);\n"
+        );
+    }
+
+    #[test]
+    fn get_user_large_file_named_argument_omits_optional_parameters_without_arguments() {
+        let mut text =
+            "<?php\nfunction getUser(int $id, bool $withTrash = false) {}\nfunction pad(): void {\n"
+                .to_string();
+        for index in 0..14_000 {
+            text.push_str(&format!("    $value += {index};\n"));
+        }
+        text.push_str("}\n$user = getUser(1);\n");
+        let byte_offset = text
+            .find("getUser(1)")
+            .map(|offset| offset + "getUser(".len())
+            .expect("call offset");
+        let position = lsp_position_for_byte_offset(&text, byte_offset).expect("position");
+        let action = named_argument_code_action(&uri(), &text, position).expect("action");
+        let edits = edits_from_action(action);
+
+        assert!(php_document_uses_large_analysis(&text));
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "id: ");
+        assert!(edits.iter().all(|edit| edit.new_text != "withTrash: "));
+        assert_eq!(
+            apply_edits(&text, &edits),
+            text.replace("getUser(1)", "getUser(id: 1)")
         );
     }
 

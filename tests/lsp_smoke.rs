@@ -6418,6 +6418,23 @@ fn lsp_returns_named_argument_code_action_for_open_document() {
 }
 
 #[test]
+fn lsp_named_argument_omits_optional_parameters_without_arguments() {
+    let root = temp_project("optional-argument-omitted");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text =
+        "<?php\nfunction getUser(int $id, bool $withTrash = false) {}\n$user = getUser(1);\n";
+    let uri = server.open_php(&file, text);
+
+    let actions = server.code_actions(&uri, 2, 12);
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0]["title"], "[Rephactor] Add name identifier 'id'");
+    assert_eq!(insert_texts(&actions[0], &uri), vec!["id: "]);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_phpdoc_code_action_for_function_declaration() {
     let root = temp_project("phpdoc-action");
     let mut server = LspProcess::start(&root);
