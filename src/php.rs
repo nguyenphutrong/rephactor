@@ -20,6 +20,7 @@ use tree_sitter::{Node, Parser};
 use crate::document::{byte_offset_for_lsp_position, lsp_position_for_byte_offset};
 
 const ACTION_TITLE: &str = "[Rephactor] Add names to arguments";
+const MAX_TREE_SITTER_PARSE_BYTES: usize = 192 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Signature {
@@ -259,6 +260,10 @@ pub struct DocumentLinkAnalysis {
 }
 
 pub fn analyze_parse_diagnostics(text: &str) -> Vec<Diagnostic> {
+    if php_document_too_large_for_tree_sitter(text) {
+        return Vec::new();
+    }
+
     let Some(tree) = parse_php_allowing_errors(text) else {
         return vec![Diagnostic::new_simple(
             Range::default(),
@@ -5451,12 +5456,20 @@ fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
 }
 
 fn parse_php_allowing_errors(text: &str) -> Option<tree_sitter::Tree> {
+    if php_document_too_large_for_tree_sitter(text) {
+        return None;
+    }
+
     let parse_text = php_parse_text(text);
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_php::LANGUAGE_PHP.into())
         .ok()?;
     parser.parse(parse_text.as_ref(), None)
+}
+
+fn php_document_too_large_for_tree_sitter(text: &str) -> bool {
+    text.len() > MAX_TREE_SITTER_PARSE_BYTES
 }
 
 #[derive(Debug, Clone, Copy)]

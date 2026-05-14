@@ -3967,6 +3967,28 @@ fn lsp_publishes_parse_diagnostics_for_open_document() {
 }
 
 #[test]
+fn lsp_handles_posapp_sync_order_controller_without_stack_overflow() {
+    let fixture = Path::new(
+        "/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Http/Controllers/Api/v1/SyncOrderController.php",
+    );
+    if !fixture.is_file() {
+        return;
+    }
+
+    let text = std::fs::read_to_string(fixture).expect("read SyncOrderController fixture");
+    let root = temp_project("sync-order-stack");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("SyncOrderController.php");
+    let uri = server.open_php(&file, &text);
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    assert!(notification["params"]["diagnostics"].is_array());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_unresolved_call() {
     let root = temp_project("semantic-diagnostics");
     let mut server = LspProcess::start(&root);
