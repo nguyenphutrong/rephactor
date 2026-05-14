@@ -1271,17 +1271,17 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     let root = temp_project("array-utility-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\narray_red;\narray_rev;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\narray_int;\narray_red;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 9);
 
-    assert!(items.iter().any(|item| item["label"] == "array_reduce"));
+    assert!(items.iter().any(|item| item["label"] == "array_intersect"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\n",
+        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\narray_diff('bad', []);\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1312,6 +1312,14 @@ fn lsp_returns_array_utility_internal_function_metadata() {
 
     assert!(reduce_markdown.contains("array_reduce($array, $callback, $initial)"));
     assert!(reduce_markdown.contains("[PHP manual](https://www.php.net/array_reduce)"));
+
+    let diff_hover = server.hover(&diagnostics_uri, 4, 7).expect("hover result");
+    let diff_markdown = diff_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(diff_markdown.contains("array_diff($array, $arrays)"));
+    assert!(diff_markdown.contains("[PHP manual](https://www.php.net/array_diff)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

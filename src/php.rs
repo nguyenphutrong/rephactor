@@ -9618,7 +9618,10 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "abs" => &["num"][..],
         "array_filter" => &["array", "callback", "mode"][..],
         "array_key_exists" => &["key", "array"],
+        "array_combine" => &["keys", "values"],
         "array_column" => &["array", "column_key", "index_key"],
+        "array_diff" => &["array", "arrays"],
+        "array_intersect" => &["array", "arrays"],
         "array_keys" => &["array", "filter_value", "strict"],
         "array_map" => &["callback", "array", "arrays"],
         "array_merge" => &["arrays"],
@@ -9718,7 +9721,10 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         parameter_types,
         parameters,
         return_type: internal_function_return_type(&normalized_name),
-        is_variadic: matches!(normalized_name.as_str(), "array_merge" | "sprintf"),
+        is_variadic: matches!(
+            normalized_name.as_str(),
+            "array_diff" | "array_intersect" | "array_merge" | "sprintf"
+        ),
         is_abstract: false,
         location: None,
         doc_summary: Some(format!(
@@ -9735,7 +9741,10 @@ fn internal_function_parameter_types(
         "abs" => &[Some("int")][..],
         "array_filter" => &[Some("array"), None, None][..],
         "array_key_exists" => &[None, Some("array")],
+        "array_combine" => &[Some("array"), Some("array")],
         "array_column" => &[Some("array"), None, None],
+        "array_diff" => &[Some("array"), Some("array")],
+        "array_intersect" => &[Some("array"), Some("array")],
         "array_keys" => &[Some("array"), None, Some("bool")],
         "array_map" => &[None, Some("array"), None],
         "array_merge" => &[Some("array")],
@@ -9843,9 +9852,9 @@ fn internal_function_parameter_types(
 
 fn internal_function_return_type(normalized_name: &str) -> Option<ComparableReturnType> {
     let type_name = match normalized_name {
-        "array_column" | "array_filter" | "array_keys" | "array_map" | "array_merge"
-        | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
-        | "preg_split" => "array",
+        "array_column" | "array_diff" | "array_filter" | "array_intersect" | "array_keys"
+        | "array_map" | "array_merge" | "array_reverse" | "array_slice" | "array_unique"
+        | "array_values" | "explode" | "preg_split" => "array",
         "array_key_exists" | "fclose" | "file_exists" | "in_array" | "is_array" | "is_bool"
         | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
         | "is_readable" | "is_string" | "is_writable" | "str_contains" | "str_ends_with"
@@ -9868,8 +9877,11 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
 fn internal_function_names() -> Vec<&'static str> {
     vec![
         "abs",
+        "array_combine",
         "array_filter",
         "array_column",
+        "array_diff",
+        "array_intersect",
         "array_key_exists",
         "array_keys",
         "array_map",
