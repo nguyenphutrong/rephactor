@@ -1289,17 +1289,28 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     let root = temp_project("array-utility-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nks;\narray_fil;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nks;\narray_rep;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 2);
 
     assert!(items.iter().any(|item| item["label"] == "ksort"));
+    let helper_items = server.completion(&completion_uri, 2, 9);
+    assert!(
+        helper_items
+            .iter()
+            .any(|item| item["label"] == "array_replace")
+    );
+    assert!(
+        helper_items
+            .iter()
+            .any(|item| item["label"] == "array_replace_recursive")
+    );
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\narray_diff('bad', []);\narray_chunk([], 'bad');\nsort('bad', 'bad');\n",
+        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\narray_diff('bad', []);\narray_chunk([], 'bad');\nsort('bad', 'bad');\narray_pad('bad', 'bad', null);\narray_walk('bad', $callback);\narray_replace('bad', []);\nextract('bad', 'bad');\nfunction takes_string(string $value) {}\ntakes_string(array_sum([]));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1318,6 +1329,14 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for length: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got float"
             && diagnostic["severity"] == 1
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -1362,6 +1381,22 @@ fn lsp_returns_array_utility_internal_function_metadata() {
 
     assert!(sort_markdown.contains("sort($array, $flags)"));
     assert!(sort_markdown.contains("[PHP manual](https://www.php.net/sort)"));
+
+    let pad_hover = server.hover(&diagnostics_uri, 7, 8).expect("hover result");
+    let pad_markdown = pad_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(pad_markdown.contains("array_pad($array, $length, $value)"));
+    assert!(pad_markdown.contains("[PHP manual](https://www.php.net/array_pad)"));
+
+    let replace_hover = server.hover(&diagnostics_uri, 9, 8).expect("hover result");
+    let replace_markdown = replace_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(replace_markdown.contains("array_replace($array, $replacements)"));
+    assert!(replace_markdown.contains("[PHP manual](https://www.php.net/array_replace)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

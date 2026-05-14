@@ -9669,14 +9669,22 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "array_keys" => &["array", "filter_value", "strict"],
         "array_map" => &["callback", "array", "arrays"],
         "array_merge" => &["arrays"],
+        "array_pad" => &["array", "length", "value"],
         "array_pop" => &["array"],
+        "array_product" => &["array"],
+        "array_rand" => &["array", "num"],
         "array_reduce" => &["array", "callback", "initial"],
+        "array_replace" => &["array", "replacements"],
+        "array_replace_recursive" => &["array", "replacements"],
         "array_reverse" => &["array", "preserve_keys"],
         "array_search" => &["needle", "haystack", "strict"],
         "array_shift" => &["array"],
         "array_slice" => &["array", "offset", "length", "preserve_keys"],
+        "array_sum" => &["array"],
         "array_unique" => &["array", "flags"],
         "array_values" => &["array"],
+        "array_walk" => &["array", "callback", "arg"],
+        "array_walk_recursive" => &["array", "callback", "arg"],
         "asort" => &["array", "flags"],
         "base64_decode" => &["string", "strict"],
         "base64_encode" => &["string"],
@@ -9688,6 +9696,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "chown" => &["filename", "user"],
         "class_exists" => &["class", "autoload"],
         "closedir" => &["dir_handle"],
+        "compact" => &["var_name", "var_names"],
         "count" => &["value", "mode"],
         "copy" => &["from", "to", "context"],
         "date" => &["format", "timestamp"],
@@ -9695,6 +9704,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "disk_free_space" => &["directory"],
         "disk_total_space" => &["directory"],
         "explode" => &["separator", "string", "limit"],
+        "extract" => &["array", "flags", "prefix"],
         "file_exists" => &["filename"],
         "file_get_contents" => &[
             "filename",
@@ -9771,6 +9781,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "pow" => &["num", "exponent"],
         "random_bytes" => &["length"],
         "random_int" => &["min", "max"],
+        "range" => &["start", "end", "step"],
         "rawurldecode" => &["string"],
         "rawurlencode" => &["string"],
         "readlink" => &["path"],
@@ -9780,6 +9791,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "round" => &["num", "precision", "mode"],
         "rmdir" => &["directory", "context"],
         "scandir" => &["directory", "sorting_order", "context"],
+        "shuffle" => &["array"],
         "rsort" => &["array", "flags"],
         "rtrim" => &["string", "characters"],
         "serialize" => &["value"],
@@ -9832,7 +9844,13 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         return_type: internal_function_return_type(&normalized_name),
         is_variadic: matches!(
             normalized_name.as_str(),
-            "array_diff" | "array_intersect" | "array_merge" | "sprintf"
+            "array_diff"
+                | "array_intersect"
+                | "array_merge"
+                | "array_replace"
+                | "array_replace_recursive"
+                | "compact"
+                | "sprintf"
         ),
         is_abstract: false,
         location: None,
@@ -9860,14 +9878,22 @@ fn internal_function_parameter_types(
         "array_keys" => &[Some("array"), None, Some("bool")],
         "array_map" => &[None, Some("array"), None],
         "array_merge" => &[Some("array")],
+        "array_pad" => &[Some("array"), Some("int"), None],
         "array_pop" => &[Some("array")],
+        "array_product" => &[Some("array")],
+        "array_rand" => &[Some("array"), Some("int")],
         "array_reduce" => &[Some("array"), None, None],
+        "array_replace" => &[Some("array"), Some("array")],
+        "array_replace_recursive" => &[Some("array"), Some("array")],
         "array_reverse" => &[Some("array"), Some("bool")],
         "array_search" => &[None, Some("array"), Some("bool")],
         "array_shift" => &[Some("array")],
         "array_slice" => &[Some("array"), Some("int"), Some("int"), Some("bool")],
+        "array_sum" => &[Some("array")],
         "array_unique" => &[Some("array"), Some("int")],
         "array_values" => &[Some("array")],
+        "array_walk" => &[Some("array"), None, None],
+        "array_walk_recursive" => &[Some("array"), None, None],
         "asort" => &[Some("array"), Some("int")],
         "base64_decode" => &[Some("string"), Some("bool")],
         "base64_encode" => &[Some("string")],
@@ -9879,12 +9905,14 @@ fn internal_function_parameter_types(
         "chown" => &[Some("string"), None],
         "class_exists" => &[Some("string"), Some("bool")],
         "closedir" => &[None],
+        "compact" => &[Some("string"), Some("string")],
         "copy" => &[Some("string"), Some("string"), None],
         "date" => &[Some("string"), Some("int")],
         "dirname" => &[Some("string"), Some("int")],
         "disk_free_space" => &[Some("string")],
         "disk_total_space" => &[Some("string")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
+        "extract" => &[Some("array"), Some("int"), Some("string")],
         "file_exists" => &[Some("string")],
         "file_get_contents" => &[Some("string"), Some("bool"), None, Some("int"), Some("int")],
         "file_put_contents" => &[Some("string"), None, Some("int"), None],
@@ -9967,6 +9995,7 @@ fn internal_function_parameter_types(
         "pow" => &[Some("float"), Some("float")],
         "random_bytes" => &[Some("int")],
         "random_int" => &[Some("int"), Some("int")],
+        "range" => &[None, None, None],
         "rawurldecode" => &[Some("string")],
         "rawurlencode" => &[Some("string")],
         "readlink" => &[Some("string")],
@@ -9976,6 +10005,7 @@ fn internal_function_parameter_types(
         "round" => &[Some("int"), Some("int"), None],
         "rmdir" => &[Some("string"), None],
         "scandir" => &[Some("string"), Some("int"), None],
+        "shuffle" => &[Some("array")],
         "rsort" => &[Some("array"), Some("int")],
         "rtrim" => &[Some("string"), Some("string")],
         "serialize" => &[None],
@@ -10029,21 +10059,78 @@ fn internal_function_parameter_types(
 
 fn internal_function_return_type(normalized_name: &str) -> Option<ComparableReturnType> {
     let type_name = match normalized_name {
-        "array_chunk" | "array_column" | "array_diff" | "array_fill" | "array_fill_keys"
-        | "array_filter" | "array_intersect" | "array_keys" | "array_map" | "array_merge"
-        | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
-        | "preg_grep" | "preg_split" => "array",
-        "array_key_exists" | "chgrp" | "chmod" | "chown" | "class_exists" | "copy" | "fclose"
-        | "feof" | "file_exists" | "filter_has_var" | "function_exists" | "in_array"
-        | "interface_exists" | "is_array" | "is_bool" | "is_dir" | "is_file" | "is_int"
-        | "is_link" | "is_null" | "is_numeric" | "is_object" | "is_readable" | "is_string"
-        | "is_writable" | "link" | "method_exists" | "mkdir" | "property_exists" | "rename"
-        | "rmdir" | "symlink" | "touch" | "trait_exists" | "unlink" | "asort" | "ksort"
-        | "rsort" | "sort" | "str_contains" | "str_ends_with" | "str_starts_with" => "bool",
+        "array_chunk"
+        | "array_column"
+        | "array_diff"
+        | "array_fill"
+        | "array_fill_keys"
+        | "array_filter"
+        | "array_intersect"
+        | "array_keys"
+        | "array_map"
+        | "array_merge"
+        | "array_pad"
+        | "array_replace"
+        | "array_replace_recursive"
+        | "array_reverse"
+        | "array_slice"
+        | "array_unique"
+        | "array_values"
+        | "compact"
+        | "explode"
+        | "range"
+        | "preg_grep"
+        | "preg_split" => "array",
+        "array_key_exists"
+        | "array_walk"
+        | "array_walk_recursive"
+        | "chgrp"
+        | "chmod"
+        | "chown"
+        | "class_exists"
+        | "copy"
+        | "fclose"
+        | "feof"
+        | "file_exists"
+        | "filter_has_var"
+        | "function_exists"
+        | "in_array"
+        | "interface_exists"
+        | "is_array"
+        | "is_bool"
+        | "is_dir"
+        | "is_file"
+        | "is_int"
+        | "is_link"
+        | "is_null"
+        | "is_numeric"
+        | "is_object"
+        | "is_readable"
+        | "is_string"
+        | "is_writable"
+        | "link"
+        | "method_exists"
+        | "mkdir"
+        | "property_exists"
+        | "rename"
+        | "rmdir"
+        | "shuffle"
+        | "symlink"
+        | "touch"
+        | "trait_exists"
+        | "unlink"
+        | "asort"
+        | "ksort"
+        | "rsort"
+        | "sort"
+        | "str_contains"
+        | "str_ends_with"
+        | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
-        | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all"
-        | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
-        "disk_free_space" | "disk_total_space" => "float",
+        | "extract" | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match"
+        | "preg_match_all" | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time"
+        | "random_int" => "int",
+        "array_product" | "array_sum" | "disk_free_space" | "disk_total_space" => "float",
         "base64_decode"
         | "base64_encode"
         | "basename"
@@ -10112,14 +10199,22 @@ fn internal_function_names() -> Vec<&'static str> {
         "array_keys",
         "array_map",
         "array_merge",
+        "array_pad",
         "array_pop",
+        "array_product",
+        "array_rand",
         "array_reduce",
+        "array_replace",
+        "array_replace_recursive",
         "array_reverse",
         "array_search",
         "array_shift",
         "array_slice",
+        "array_sum",
         "array_unique",
         "array_values",
+        "array_walk",
+        "array_walk_recursive",
         "asort",
         "base64_decode",
         "base64_encode",
@@ -10131,6 +10226,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "chown",
         "class_exists",
         "closedir",
+        "compact",
         "count",
         "copy",
         "date",
@@ -10138,6 +10234,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "disk_free_space",
         "disk_total_space",
         "explode",
+        "extract",
         "file_exists",
         "file_get_contents",
         "file_put_contents",
@@ -10208,6 +10305,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "pow",
         "random_bytes",
         "random_int",
+        "range",
         "rawurldecode",
         "rawurlencode",
         "readlink",
@@ -10217,6 +10315,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "round",
         "rmdir",
         "scandir",
+        "shuffle",
         "rsort",
         "rtrim",
         "serialize",
