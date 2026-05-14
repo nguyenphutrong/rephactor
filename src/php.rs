@@ -443,6 +443,17 @@ pub fn analyze_code_actions_for_position_with_cache(
     cache: &mut ProjectIndexCache,
 ) -> CodeActionAnalysis {
     let index_cache_status = cache.status_for_document(uri);
+    if php_document_uses_large_analysis(text) {
+        return large_code_actions_for_position_with_cache(
+            uri,
+            text,
+            position,
+            open_documents,
+            cache,
+            index_cache_status,
+        );
+    }
+
     let mut actions = Vec::new();
     let mut skip_reason = None;
 
@@ -486,6 +497,32 @@ pub fn analyze_code_actions_for_position_with_cache(
 
     CodeActionAnalysis {
         skip_reason: actions.is_empty().then_some(skip_reason).flatten(),
+        actions,
+        index_cache_status,
+    }
+}
+
+fn large_code_actions_for_position_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+    index_cache_status: IndexCacheStatus,
+) -> CodeActionAnalysis {
+    let (actions, skip_reason) = match large_named_argument_code_action_with_cache(
+        uri,
+        text,
+        position,
+        open_documents,
+        cache,
+    ) {
+        CodeActionOutcome::Action(action) => (vec![CodeActionOrCommand::CodeAction(*action)], None),
+        CodeActionOutcome::NoAction(reason) => (Vec::new(), Some(reason)),
+    };
+
+    CodeActionAnalysis {
+        skip_reason,
         actions,
         index_cache_status,
     }
@@ -1010,6 +1047,55 @@ fn named_argument_code_action_with_cache(
     }))
 }
 
+fn large_named_argument_code_action_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> CodeActionOutcome {
+    if !document_supports_named_arguments(uri) {
+        return CodeActionOutcome::NoAction(SkipReason::PhpVersionBelow8);
+    }
+
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return CodeActionOutcome::NoAction(SkipReason::InvalidCursorPosition);
+    };
+    let call = match large_call_at_byte(text, byte_offset) {
+        Ok(call) => call,
+        Err(reason) => return CodeActionOutcome::NoAction(reason),
+    };
+    if call.arguments.iter().any(|argument| argument.is_unpacking) {
+        return CodeActionOutcome::NoAction(SkipReason::UnpackingArgument);
+    }
+
+    let namespace = large_namespace_at_byte(text, byte_offset);
+    let imports = ImportMap::default();
+    let index = cache.index_for_document(uri, text, open_documents);
+    let signature = match index.resolve_large_call(&call.target, namespace.as_deref(), &imports) {
+        Ok(signature) => signature,
+        Err(reason) => return CodeActionOutcome::NoAction(reason),
+    };
+    let edits = match edits_for_call(text, &call, &signature) {
+        Ok(edits) => edits,
+        Err(reason) => return CodeActionOutcome::NoAction(reason),
+    };
+
+    let mut changes = HashMap::new();
+    changes.insert(uri.clone(), edits.clone());
+
+    CodeActionOutcome::Action(Box::new(CodeAction {
+        title: action_title_for_edits(&edits),
+        kind: Some(CodeActionKind::REFACTOR_REWRITE),
+        diagnostics: None,
+        edit: Some(WorkspaceEdit::new(changes)),
+        command: None,
+        is_preferred: Some(true),
+        disabled: None,
+        data: None,
+    }))
+}
+
 fn import_code_actions_with_cache(
     uri: &Url,
     text: &str,
@@ -1256,7 +1342,7 @@ fn large_signature_help_for_position(
     open_documents: &HashMap<Url, String>,
     cache: &mut ProjectIndexCache,
 ) -> Result<SignatureHelp, SkipReason> {
-    let call = large_function_call_at_byte(text, byte_offset)?;
+    let call = large_call_at_byte(text, byte_offset)?;
     if call.arguments.iter().any(|argument| argument.is_unpacking) {
         return Err(SkipReason::UnpackingArgument);
     }
@@ -1264,10 +1350,7 @@ fn large_signature_help_for_position(
     let namespace = large_namespace_at_byte(text, byte_offset);
     let imports = ImportMap::default();
     let index = cache.index_for_document(uri, text, open_documents);
-    let CallTarget::Function(name) = &call.target else {
-        return Err(SkipReason::NoSupportedCall);
-    };
-    let signature = index.resolve_function(name, namespace.as_deref(), &imports)?;
+    let signature = index.resolve_large_call(&call.target, namespace.as_deref(), &imports)?;
     let active_parameter = active_parameter_for_call(byte_offset, &call, &signature)?;
 
     Ok(signature_help_for_call(
@@ -1277,28 +1360,60 @@ fn large_signature_help_for_position(
     ))
 }
 
-fn large_function_call_at_byte(text: &str, byte_offset: usize) -> Result<CallInfo, SkipReason> {
+fn large_call_at_byte(text: &str, byte_offset: usize) -> Result<CallInfo, SkipReason> {
     let open = find_large_call_open(text, byte_offset).ok_or(SkipReason::NoSupportedCall)?;
     let name_end = text[..open].trim_end().len();
-    let name_start = text[..name_end]
+    let name_start = large_identifier_start_before(text, name_end).unwrap_or(name_end);
+    let method_name = text[name_start..name_end].trim();
+    if method_name.is_empty() || method_name.ends_with("function") {
+        return Err(SkipReason::NoSupportedCall);
+    }
+    let before_name = text[..name_start].trim_end();
+    if before_name.ends_with("->") {
+        return Err(SkipReason::NoSupportedCall);
+    }
+    let target = if before_name.ends_with("::") {
+        let class_end = before_name.len().saturating_sub(2);
+        let class_start = large_name_start_before(text, class_end).unwrap_or(class_end);
+        let class_name = text[class_start..class_end].trim();
+        if class_name.is_empty() {
+            return Err(SkipReason::NoSupportedCall);
+        }
+        CallTarget::StaticMethod {
+            class_name: clean_name_text(class_name),
+            method: clean_name_text(method_name),
+        }
+    } else {
+        CallTarget::Function(clean_name_text(method_name))
+    };
+    let close = find_large_call_close(text, open).unwrap_or(text.len());
+
+    Ok(CallInfo {
+        target,
+        arguments: large_call_arguments(text, open + 1, close),
+        arguments_start_byte: open + 1,
+        arguments_end_byte: close,
+    })
+}
+
+fn large_identifier_start_before(text: &str, end: usize) -> Option<usize> {
+    text[..end]
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!is_large_identifier_char(character)).then_some(index + character.len_utf8())
+        })
+        .or(Some(0))
+}
+
+fn large_name_start_before(text: &str, end: usize) -> Option<usize> {
+    text[..end]
         .char_indices()
         .rev()
         .find_map(|(index, character)| {
             (!is_large_name_char(character)).then_some(index + character.len_utf8())
         })
-        .unwrap_or(0);
-    let name = text[name_start..name_end].trim();
-    if name.is_empty() || name.ends_with("function") {
-        return Err(SkipReason::NoSupportedCall);
-    }
-    let close = find_large_call_close(text, open).unwrap_or(text.len());
-
-    Ok(CallInfo {
-        target: CallTarget::Function(clean_name_text(name)),
-        arguments: large_call_arguments(text, open + 1, close),
-        arguments_start_byte: open + 1,
-        arguments_end_byte: close,
-    })
+        .or(Some(0))
 }
 
 fn find_large_call_open(text: &str, byte_offset: usize) -> Option<usize> {
@@ -1364,13 +1479,14 @@ fn large_call_arguments(text: &str, start: usize, end: usize) -> Vec<ArgumentInf
 fn large_argument_info(text: &str, start: usize, end: usize) -> ArgumentInfo {
     let segment = text.get(start..end).unwrap_or_default();
     let trimmed = segment.trim_start();
+    let start_byte = start + segment.len() - trimmed.len();
     let name = trimmed
         .find(':')
         .and_then(|colon| leading_large_identifier(&trimmed[..colon]).map(str::to_string));
     ArgumentInfo {
-        start_byte: start,
+        start_byte,
         end_byte: end,
-        insert_byte: end,
+        insert_byte: start_byte,
         name,
         is_unpacking: trimmed.starts_with("..."),
     }
@@ -6618,6 +6734,31 @@ impl SymbolIndex {
 
                 self.resolve_internal_method(class_name, method, namespace, imports)
                     .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+            }
+        }
+    }
+
+    fn resolve_large_call(
+        &self,
+        target: &CallTarget,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> Result<Signature, SkipReason> {
+        match target {
+            CallTarget::Function(name) => self.resolve_function(name, namespace, imports),
+            CallTarget::StaticMethod { class_name, method } => {
+                if let Some(class_info) = self.resolve_class(class_name, namespace, imports) {
+                    return self.resolve_method(class_info, method, target);
+                }
+
+                self.resolve_internal_method(class_name, method, namespace, imports)
+                    .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe()))
+            }
+            CallTarget::Constructor { class_name } => self
+                .resolve_internal_constructor(class_name, namespace, imports)
+                .ok_or_else(|| SkipReason::UnresolvedCallable(target.describe())),
+            CallTarget::InstanceMethod { .. } => {
+                Err(SkipReason::UnresolvedCallable(target.describe()))
             }
         }
     }
@@ -13056,12 +13197,12 @@ mod tests {
 
     fn generated_large_php_document(repetitions: usize) -> String {
         let mut text = String::from(
-            "<?php\nnamespace App\\Large;\n\nconst GLOBAL_FLAG = true;\nfunction helper($value, ...$rest) {}\n\nclass HugeModel\n{\n    public const KIND = 'huge';\n    protected static $table = 'huge_models';\n\n    public function calculate($order, $notify): void\n    {\n",
+            "<?php\nnamespace App\\Large;\n\nconst GLOBAL_FLAG = true;\nfunction helper($value, ...$rest) {}\n\nclass HugeModel\n{\n    public const KIND = 'huge';\n    protected static $table = 'huge_models';\n    public static function map($first, $second): void {}\n\n    public function calculate($order, $notify): void\n    {\n",
         );
         for index in 0..repetitions {
             text.push_str(&format!("        $total += {index};\n"));
         }
-        text.push_str("        helper($order, $notify);\n    }\n}\n");
+        text.push_str("        helper($order, $notify);\n        HugeModel::map($order, $notify);\n    }\n}\n");
         text
     }
 
@@ -13166,6 +13307,74 @@ mod tests {
 
         assert_eq!(help.signatures[0].label, "helper($value, $rest)");
         assert_eq!(help.active_parameter, Some(1));
+    }
+
+    #[test]
+    fn large_file_code_action_uses_scanner_index_without_parse_error() {
+        let text = generated_large_php_document(9_000);
+        let byte_offset = text
+            .find("helper($order, $notify)")
+            .map(|offset| offset + "helper($o".len())
+            .expect("function call offset");
+        let position = lsp_position_for_byte_offset(&text, byte_offset).expect("call position");
+        let analysis = analyze_code_actions_for_position(&uri(), &text, position, &HashMap::new());
+
+        assert_ne!(analysis.skip_reason, Some(SkipReason::ParseError));
+        assert_eq!(analysis.actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &analysis.actions[0] else {
+            panic!("code action");
+        };
+        assert_eq!(
+            apply_edits(&text, &edits_from_action(action.clone())),
+            text.replace(
+                "helper($order, $notify)",
+                "helper(value: $order, rest: $notify)"
+            )
+        );
+    }
+
+    #[test]
+    fn large_file_static_code_action_uses_scanner_index_without_parse_error() {
+        let text = generated_large_php_document(9_000);
+        let byte_offset = text
+            .find("HugeModel::map($order, $notify)")
+            .map(|offset| offset + "HugeModel::map($order, $n".len())
+            .expect("static call offset");
+        let position = lsp_position_for_byte_offset(&text, byte_offset).expect("call position");
+        let analysis = analyze_code_actions_for_position(&uri(), &text, position, &HashMap::new());
+
+        assert_ne!(analysis.skip_reason, Some(SkipReason::ParseError));
+        assert_eq!(analysis.actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &analysis.actions[0] else {
+            panic!("code action");
+        };
+        assert_eq!(
+            apply_edits(&text, &edits_from_action(action.clone())),
+            text.replace(
+                "HugeModel::map($order, $notify)",
+                "HugeModel::map(first: $order, second: $notify)"
+            )
+        );
+    }
+
+    #[test]
+    fn large_file_unresolved_code_action_is_not_parse_error() {
+        let mut text = generated_large_php_document(9_000);
+        text.push_str("MissingService::sync($order);\n");
+        let byte_offset = text
+            .find("MissingService::sync($order)")
+            .map(|offset| offset + "MissingService::sync($o".len())
+            .expect("missing call offset");
+        let position = lsp_position_for_byte_offset(&text, byte_offset).expect("call position");
+        let analysis = analyze_code_actions_for_position(&uri(), &text, position, &HashMap::new());
+
+        assert_eq!(
+            analysis.skip_reason,
+            Some(SkipReason::UnresolvedCallable(
+                "MissingService::sync".to_string()
+            ))
+        );
+        assert!(analysis.actions.is_empty());
     }
 
     #[test]

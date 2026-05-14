@@ -187,6 +187,48 @@ impl LspProcess {
             .clone()
     }
 
+    fn code_actions_with_logs(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> (Vec<Value>, Vec<String>) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/codeAction",
+            "params": {
+                "textDocument": { "uri": uri },
+                "range": {
+                    "start": { "line": line, "character": character },
+                    "end": { "line": line, "character": character }
+                },
+                "context": { "diagnostics": [] }
+            }
+        }));
+
+        let mut logs = Vec::new();
+        loop {
+            let message = self.read_message();
+            if message.get("id").and_then(Value::as_i64) == Some(id) {
+                return (
+                    message["result"]
+                        .as_array()
+                        .expect("code action array")
+                        .clone(),
+                    logs,
+                );
+            }
+            if message.get("method").and_then(Value::as_str) == Some("window/logMessage")
+                && let Some(log) = message["params"]["message"].as_str()
+            {
+                logs.push(log.to_string());
+            }
+        }
+    }
+
     fn code_lens(&mut self, uri: &str) -> Vec<Value> {
         let response = self.request(
             "textDocument/codeLens",
@@ -3987,6 +4029,35 @@ fn lsp_handles_posapp_sync_order_controller_without_stack_overflow() {
     assert!(notification["params"]["diagnostics"].is_array());
     assert!(!server.document_symbols(&uri).is_empty());
     assert!(!server.folding_ranges(&uri).is_empty());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_large_posapp_code_action_does_not_report_parse_error() {
+    let fixture = Path::new(
+        "/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Http/Controllers/Api/v1/SyncOrderController.php",
+    );
+    if !fixture.is_file() {
+        return;
+    }
+
+    let text = std::fs::read_to_string(fixture).expect("read SyncOrderController fixture");
+    let root = temp_project("sync-order-code-action");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("SyncOrderController.php");
+    let uri = server.open_php(&file, &text);
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+    assert_eq!(notification["params"]["uri"], uri);
+
+    let (_actions, logs) = server.code_actions_with_logs(&uri, 2777, 28);
+
+    assert!(
+        logs.iter()
+            .filter(|log| log.contains("Rephactor codeAction"))
+            .all(|log| !log.contains("PHP parse error")),
+        "unexpected codeAction logs: {logs:?}"
+    );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
