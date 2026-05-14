@@ -3889,11 +3889,9 @@ fn unused_import_diagnostics(
 ) -> Vec<Diagnostic> {
     imports
         .iter()
+        .filter(|import| is_simple_removable_import(import))
         .filter(|import| {
-            import.kind == ImportKind::Class && !import.is_grouped && !import.has_alias
-        })
-        .filter(|import| {
-            !class_name_is_used(
+            !import_alias_is_used(
                 root,
                 text,
                 &import.alias,
@@ -6959,10 +6957,11 @@ fn remove_unused_import_actions(
 ) -> Result<Vec<CodeAction>, SkipReason> {
     let mut actions = Vec::new();
 
-    for import in imports.iter().filter(|import| {
-        import.kind == ImportKind::Class && !import.is_grouped && !import.has_alias
-    }) {
-        if class_name_is_used(
+    for import in imports
+        .iter()
+        .filter(|import| is_simple_removable_import(import))
+    {
+        if import_alias_is_used(
             root,
             text,
             &import.alias,
@@ -6988,6 +6987,14 @@ fn remove_unused_import_actions(
     }
 
     Ok(actions)
+}
+
+fn is_simple_removable_import(import: &ImportDeclaration) -> bool {
+    matches!(
+        import.kind,
+        ImportKind::Class | ImportKind::Function | ImportKind::Const
+    ) && !import.is_grouped
+        && !import.has_alias
 }
 
 fn insert_import_edit_with_kind(
@@ -7039,7 +7046,7 @@ fn first_namespace_definition(root: Node) -> Option<Node> {
         .find(|child| child.kind() == "namespace_definition")
 }
 
-fn class_name_is_used(
+fn import_alias_is_used(
     root: Node,
     text: &str,
     alias: &str,
@@ -10168,6 +10175,24 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nnamespace App\\Http;\nuse App\\A;\nnew A();\n"
+        );
+    }
+
+    #[test]
+    fn removes_unused_simple_function_import() {
+        let text = "<?php\nnamespace App\\Http;\nuse function App\\send_invoice;\nuse function App\\unused_helper;\nsend_invoice();\n";
+
+        let action = action_by_title(
+            text,
+            4,
+            1,
+            "[Rephactor] Remove unused import 'unused_helper'",
+        );
+        let edits = edits_from_action(action);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse function App\\send_invoice;\nsend_invoice();\n"
         );
     }
 
