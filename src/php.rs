@@ -1125,7 +1125,7 @@ fn signature_help_for_position_with_cache(
     let root = tree.root_node();
     let namespace = namespace_at_byte(root, text, byte_offset);
     let imports = ImportMap::from_root(root, text);
-    let call = find_call_at_byte(root, text, byte_offset)?;
+    let call = find_call_at_byte_allow_empty(root, text, byte_offset)?;
 
     if call.arguments.iter().any(|argument| argument.is_unpacking) {
         return Err(SkipReason::UnpackingArgument);
@@ -6551,7 +6551,19 @@ fn find_call_at_byte(root: Node, text: &str, byte_offset: usize) -> Result<CallI
         return Err(SkipReason::NoSupportedCall);
     };
 
-    call_info(node, text)
+    call_info_with_empty(node, text, false)
+}
+
+fn find_call_at_byte_allow_empty(
+    root: Node,
+    text: &str,
+    byte_offset: usize,
+) -> Result<CallInfo, SkipReason> {
+    let Some(node) = find_smallest_call(root, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+
+    call_info_with_empty(node, text, true)
 }
 
 fn find_call_target_at_byte(
@@ -6712,12 +6724,16 @@ fn is_supported_call_kind(kind: &str) -> bool {
 }
 
 fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
+    call_info_with_empty(node, text, false)
+}
+
+fn call_info_with_empty(node: Node, text: &str, allow_empty: bool) -> Result<CallInfo, SkipReason> {
     let Some(arguments_node) = find_arguments_node(node) else {
         return Err(SkipReason::NoSupportedCall);
     };
     let arguments = argument_infos(arguments_node, text);
 
-    if arguments.is_empty() {
+    if arguments.is_empty() && !allow_empty {
         return Err(SkipReason::NoEdits);
     }
 
@@ -7403,12 +7419,12 @@ fn active_parameter_for_call(
     byte_offset: usize,
     call: &CallInfo,
     signature: &Signature,
-) -> Result<u32, SkipReason> {
-    if signature.parameters.is_empty()
-        || byte_offset < call.arguments_start_byte
-        || byte_offset > call.arguments_end_byte
-    {
+) -> Result<Option<u32>, SkipReason> {
+    if byte_offset < call.arguments_start_byte || byte_offset > call.arguments_end_byte {
         return Err(SkipReason::NoSupportedCall);
+    }
+    if signature.parameters.is_empty() {
+        return Ok(None);
     }
 
     let Some(argument_index) = active_argument_index(byte_offset, call) else {
@@ -7424,6 +7440,7 @@ fn active_parameter_for_call(
             .iter()
             .position(|parameter| parameter.eq_ignore_ascii_case(name))
             .map(|index| index as u32)
+            .map(Some)
             .ok_or(SkipReason::UnsafeNamedArguments);
     }
 
@@ -7431,7 +7448,7 @@ fn active_parameter_for_call(
         return Err(SkipReason::UnsafeNamedArguments);
     }
 
-    Ok(argument_index as u32)
+    Ok(Some(argument_index as u32))
 }
 
 fn active_argument_index(byte_offset: usize, call: &CallInfo) -> Option<usize> {
@@ -7455,7 +7472,7 @@ fn active_argument_index(byte_offset: usize, call: &CallInfo) -> Option<usize> {
 fn signature_help_for_call(
     target: &CallTarget,
     signature: &Signature,
-    active_parameter: u32,
+    active_parameter: Option<u32>,
 ) -> SignatureHelp {
     SignatureHelp {
         signatures: vec![SignatureInformation {
@@ -7471,10 +7488,10 @@ fn signature_help_for_call(
                     })
                     .collect(),
             ),
-            active_parameter: Some(active_parameter),
+            active_parameter,
         }],
         active_signature: Some(0),
-        active_parameter: Some(active_parameter),
+        active_parameter,
     }
 }
 
@@ -10371,6 +10388,18 @@ mod tests {
         assert_eq!(help.signatures.len(), 1);
         assert_eq!(help.signatures[0].label, "send_invoice($invoice, $notify)");
         assert_eq!(help.active_parameter, Some(1));
+    }
+
+    #[test]
+    fn returns_signature_help_for_zero_argument_internal_function_call() {
+        let text = "<?php\ntime();\n";
+
+        let help = signature_help(text, 1, 5).expect("signature help");
+
+        assert_eq!(help.signatures.len(), 1);
+        assert_eq!(help.signatures[0].label, "time()");
+        assert_eq!(help.active_parameter, None);
+        assert_eq!(help.signatures[0].active_parameter, None);
     }
 
     #[test]
