@@ -862,7 +862,7 @@ pub fn formatting_edits_for_text(text: &str) -> Vec<TextEdit> {
         return Vec::new();
     }
 
-    let formatted = trim_trailing_whitespace(text, true);
+    let formatted = format_php_text(text, true, is_php_only_document(text));
     if formatted == text {
         return Vec::new();
     }
@@ -895,7 +895,7 @@ pub fn range_formatting_edits_for_text(text: &str, range: Range) -> Vec<TextEdit
         return Vec::new();
     };
 
-    let formatted = trim_trailing_whitespace(selected_text, false);
+    let formatted = format_php_text(selected_text, false, is_php_only_document(text));
     if formatted == selected_text {
         return Vec::new();
     }
@@ -9278,6 +9278,109 @@ fn trim_trailing_whitespace(text: &str, ensure_final_newline: bool) -> String {
     }
 
     formatted
+}
+
+fn format_php_text(text: &str, ensure_final_newline: bool, php_only: bool) -> String {
+    let formatted = trim_trailing_whitespace(text, ensure_final_newline);
+    if php_only {
+        normalize_php_declaration_blank_lines(&formatted, ensure_final_newline)
+    } else {
+        formatted
+    }
+}
+
+fn is_php_only_document(text: &str) -> bool {
+    text.trim_start().starts_with("<?php") && !text.contains("?>")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeclarationLineKind {
+    Namespace,
+    Use,
+    ClassLike,
+    Function,
+    Other,
+}
+
+fn normalize_php_declaration_blank_lines(text: &str, ensure_final_newline: bool) -> String {
+    let mut output = Vec::new();
+    let mut pending_blank_lines = 0usize;
+    let mut previous_kind: Option<DeclarationLineKind> = None;
+    let had_final_newline = text.ends_with('\n');
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            pending_blank_lines += 1;
+            continue;
+        }
+
+        let kind = declaration_line_kind(line);
+        let blank_lines = declaration_blank_lines_before(previous_kind, kind, pending_blank_lines);
+        for _ in 0..blank_lines {
+            output.push(String::new());
+        }
+        output.push(line.to_string());
+        pending_blank_lines = 0;
+        previous_kind = Some(kind);
+    }
+
+    let mut formatted = output.join("\n");
+    if ensure_final_newline || had_final_newline {
+        formatted.push('\n');
+    }
+    formatted
+}
+
+fn declaration_blank_lines_before(
+    previous: Option<DeclarationLineKind>,
+    current: DeclarationLineKind,
+    pending_blank_lines: usize,
+) -> usize {
+    let Some(previous) = previous else {
+        return 0;
+    };
+
+    match (previous, current) {
+        (DeclarationLineKind::Use, DeclarationLineKind::Use) => 0,
+        (DeclarationLineKind::Namespace, DeclarationLineKind::Use)
+        | (DeclarationLineKind::Namespace, DeclarationLineKind::ClassLike)
+        | (DeclarationLineKind::Namespace, DeclarationLineKind::Function)
+        | (DeclarationLineKind::Use, DeclarationLineKind::ClassLike)
+        | (DeclarationLineKind::Use, DeclarationLineKind::Function)
+        | (_, DeclarationLineKind::ClassLike)
+        | (_, DeclarationLineKind::Function) => 1,
+        _ => pending_blank_lines,
+    }
+}
+
+fn declaration_line_kind(line: &str) -> DeclarationLineKind {
+    if line.starts_with(char::is_whitespace) {
+        return DeclarationLineKind::Other;
+    }
+
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("namespace ") {
+        DeclarationLineKind::Namespace
+    } else if trimmed.starts_with("use ") {
+        DeclarationLineKind::Use
+    } else if trimmed.starts_with("function ") {
+        DeclarationLineKind::Function
+    } else if is_class_like_declaration_line(trimmed) {
+        DeclarationLineKind::ClassLike
+    } else {
+        DeclarationLineKind::Other
+    }
+}
+
+fn is_class_like_declaration_line(trimmed: &str) -> bool {
+    let trimmed = trimmed
+        .strip_prefix("abstract ")
+        .or_else(|| trimmed.strip_prefix("final "))
+        .unwrap_or(trimmed);
+    trimmed.starts_with("class ")
+        || trimmed.starts_with("interface ")
+        || trimmed.starts_with("trait ")
+        || trimmed.starts_with("enum ")
 }
 
 fn variable_types_at_byte(

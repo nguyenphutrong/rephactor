@@ -5861,11 +5861,51 @@ fn lsp_formats_trailing_whitespace_and_final_newline() {
     assert_eq!(edits.len(), 1);
     assert_eq!(
         edits[0]["newText"],
-        "<?php\nfunction run() {\n    return true;\n}\n"
+        "<?php\n\nfunction run() {\n    return true;\n}\n"
     );
     assert_eq!(
         edits[0]["range"]["start"],
         json!({ "line": 0, "character": 0 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_formats_php_declaration_blank_lines() {
+    let root = temp_project("formatting-declaration-blank-lines");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nuse App\\Support\\Mailer;\n\n\nuse App\\Support\\Logger;\nclass Sender {}\nfunction helper() {}\n",
+    );
+
+    let edits = server.formatting(&uri);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "<?php\nnamespace App;\n\nuse App\\Support\\Mailer;\nuse App\\Support\\Logger;\n\nclass Sender {}\n\nfunction helper() {}\n"
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_range_formats_php_declaration_blank_lines() {
+    let root = temp_project("range-formatting-declaration-blank-lines");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nuse App\\Support\\Mailer;\nclass Sender {}\n",
+    );
+
+    let edits = server.range_formatting(&uri, 1, 4);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "namespace App;\n\nuse App\\Support\\Mailer;\n\nclass Sender {}\n"
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

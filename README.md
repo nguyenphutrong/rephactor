@@ -294,8 +294,9 @@ literals, match expressions, imports, heredoc/nowdoc strings, comments, and
 custom `#region`/`#endregion` regions.
 
 Formatting V1 trims trailing spaces/tabs for whole-document and range
-formatting. Whole-document formatting also ensures a final newline. PSR-12
-structural formatting is still deferred.
+formatting. Whole-document formatting also ensures a final newline. For
+PHP-only documents, it conservatively normalizes blank lines around
+namespace/use/class/function declarations.
 
 Inlay Hint V1 shows parameter names for resolved positional call arguments. It
 also shows conservative return-type hints for function-like declarations,
@@ -457,7 +458,8 @@ files that are not open in the editor are picked up on the next request.
 - Folding ranges for PHP blocks, array literals, match expressions, imports,
   heredoc/nowdoc strings, comments, and custom `#region`/`#endregion` regions.
 - Whole-document and range whitespace formatting for trailing whitespace; whole
-  documents also get a final newline.
+  documents also get a final newline. PHP-only formatting also normalizes blank
+  lines around namespace/use/class/function declarations.
 - Parameter-name inlay hints for resolved positional call arguments.
 - Inferred return-type inlay hints for function-like declarations, anonymous
   functions, and arrow functions that return one obvious or resolved type.
@@ -554,7 +556,7 @@ Rephactor returns no action instead of guessing for:
 - unknown parameter names
 - PHP internal functions outside the seeded stub set
 - completion for dynamic receivers or unresolved classes
-- PSR-12 structural formatting beyond trailing-whitespace cleanup
+- PSR-12 structural formatting beyond declaration blank-line normalization
 - static-analysis diagnostics beyond parser, callable-resolution, and
   conservative return/argument/assignment type mismatch errors
 - Composer autoload modes other than `psr-4`, `classmap`, and `files` entries
