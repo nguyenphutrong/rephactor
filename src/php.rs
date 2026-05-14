@@ -9704,6 +9704,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "disk_free_space" => &["directory"],
         "disk_total_space" => &["directory"],
         "explode" => &["separator", "string", "limit"],
+        "extension_loaded" => &["extension"],
         "extract" => &["array", "flags", "prefix"],
         "file_exists" => &["filename"],
         "file_get_contents" => &[
@@ -9735,6 +9736,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "http_build_query" => &["data", "numeric_prefix", "arg_separator", "encoding_type"],
         "implode" => &["separator", "array"],
         "in_array" => &["needle", "haystack", "strict"],
+        "ini_get" => &["option"],
+        "ini_set" => &["option", "value"],
         "interface_exists" => &["interface", "autoload"],
         "intval" => &["value", "base"],
         "is_array" => &["value"],
@@ -9758,6 +9761,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "link" => &["target", "link"],
         "ltrim" => &["string", "characters"],
         "max" => &["value", "values"],
+        "memory_get_peak_usage" => &["real_usage"],
+        "memory_get_usage" => &["real_usage"],
         "mb_strlen" => &["string", "encoding"],
         "mb_strpos" => &["haystack", "needle", "offset", "encoding"],
         "mb_strtolower" => &["string", "encoding"],
@@ -9771,6 +9776,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "opendir" => &["directory", "context"],
         "parse_url" => &["url", "component"],
         "pathinfo" => &["path", "flags"],
+        "getenv" => &["name", "local_only"],
+        "phpversion" => &["extension"],
         "property_exists" => &["object_or_class", "property"],
         "preg_grep" => &["pattern", "array", "flags"],
         "preg_match_all" => &["pattern", "subject", "matches", "flags", "offset"],
@@ -9782,6 +9789,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "parse_str" => &["string", "result"],
         "pow" => &["num", "exponent"],
         "printf" => &["format", "values"],
+        "putenv" => &["assignment"],
         "random_bytes" => &["length"],
         "random_int" => &["min", "max"],
         "range" => &["start", "end", "step"],
@@ -9837,6 +9845,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "urlencode" => &["string"],
         "vprintf" => &["format", "values"],
         "vsprintf" => &["format", "values"],
+        "version_compare" => &["version1", "version2", "operator"],
         "wordwrap" => &["string", "width", "break", "cut"],
         _ => return None,
     };
@@ -9923,6 +9932,7 @@ fn internal_function_parameter_types(
         "disk_free_space" => &[Some("string")],
         "disk_total_space" => &[Some("string")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
+        "extension_loaded" => &[Some("string")],
         "extract" => &[Some("array"), Some("int"), Some("string")],
         "file_exists" => &[Some("string")],
         "file_get_contents" => &[Some("string"), Some("bool"), None, Some("int"), Some("int")],
@@ -9948,6 +9958,8 @@ fn internal_function_parameter_types(
         "http_build_query" => &[Some("array"), Some("string"), Some("string"), Some("int")],
         "implode" => &[Some("string"), Some("array")],
         "in_array" => &[None, Some("array"), Some("bool")],
+        "ini_get" => &[Some("string")],
+        "ini_set" => &[Some("string"), None],
         "interface_exists" => &[Some("string"), Some("bool")],
         "intval" => &[None, Some("int")],
         "is_array" => &[None],
@@ -9971,6 +9983,8 @@ fn internal_function_parameter_types(
         "link" => &[Some("string"), Some("string")],
         "ltrim" => &[Some("string"), Some("string")],
         "max" => &[None, None],
+        "memory_get_peak_usage" => &[Some("bool")],
+        "memory_get_usage" => &[Some("bool")],
         "mb_strlen" => &[Some("string"), Some("string")],
         "mb_strpos" => &[Some("string"), Some("string"), Some("int"), Some("string")],
         "mb_strtolower" => &[Some("string"), Some("string")],
@@ -9984,6 +9998,8 @@ fn internal_function_parameter_types(
         "opendir" => &[Some("string"), None],
         "parse_url" => &[Some("string"), Some("int")],
         "pathinfo" => &[Some("string"), Some("int")],
+        "getenv" => &[Some("string"), Some("bool")],
+        "phpversion" => &[Some("string")],
         "property_exists" => &[None, Some("string")],
         "preg_grep" => &[Some("string"), Some("array"), Some("int")],
         "preg_match_all" => &[
@@ -10007,6 +10023,7 @@ fn internal_function_parameter_types(
         "parse_str" => &[Some("string"), None],
         "pow" => &[Some("float"), Some("float")],
         "printf" => &[Some("string"), None],
+        "putenv" => &[Some("string")],
         "random_bytes" => &[Some("int")],
         "random_int" => &[Some("int"), Some("int")],
         "range" => &[None, None, None],
@@ -10065,6 +10082,7 @@ fn internal_function_parameter_types(
         "urldecode" => &[Some("string")],
         "urlencode" => &[Some("string")],
         "vprintf" => &[Some("string"), Some("array")],
+        "version_compare" => &[Some("string"), Some("string"), Some("string")],
         "vsprintf" => &[Some("string"), Some("array")],
         "wordwrap" => &[Some("string"), Some("int"), Some("string"), Some("bool")],
         _ => &[][..],
@@ -10120,6 +10138,7 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "feof"
         | "file_exists"
         | "filter_has_var"
+        | "extension_loaded"
         | "function_exists"
         | "in_array"
         | "interface_exists"
@@ -10139,6 +10158,7 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "method_exists"
         | "mkdir"
         | "property_exists"
+        | "putenv"
         | "rename"
         | "rmdir"
         | "shuffle"
@@ -10153,10 +10173,30 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "str_contains"
         | "str_ends_with"
         | "str_starts_with" => "bool",
-        "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
-        | "extract" | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match"
-        | "preg_match_all" | "printf" | "round" | "strlen" | "strpos" | "strrpos" | "strtotime"
-        | "time" | "random_int" | "vprintf" => "int",
+        "abs"
+        | "ceil"
+        | "count"
+        | "file_put_contents"
+        | "filesize"
+        | "floor"
+        | "intval"
+        | "extract"
+        | "json_last_error"
+        | "mb_strlen"
+        | "mb_strpos"
+        | "preg_match"
+        | "preg_match_all"
+        | "printf"
+        | "round"
+        | "strlen"
+        | "strpos"
+        | "strrpos"
+        | "strtotime"
+        | "time"
+        | "memory_get_peak_usage"
+        | "memory_get_usage"
+        | "random_int"
+        | "vprintf" => "int",
         "array_product" | "array_sum" | "disk_free_space" | "disk_total_space" => "float",
         "base64_decode"
         | "base64_encode"
@@ -10178,11 +10218,13 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "html_entity_decode"
         | "htmlspecialchars"
         | "http_build_query"
+        | "ini_get"
         | "json_last_error_msg"
         | "mb_strtolower"
         | "mb_strtoupper"
         | "mb_substr"
         | "md5"
+        | "phpversion"
         | "serialize"
         | "sha1"
         | "sprintf"
@@ -10265,6 +10307,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "disk_free_space",
         "disk_total_space",
         "explode",
+        "extension_loaded",
         "extract",
         "file_exists",
         "file_get_contents",
@@ -10290,6 +10333,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "http_build_query",
         "implode",
         "in_array",
+        "ini_get",
+        "ini_set",
         "interface_exists",
         "intval",
         "is_array",
@@ -10313,6 +10358,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "link",
         "ltrim",
         "max",
+        "memory_get_peak_usage",
+        "memory_get_usage",
         "mb_strlen",
         "mb_strpos",
         "mb_strtolower",
@@ -10324,9 +10371,11 @@ fn internal_function_names() -> Vec<&'static str> {
         "mkdir",
         "nl2br",
         "opendir",
+        "getenv",
         "parse_str",
         "parse_url",
         "pathinfo",
+        "phpversion",
         "property_exists",
         "preg_grep",
         "preg_match_all",
@@ -10337,6 +10386,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "preg_split",
         "pow",
         "printf",
+        "putenv",
         "random_bytes",
         "random_int",
         "range",
@@ -10391,6 +10441,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "urldecode",
         "urlencode",
         "vprintf",
+        "version_compare",
         "vsprintf",
         "wordwrap",
     ]

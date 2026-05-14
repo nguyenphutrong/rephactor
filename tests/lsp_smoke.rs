@@ -2409,17 +2409,28 @@ fn lsp_returns_runtime_internal_function_metadata() {
     let root = temp_project("runtime-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nrandom_i;\nser;\n");
+    let completion_uri = server.open_php(
+        &completion_file,
+        "<?php\nrandom_i;\nser;\nini_;\nmemory_get_u;\n",
+    );
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 8);
 
     assert!(items.iter().any(|item| item["label"] == "random_int"));
+    let ini_items = server.completion(&completion_uri, 3, 4);
+    assert!(ini_items.iter().any(|item| item["label"] == "ini_get"));
+    let memory_items = server.completion(&completion_uri, 4, 12);
+    assert!(
+        memory_items
+            .iter()
+            .any(|item| item["label"] == "memory_get_usage")
+    );
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nhash([], [], false, 'bad');\nmd5([], 'bad');\nrandom_int('min', 'max');\nfunction takes_int(int $value) {}\ntakes_int(strval(10));\n",
+        "<?php\nhash([], [], false, 'bad');\nmd5([], 'bad');\nrandom_int('min', 'max');\nextension_loaded([]);\nini_get([]);\nini_set([], '1');\ngetenv([], 'bad');\nputenv([]);\nmemory_get_usage('bad');\nmemory_get_peak_usage('bad');\nphpversion([]);\nversion_compare([], '8.0', []);\nfunction takes_int(int $value) {}\ntakes_int(strval(10));\nfunction takes_bool(bool $value) {}\ntakes_bool(memory_get_usage());\nfunction takes_string(string $value) {}\ntakes_string(extension_loaded('x'));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -2453,7 +2464,47 @@ fn lsp_returns_runtime_internal_function_metadata() {
             && diagnostic["severity"] == 1
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for extension: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for option: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for name: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for local_only: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for assignment: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for real_usage: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for version1: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for operator: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for value: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected bool, got int"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got bool"
             && diagnostic["severity"] == 1
     }));
 
@@ -2470,6 +2521,22 @@ fn lsp_returns_runtime_internal_function_metadata() {
 
     assert!(random_markdown.contains("random_int($min, $max)"));
     assert!(random_markdown.contains("[PHP manual](https://www.php.net/random_int)"));
+
+    let memory_hover = server.hover(&diagnostics_uri, 9, 5).expect("hover result");
+    let memory_markdown = memory_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(memory_markdown.contains("memory_get_usage($real_usage)"));
+    assert!(memory_markdown.contains("[PHP manual](https://www.php.net/memory_get_usage)"));
+
+    let version_hover = server.hover(&diagnostics_uri, 12, 5).expect("hover result");
+    let version_markdown = version_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(version_markdown.contains("version_compare($version1, $version2, $operator)"));
+    assert!(version_markdown.contains("[PHP manual](https://www.php.net/version_compare)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
