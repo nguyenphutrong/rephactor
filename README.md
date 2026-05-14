@@ -296,9 +296,9 @@ Inlay Hint V1 shows parameter names for resolved positional call arguments. It
 also shows conservative return-type hints for function-like declarations,
 anonymous functions, and arrow functions without a declared return type when
 returned expressions infer to one type, including object creation expressions,
-local variables, and resolved calls. Untyped function-like parameters with
-PHPDoc `@param` annotations also receive conservative type hints, including
-anonymous functions.
+local variables, resolved calls, and seeded PHP internal method calls. Untyped
+function-like parameters with PHPDoc `@param` annotations also receive
+conservative type hints, including anonymous functions.
 
 Inline Value V1 returns PHP variable lookup ranges for debugger inline values.
 

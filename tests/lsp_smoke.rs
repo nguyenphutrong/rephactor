@@ -4400,6 +4400,26 @@ fn lsp_returns_inferred_return_type_inlay_hints() {
 }
 
 #[test]
+fn lsp_returns_inferred_return_type_inlay_hints_for_internal_methods() {
+    let root = temp_project("internal-method-return-type-inlay-hints");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction formatted_date() {\n    $date = new DateTimeImmutable('now');\n    return $date->format('Y-m-d');\n}\n",
+    );
+
+    let hints = server.inlay_hints(&uri, 0, 0, 5, 0);
+
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint["label"] == ": string" && hint["kind"] == 1)
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_inferred_return_type_inlay_hints_for_anonymous_functions() {
     let root = temp_project("anonymous-return-type-inlay-hints");
     let mut server = LspProcess::start(&root);
