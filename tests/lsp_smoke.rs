@@ -704,6 +704,24 @@ fn lsp_returns_definition_for_same_file_function_call() {
 }
 
 #[test]
+fn lsp_returns_definition_for_zero_argument_function_call() {
+    let root = temp_project("definition-zero-argument-function");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nfunction build() {}\nbuild();\n";
+    let uri = server.open_php(&file, text);
+
+    let definition = server.definition(&uri, 2, 2).expect("definition result");
+
+    assert_eq!(definition["uri"], uri);
+    assert_eq!(
+        definition["range"]["start"],
+        json!({ "line": 1, "character": 9 })
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_definition_for_classmap_static_method() {
     let root = temp_project("definition-classmap");
     let legacy_dir = root.join("legacy");

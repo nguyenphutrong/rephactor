@@ -1169,9 +1169,12 @@ fn definition_for_position_with_cache(
     let index = cache.index_for_document(uri, text, open_documents);
     let open_paths = open_project_documents(open_documents);
 
-    if let Ok(call) = find_call_at_byte(root, text, byte_offset) {
+    if let Ok(target) = find_call_at_byte(root, text, byte_offset)
+        .map(|call| call.target)
+        .or_else(|_| find_call_target_at_byte(root, text, byte_offset))
+    {
         let signature = index.resolve(
-            &call.target,
+            &target,
             root,
             text,
             byte_offset,
