@@ -1526,7 +1526,8 @@ fn lsp_returns_filesystem_internal_function_metadata() {
     let root = temp_project("filesystem-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nfile_ex;\nscan;\nmkd;\n");
+    let completion_uri =
+        server.open_php(&completion_file, "<?php\nfile_ex;\nscan;\nmkd;\nchmod;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 7);
@@ -1540,11 +1541,13 @@ fn lsp_returns_filesystem_internal_function_metadata() {
     );
     let mutation_items = server.completion(&completion_uri, 3, 3);
     assert!(mutation_items.iter().any(|item| item["label"] == "mkdir"));
+    let permission_items = server.completion(&completion_uri, 4, 5);
+    assert!(permission_items.iter().any(|item| item["label"] == "chmod"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nfile_exists([]);\ndirname('/tmp', 'bad');\nglob([], 'bad');\nscandir([], 'bad');\nopendir([]);\ncopy([], []);\nmkdir([], 'bad', 'bad');\nunlink([]);\nfunction takes_string(string $value) {}\ntakes_string(rename('/tmp/a', '/tmp/b'));\n",
+        "<?php\nfile_exists([]);\ndirname('/tmp', 'bad');\nglob([], 'bad');\nscandir([], 'bad');\nopendir([]);\ncopy([], []);\nmkdir([], 'bad', 'bad');\nunlink([]);\nchmod([], 'bad');\ntouch([], 'bad');\ndisk_free_space([]);\nlink([], []);\nfunction takes_string(string $value) {}\ntakes_string(rename('/tmp/a', '/tmp/b'));\ntakes_string(disk_total_space('/tmp'));\nfunction takes_int(int $value) {}\ntakes_int(sys_get_temp_dir());\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1598,6 +1601,22 @@ fn lsp_returns_filesystem_internal_function_metadata() {
         diagnostic["message"] == "argument type mismatch for value: expected string, got bool"
             && diagnostic["severity"] == 1
     }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for permissions: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for mtime: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got float"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
 
     let hover = server.hover(&diagnostics_uri, 2, 2).expect("hover result");
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
@@ -1636,6 +1655,24 @@ fn lsp_returns_filesystem_internal_function_metadata() {
 
     assert!(mkdir_markdown.contains("mkdir($directory, $permissions, $recursive, $context)"));
     assert!(mkdir_markdown.contains("[PHP manual](https://www.php.net/mkdir)"));
+
+    let chmod_hover = server.hover(&diagnostics_uri, 9, 2).expect("hover result");
+    let chmod_markdown = chmod_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(chmod_markdown.contains("chmod($filename, $permissions)"));
+    assert!(chmod_markdown.contains("[PHP manual](https://www.php.net/chmod)"));
+
+    let temp_dir_hover = server
+        .hover(&diagnostics_uri, 17, 12)
+        .expect("hover result");
+    let temp_dir_markdown = temp_dir_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(temp_dir_markdown.contains("sys_get_temp_dir()"));
+    assert!(temp_dir_markdown.contains("[PHP manual](https://www.php.net/sys_get_temp_dir)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

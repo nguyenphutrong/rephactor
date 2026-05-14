@@ -9683,12 +9683,17 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "basename" => &["path", "suffix"],
         "boolval" => &["value"],
         "ceil" => &["num"],
+        "chgrp" => &["filename", "group"],
+        "chmod" => &["filename", "permissions"],
+        "chown" => &["filename", "user"],
         "class_exists" => &["class", "autoload"],
         "closedir" => &["dir_handle"],
         "count" => &["value", "mode"],
         "copy" => &["from", "to", "context"],
         "date" => &["format", "timestamp"],
         "dirname" => &["path", "levels"],
+        "disk_free_space" => &["directory"],
+        "disk_total_space" => &["directory"],
         "explode" => &["separator", "string", "limit"],
         "file_exists" => &["filename"],
         "file_get_contents" => &[
@@ -9727,6 +9732,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "is_dir" => &["filename"],
         "is_file" => &["filename"],
         "is_int" => &["value"],
+        "is_link" => &["filename"],
         "is_null" => &["value"],
         "is_numeric" => &["value"],
         "is_object" => &["value"],
@@ -9739,6 +9745,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "json_last_error_msg" => &[][..],
         "ksort" => &["array", "flags"],
         "lcfirst" => &["string"],
+        "link" => &["target", "link"],
         "ltrim" => &["string", "characters"],
         "max" => &["value", "values"],
         "mb_strlen" => &["string", "encoding"],
@@ -9766,6 +9773,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "random_int" => &["min", "max"],
         "rawurldecode" => &["string"],
         "rawurlencode" => &["string"],
+        "readlink" => &["path"],
         "readdir" => &["dir_handle"],
         "realpath" => &["path"],
         "rename" => &["from", "to", "context"],
@@ -9796,7 +9804,11 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "sprintf" => &["format", "values"],
         "sqrt" => &["num"],
         "strtotime" => &["datetime", "base_timestamp"],
+        "symlink" => &["target", "link"],
+        "sys_get_temp_dir" => &[][..],
+        "tempnam" => &["directory", "prefix"],
         "time" => &[][..],
+        "touch" => &["filename", "mtime", "atime"],
         "trait_exists" => &["trait", "autoload"],
         "trim" => &["string", "characters"],
         "ucfirst" => &["string"],
@@ -9862,11 +9874,16 @@ fn internal_function_parameter_types(
         "basename" => &[Some("string"), Some("string")],
         "boolval" => &[None],
         "ceil" => &[Some("int")],
+        "chgrp" => &[Some("string"), None],
+        "chmod" => &[Some("string"), Some("int")],
+        "chown" => &[Some("string"), None],
         "class_exists" => &[Some("string"), Some("bool")],
         "closedir" => &[None],
         "copy" => &[Some("string"), Some("string"), None],
         "date" => &[Some("string"), Some("int")],
         "dirname" => &[Some("string"), Some("int")],
+        "disk_free_space" => &[Some("string")],
+        "disk_total_space" => &[Some("string")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
         "file_exists" => &[Some("string")],
         "file_get_contents" => &[Some("string"), Some("bool"), None, Some("int"), Some("int")],
@@ -9899,6 +9916,7 @@ fn internal_function_parameter_types(
         "is_dir" => &[Some("string")],
         "is_file" => &[Some("string")],
         "is_int" => &[None],
+        "is_link" => &[Some("string")],
         "is_null" => &[None],
         "is_numeric" => &[None],
         "is_object" => &[None],
@@ -9911,6 +9929,7 @@ fn internal_function_parameter_types(
         "json_last_error_msg" => &[],
         "ksort" => &[Some("array"), Some("int")],
         "lcfirst" => &[Some("string")],
+        "link" => &[Some("string"), Some("string")],
         "ltrim" => &[Some("string"), Some("string")],
         "max" => &[None, None],
         "mb_strlen" => &[Some("string"), Some("string")],
@@ -9950,6 +9969,7 @@ fn internal_function_parameter_types(
         "random_int" => &[Some("int"), Some("int")],
         "rawurldecode" => &[Some("string")],
         "rawurlencode" => &[Some("string")],
+        "readlink" => &[Some("string")],
         "readdir" => &[None],
         "realpath" => &[Some("string")],
         "rename" => &[Some("string"), Some("string"), None],
@@ -9979,7 +9999,11 @@ fn internal_function_parameter_types(
         "sprintf" => &[Some("string"), None],
         "sqrt" => &[Some("float")],
         "strtotime" => &[Some("string"), Some("int")],
+        "symlink" => &[Some("string"), Some("string")],
+        "sys_get_temp_dir" => &[],
+        "tempnam" => &[Some("string"), Some("string")],
         "time" => &[],
+        "touch" => &[Some("string"), Some("int"), Some("int")],
         "trait_exists" => &[Some("string"), Some("bool")],
         "trim" => &[Some("string"), Some("string")],
         "ucfirst" => &[Some("string")],
@@ -10009,17 +10033,17 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "array_filter" | "array_intersect" | "array_keys" | "array_map" | "array_merge"
         | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
         | "preg_grep" | "preg_split" => "array",
-        "array_key_exists" | "class_exists" | "copy" | "fclose" | "feof" | "file_exists"
-        | "filter_has_var" | "function_exists" | "in_array" | "interface_exists" | "is_array"
-        | "is_bool" | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
-        | "is_readable" | "is_string" | "is_writable" | "method_exists" | "mkdir"
-        | "property_exists" | "rename" | "rmdir" | "trait_exists" | "unlink" | "asort"
-        | "ksort" | "rsort" | "sort" | "str_contains" | "str_ends_with" | "str_starts_with" => {
-            "bool"
-        }
+        "array_key_exists" | "chgrp" | "chmod" | "chown" | "class_exists" | "copy" | "fclose"
+        | "feof" | "file_exists" | "filter_has_var" | "function_exists" | "in_array"
+        | "interface_exists" | "is_array" | "is_bool" | "is_dir" | "is_file" | "is_int"
+        | "is_link" | "is_null" | "is_numeric" | "is_object" | "is_readable" | "is_string"
+        | "is_writable" | "link" | "method_exists" | "mkdir" | "property_exists" | "rename"
+        | "rmdir" | "symlink" | "touch" | "trait_exists" | "unlink" | "asort" | "ksort"
+        | "rsort" | "sort" | "str_contains" | "str_ends_with" | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
         | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all"
         | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
+        "disk_free_space" | "disk_total_space" => "float",
         "base64_decode"
         | "base64_encode"
         | "basename"
@@ -10030,6 +10054,7 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "random_bytes"
         | "rawurldecode"
         | "rawurlencode"
+        | "readlink"
         | "realpath"
         | "rtrim"
         | "date"
@@ -10057,6 +10082,8 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "strtr"
         | "substr"
         | "substr_replace"
+        | "sys_get_temp_dir"
+        | "tempnam"
         | "trim"
         | "ucfirst"
         | "ucwords"
@@ -10099,12 +10126,17 @@ fn internal_function_names() -> Vec<&'static str> {
         "basename",
         "boolval",
         "ceil",
+        "chgrp",
+        "chmod",
+        "chown",
         "class_exists",
         "closedir",
         "count",
         "copy",
         "date",
         "dirname",
+        "disk_free_space",
+        "disk_total_space",
         "explode",
         "file_exists",
         "file_get_contents",
@@ -10137,6 +10169,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "is_dir",
         "is_file",
         "is_int",
+        "is_link",
         "is_null",
         "is_numeric",
         "is_object",
@@ -10149,6 +10182,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "json_last_error_msg",
         "ksort",
         "lcfirst",
+        "link",
         "ltrim",
         "max",
         "mb_strlen",
@@ -10176,6 +10210,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "random_int",
         "rawurldecode",
         "rawurlencode",
+        "readlink",
         "readdir",
         "realpath",
         "rename",
@@ -10206,7 +10241,11 @@ fn internal_function_names() -> Vec<&'static str> {
         "sprintf",
         "sqrt",
         "strtotime",
+        "symlink",
+        "sys_get_temp_dir",
+        "tempnam",
         "time",
+        "touch",
         "trait_exists",
         "trim",
         "ucfirst",
