@@ -505,7 +505,7 @@ files that are not open in the editor are picked up on the next request.
   `classmap`, and `files` entries.
 - A seed set of PHP internal functions, such as `str_replace`, `json_encode`,
   `preg_match`, `in_array`, `str_starts_with`, `array_values`, `file_exists`,
-  `dirname`, `basename`, `realpath`, `str_repeat`, `strpos`, `ltrim`,
+  `dirname`, `basename`, `realpath`, `str_pad`, `str_repeat`, `strpos`, `ltrim`,
   `is_string`, `array_combine`, `array_diff`, `array_intersect`,
   `array_reduce`, `array_reverse`, `array_unique`, `date`, `strtotime`,
   `round`, `abs`, `hash`, `md5`, `serialize`, `gettype`, `intval`, `strval`,

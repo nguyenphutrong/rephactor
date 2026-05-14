@@ -9693,6 +9693,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "sha1" => &["string", "binary"],
         "str_contains" => &["haystack", "needle"],
         "str_ends_with" => &["haystack", "needle"],
+        "str_pad" => &["string", "length", "pad_string", "pad_type"],
         "str_repeat" => &["string", "times"],
         "str_starts_with" => &["haystack", "needle"],
         "strval" => &["value"],
@@ -9821,6 +9822,7 @@ fn internal_function_parameter_types(
         "sha1" => &[Some("string"), Some("bool")],
         "str_contains" => &[Some("string"), Some("string")],
         "str_ends_with" => &[Some("string"), Some("string")],
+        "str_pad" => &[Some("string"), Some("int"), Some("string"), Some("int")],
         "str_repeat" => &[Some("string"), Some("int")],
         "str_starts_with" => &[Some("string"), Some("string")],
         "strval" => &[None],
@@ -9865,8 +9867,8 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "realpath" | "rtrim"
         | "date" | "file_get_contents" | "gettype" | "hash" | "html_entity_decode"
         | "htmlspecialchars" | "mb_strtolower" | "mb_strtoupper" | "mb_substr" | "md5"
-        | "serialize" | "sha1" | "sprintf" | "str_repeat" | "strtolower" | "strtoupper"
-        | "strval" | "substr" | "trim" => "string",
+        | "serialize" | "sha1" | "sprintf" | "str_pad" | "str_repeat" | "strtolower"
+        | "strtoupper" | "strval" | "substr" | "trim" => "string",
         "boolval" => "bool",
         "floatval" => "float",
         _ => return None,
@@ -9948,6 +9950,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "sha1",
         "str_contains",
         "str_ends_with",
+        "str_pad",
         "str_repeat",
         "str_starts_with",
         "strval",

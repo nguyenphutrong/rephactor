@@ -1521,17 +1521,17 @@ fn lsp_returns_string_internal_function_metadata() {
     let root = temp_project("string-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nstr_rep;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nstr_pa;\nstr_rep;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
-    let items = server.completion(&completion_uri, 1, 7);
+    let items = server.completion(&completion_uri, 1, 6);
 
-    assert!(items.iter().any(|item| item["label"] == "str_repeat"));
+    assert!(items.iter().any(|item| item["label"] == "str_pad"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\n",
+        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1548,12 +1548,24 @@ fn lsp_returns_string_internal_function_metadata() {
         diagnostic["message"] == "argument type mismatch for haystack: expected string, got array"
             && diagnostic["severity"] == 1
     }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for length: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
 
     let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
 
     assert!(markdown.contains("str_repeat($string, $times)"));
     assert!(markdown.contains("[PHP manual](https://www.php.net/str_repeat)"));
+
+    let pad_hover = server.hover(&diagnostics_uri, 3, 5).expect("hover result");
+    let pad_markdown = pad_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(pad_markdown.contains("str_pad($string, $length, $pad_string, $pad_type)"));
+    assert!(pad_markdown.contains("[PHP manual](https://www.php.net/str_pad)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
