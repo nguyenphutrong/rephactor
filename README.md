@@ -208,7 +208,9 @@ perform full type-aware disambiguation.
 Rename V1 returns a workspace edit for exact AST symbol references, including
 constants. When a class-like declaration is renamed from a matching
 `ClassName.php` file, it also adds a file rename operation for the PHP file.
-Folder renames are still skipped.
+When renaming a namespace segment, it adds a matching PSR-4 directory rename
+operation only when the Composer mapping is unambiguous and the current file
+path matches that namespace directory.
 
 Code Lens V1 shows exact-reference counts for function, constant, class,
 interface, trait, method, and property declarations. Class-like and method
@@ -360,6 +362,8 @@ files that are not open in the editor are picked up on the next request.
 - Exact AST symbol rename edits across Composer-indexed PHP files.
 - Matching class-like PHP file rename operations for class/interface/trait
   declaration renames.
+- Matching PSR-4 namespace directory rename operations when the mapping is
+  unambiguous.
 - Class constant hover and definition lookup for direct, inherited, `self::`,
   `static::`, and direct `parent::` constant references.
 - Instance method hover and definition lookup for `$this` receivers.

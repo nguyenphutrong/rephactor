@@ -2959,6 +2959,85 @@ fn lsp_renames_matching_class_file_for_class_rename() {
 }
 
 #[test]
+fn lsp_renames_matching_psr4_namespace_directory() {
+    let root = temp_project("rename-namespace-directory");
+    let domain_dir = root.join("src").join("Domain");
+    std::fs::create_dir_all(&domain_dir).expect("create domain dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let file = domain_dir.join("Customer.php");
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(&file, "<?php\nnamespace App\\Domain;\nclass Customer {}\n");
+
+    let edit = server.rename(&uri, 1, 16, "Sales");
+    let edits = edit["changes"]
+        .get(&uri)
+        .expect("rename edits for uri")
+        .as_array()
+        .expect("rename edits for uri");
+    let operations = edit["documentChanges"]
+        .as_array()
+        .expect("document change operations");
+
+    assert!(edits.iter().any(|edit| edit["newText"] == "Sales"));
+    assert!(operations.iter().any(|operation| {
+        operation["kind"] == "rename"
+            && operation["oldUri"]
+                .as_str()
+                .expect("old uri")
+                .ends_with("/src/Domain")
+            && operation["newUri"]
+                .as_str()
+                .expect("new uri")
+                .ends_with("/src/Sales")
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_skips_namespace_directory_rename_for_ambiguous_psr4_roots() {
+    let root = temp_project("rename-namespace-ambiguous");
+    let domain_dir = root.join("src").join("Domain");
+    std::fs::create_dir_all(&domain_dir).expect("create domain dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}},"autoload-dev":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let file = domain_dir.join("Customer.php");
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(&file, "<?php\nnamespace App\\Domain;\nclass Customer {}\n");
+
+    let edit = server.rename(&uri, 1, 16, "Sales");
+
+    assert!(edit.get("documentChanges").is_none_or(Value::is_null));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_skips_namespace_directory_rename_for_non_matching_file() {
+    let root = temp_project("rename-namespace-non-matching");
+    let legacy_dir = root.join("legacy").join("Domain");
+    std::fs::create_dir_all(&legacy_dir).expect("create legacy dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let file = legacy_dir.join("Customer.php");
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(&file, "<?php\nnamespace App\\Domain;\nclass Customer {}\n");
+
+    let edit = server.rename(&uri, 1, 16, "Sales");
+
+    assert!(edit.get("documentChanges").is_none_or(Value::is_null));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_null_hover_for_dynamic_call() {
     let root = temp_project("hover-unsupported");
     let mut server = LspProcess::start(&root);

@@ -4772,8 +4772,15 @@ fn rename_for_position(
     for edits in changes.values_mut() {
         edits.sort_by_key(|edit| (edit.range.start.line, edit.range.start.character));
     }
-    let document_changes = class_like_file_rename_operation(uri, text, position, new_name)
-        .map(|operation| DocumentChanges::Operations(vec![operation]));
+    let mut operations = Vec::new();
+    if let Some(operation) = class_like_file_rename_operation(uri, text, position, new_name) {
+        operations.push(operation);
+    }
+    if let Some(operation) = namespace_directory_rename_operation(uri, text, position, new_name) {
+        operations.push(operation);
+    }
+    let document_changes =
+        (!operations.is_empty()).then_some(DocumentChanges::Operations(operations));
 
     Ok(WorkspaceEdit {
         changes: Some(changes),
@@ -4816,6 +4823,115 @@ fn class_like_file_rename_operation(
         RenameFile {
             old_uri: uri.clone(),
             new_uri,
+            options: None,
+            annotation_id: None,
+        },
+    )))
+}
+
+fn namespace_segment_index_at_byte(namespace_name: Node, byte_offset: usize) -> Option<usize> {
+    if namespace_name.kind() == "name" {
+        return (namespace_name.start_byte() <= byte_offset
+            && byte_offset <= namespace_name.end_byte())
+        .then_some(0);
+    }
+
+    let mut cursor = namespace_name.walk();
+    namespace_name
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "name")
+        .enumerate()
+        .find_map(|(index, child)| {
+            (child.start_byte() <= byte_offset && byte_offset <= child.end_byte()).then_some(index)
+        })
+}
+
+fn psr4_namespace_directory_rename_candidates(
+    project_root: &Path,
+    document_path: &Path,
+    namespace: &str,
+    segment_index: usize,
+    new_name: &str,
+) -> Vec<(PathBuf, PathBuf)> {
+    let namespace_segments = namespace
+        .split('\\')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let Some(document_dir) = document_path.parent() else {
+        return Vec::new();
+    };
+
+    composer_psr4_mappings(project_root)
+        .into_iter()
+        .filter_map(|(prefix, root)| {
+            let prefix_segments = prefix
+                .split('\\')
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>();
+            if segment_index < prefix_segments.len()
+                || !namespace_segments.starts_with(&prefix_segments)
+            {
+                return None;
+            }
+
+            let relative_segments = &namespace_segments[prefix_segments.len()..];
+            let namespace_dir = relative_segments
+                .iter()
+                .fold(root.clone(), |path, segment| path.join(segment));
+            if namespace_dir != document_dir {
+                return None;
+            }
+
+            let relative_index = segment_index.checked_sub(prefix_segments.len())?;
+            let old_path = relative_segments
+                .iter()
+                .take(relative_index + 1)
+                .fold(root.clone(), |path, segment| path.join(segment));
+            if !old_path.is_dir() {
+                return None;
+            }
+            let new_path = old_path.parent()?.join(new_name);
+            Some((old_path, new_path))
+        })
+        .collect()
+}
+
+fn namespace_directory_rename_operation(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    new_name: &str,
+) -> Option<DocumentChangeOperation> {
+    let byte_offset = byte_offset_for_lsp_position(text, position)?;
+    let tree = parse_php(text)?;
+    let root = tree.root_node();
+    let name_node = find_reference_name_at_byte(root, text, byte_offset)?;
+    let namespace_node = containing_namespace_definition(name_node)?;
+    let namespace_name = namespace_node.child_by_field_name("name")?;
+    if namespace_name.start_byte() > byte_offset || byte_offset > namespace_name.end_byte() {
+        return None;
+    }
+
+    let path = uri.to_file_path().ok()?;
+    let namespace = clean_name_text(node_text(namespace_name, text));
+    let segment_index = namespace_segment_index_at_byte(namespace_name, byte_offset)?;
+    let project_root = project_root_for_uri(uri)?;
+    let candidates = psr4_namespace_directory_rename_candidates(
+        &project_root,
+        &path,
+        &namespace,
+        segment_index,
+        new_name,
+    );
+    if candidates.len() != 1 {
+        return None;
+    }
+
+    let (old_path, new_path) = candidates.into_iter().next()?;
+    Some(DocumentChangeOperation::Op(ResourceOp::Rename(
+        RenameFile {
+            old_uri: Url::from_file_path(old_path).ok()?,
+            new_uri: Url::from_file_path(new_path).ok()?,
             options: None,
             annotation_id: None,
         },
@@ -6984,6 +7100,18 @@ fn containing_class_like_declaration<'tree>(node: Node<'tree>) -> Option<Node<'t
             parent.kind(),
             "class_declaration" | "interface_declaration" | "trait_declaration"
         ) {
+            return Some(parent);
+        }
+        current = parent;
+    }
+
+    None
+}
+
+fn containing_namespace_definition<'tree>(node: Node<'tree>) -> Option<Node<'tree>> {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == "namespace_definition" {
             return Some(parent);
         }
         current = parent;
@@ -9712,6 +9840,49 @@ fn composer_autoload_paths(project_root: &Path) -> Option<Vec<PathBuf>> {
     }
 
     (!roots.is_empty()).then_some(roots)
+}
+
+fn composer_psr4_mappings(project_root: &Path) -> Vec<(String, PathBuf)> {
+    let Some(composer_json) = fs::read_to_string(project_root.join("composer.json"))
+        .ok()
+        .and_then(|composer_text| serde_json::from_str::<serde_json::Value>(&composer_text).ok())
+    else {
+        return Vec::new();
+    };
+
+    let mut mappings = Vec::new();
+    for section in ["autoload", "autoload-dev"] {
+        let Some(psr4) = composer_json
+            .get(section)
+            .and_then(|autoload| autoload.get("psr-4"))
+            .and_then(|psr4| psr4.as_object())
+        else {
+            continue;
+        };
+        for (prefix, value) in psr4 {
+            collect_composer_psr4_mapping(project_root, prefix, value, &mut mappings);
+        }
+    }
+
+    mappings
+}
+
+fn collect_composer_psr4_mapping(
+    project_root: &Path,
+    prefix: &str,
+    value: &serde_json::Value,
+    mappings: &mut Vec<(String, PathBuf)>,
+) {
+    if let Some(path) = value.as_str() {
+        mappings.push((
+            prefix.trim_end_matches('\\').to_string(),
+            project_root.join(path),
+        ));
+    } else if let Some(values) = value.as_array() {
+        for value in values {
+            collect_composer_psr4_mapping(project_root, prefix, value, mappings);
+        }
+    }
 }
 
 fn collect_composer_autoload_section(
