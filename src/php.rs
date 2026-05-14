@@ -20,7 +20,8 @@ use tree_sitter::{Node, Parser};
 use crate::document::{byte_offset_for_lsp_position, lsp_position_for_byte_offset};
 
 const ACTION_TITLE: &str = "[Rephactor] Add names to arguments";
-const MAX_TREE_SITTER_PARSE_BYTES: usize = 192 * 1024;
+const MAX_FULL_TREE_SITTER_PARSE_BYTES: usize = 192 * 1024;
+const MAX_ANALYZED_PHP_FILE_BYTES: usize = 1_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Signature {
@@ -5456,7 +5457,7 @@ fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
 }
 
 fn parse_php_allowing_errors(text: &str) -> Option<tree_sitter::Tree> {
-    if php_document_too_large_for_tree_sitter(text) {
+    if !php_document_supports_full_parse(text) {
         return None;
     }
 
@@ -5469,7 +5470,19 @@ fn parse_php_allowing_errors(text: &str) -> Option<tree_sitter::Tree> {
 }
 
 fn php_document_too_large_for_tree_sitter(text: &str) -> bool {
-    text.len() > MAX_TREE_SITTER_PARSE_BYTES
+    !php_document_supports_full_parse(text)
+}
+
+fn php_document_supports_full_parse(text: &str) -> bool {
+    text.len() <= MAX_FULL_TREE_SITTER_PARSE_BYTES
+}
+
+fn php_document_supports_large_analysis(text: &str) -> bool {
+    text.len() <= MAX_ANALYZED_PHP_FILE_BYTES
+}
+
+fn php_document_uses_large_analysis(text: &str) -> bool {
+    !php_document_supports_full_parse(text) && php_document_supports_large_analysis(text)
 }
 
 #[derive(Debug, Clone, Copy)]
