@@ -1215,6 +1215,10 @@ fn signature_help_for_position_with_cache(
         return Err(SkipReason::InvalidCursorPosition);
     };
 
+    if php_document_uses_large_analysis(text) {
+        return large_signature_help_for_position(uri, text, byte_offset, open_documents, cache);
+    }
+
     let Some(tree) = parse_php(text) else {
         return Err(SkipReason::ParseError);
     };
@@ -1243,6 +1247,153 @@ fn signature_help_for_position_with_cache(
         &signature,
         active_parameter,
     ))
+}
+
+fn large_signature_help_for_position(
+    uri: &Url,
+    text: &str,
+    byte_offset: usize,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<SignatureHelp, SkipReason> {
+    let call = large_function_call_at_byte(text, byte_offset)?;
+    if call.arguments.iter().any(|argument| argument.is_unpacking) {
+        return Err(SkipReason::UnpackingArgument);
+    }
+
+    let namespace = large_namespace_at_byte(text, byte_offset);
+    let imports = ImportMap::default();
+    let index = cache.index_for_document(uri, text, open_documents);
+    let CallTarget::Function(name) = &call.target else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    let signature = index.resolve_function(name, namespace.as_deref(), &imports)?;
+    let active_parameter = active_parameter_for_call(byte_offset, &call, &signature)?;
+
+    Ok(signature_help_for_call(
+        &call.target,
+        &signature,
+        active_parameter,
+    ))
+}
+
+fn large_function_call_at_byte(text: &str, byte_offset: usize) -> Result<CallInfo, SkipReason> {
+    let open = find_large_call_open(text, byte_offset).ok_or(SkipReason::NoSupportedCall)?;
+    let name_end = text[..open].trim_end().len();
+    let name_start = text[..name_end]
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!is_large_name_char(character)).then_some(index + character.len_utf8())
+        })
+        .unwrap_or(0);
+    let name = text[name_start..name_end].trim();
+    if name.is_empty() || name.ends_with("function") {
+        return Err(SkipReason::NoSupportedCall);
+    }
+    let close = find_large_call_close(text, open).unwrap_or(text.len());
+
+    Ok(CallInfo {
+        target: CallTarget::Function(clean_name_text(name)),
+        arguments: large_call_arguments(text, open + 1, close),
+        arguments_start_byte: open + 1,
+        arguments_end_byte: close,
+    })
+}
+
+fn find_large_call_open(text: &str, byte_offset: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut index = byte_offset.min(text.len());
+    while index > 0 {
+        let previous = text[..index].chars().next_back()?;
+        index -= previous.len_utf8();
+        match previous {
+            ')' => depth += 1,
+            '(' if depth == 0 => return Some(index),
+            '(' => depth = depth.saturating_sub(1),
+            ';' | '{' | '}' if depth == 0 => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+fn find_large_call_close(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (relative, character) in text[open..].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(open + relative);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn large_call_arguments(text: &str, start: usize, end: usize) -> Vec<ArgumentInfo> {
+    let Some(arguments_text) = text.get(start..end) else {
+        return Vec::new();
+    };
+    if arguments_text.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let mut arguments = Vec::new();
+    let mut segment_start = start;
+    let mut depth = 0usize;
+    for (relative, character) in arguments_text.char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                arguments.push(large_argument_info(text, segment_start, start + relative));
+                segment_start = start + relative + 1;
+            }
+            _ => {}
+        }
+    }
+    arguments.push(large_argument_info(text, segment_start, end));
+    arguments
+}
+
+fn large_argument_info(text: &str, start: usize, end: usize) -> ArgumentInfo {
+    let segment = text.get(start..end).unwrap_or_default();
+    let trimmed = segment.trim_start();
+    let name = trimmed
+        .find(':')
+        .and_then(|colon| leading_large_identifier(&trimmed[..colon]).map(str::to_string));
+    ArgumentInfo {
+        start_byte: start,
+        end_byte: end,
+        insert_byte: end,
+        name,
+        is_unpacking: trimmed.starts_with("..."),
+    }
+}
+
+fn large_namespace_at_byte(text: &str, byte_offset: usize) -> Option<String> {
+    let mut namespace = None;
+    let mut current_byte = 0usize;
+    for raw_line in text.split_inclusive('\n') {
+        if current_byte > byte_offset {
+            break;
+        }
+        let line = raw_line.trim_end_matches(['\r', '\n']).trim_start();
+        if let Some((name, _)) = large_namespace_from_line(line) {
+            namespace = Some(name);
+        }
+        current_byte += raw_line.len();
+    }
+    namespace
+}
+
+fn is_large_name_char(character: char) -> bool {
+    is_large_identifier_char(character) || character == '\\'
 }
 
 fn definition_for_position_with_cache(
@@ -12910,7 +13061,7 @@ mod tests {
         for index in 0..repetitions {
             text.push_str(&format!("        $total += {index};\n"));
         }
-        text.push_str("    }\n}\n");
+        text.push_str("        helper($order, $notify);\n    }\n}\n");
         text
     }
 
@@ -13000,6 +13151,21 @@ mod tests {
                 .iter()
                 .any(|constant| constant.name == "KIND")
         );
+    }
+
+    #[test]
+    fn large_file_signature_help_uses_scanner_index_without_full_parse() {
+        let text = generated_large_php_document(9_000);
+        let byte_offset = text
+            .find("helper($order, $notify)")
+            .map(|offset| offset + "helper($order, $n".len())
+            .expect("call offset");
+        let position = lsp_position_for_byte_offset(&text, byte_offset).expect("call position");
+
+        let help = signature_help(&text, position.line, position.character).expect("signature");
+
+        assert_eq!(help.signatures[0].label, "helper($value, $rest)");
+        assert_eq!(help.active_parameter, Some(1));
     }
 
     #[test]
