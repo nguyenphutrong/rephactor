@@ -1070,7 +1070,7 @@ fn large_named_argument_code_action_with_cache(
     }
 
     let namespace = large_namespace_at_byte(text, byte_offset);
-    let imports = ImportMap::default();
+    let imports = large_import_map_until_byte(text, byte_offset);
     let index = cache.index_for_document(uri, text, open_documents);
     let signature = match index.resolve_large_call(&call.target, namespace.as_deref(), &imports) {
         Ok(signature) => signature,
@@ -1348,7 +1348,7 @@ fn large_signature_help_for_position(
     }
 
     let namespace = large_namespace_at_byte(text, byte_offset);
-    let imports = ImportMap::default();
+    let imports = large_import_map_until_byte(text, byte_offset);
     let index = cache.index_for_document(uri, text, open_documents);
     let signature = index.resolve_large_call(&call.target, namespace.as_deref(), &imports)?;
     let active_parameter = active_parameter_for_call(byte_offset, &call, &signature)?;
@@ -1508,6 +1508,112 @@ fn large_namespace_at_byte(text: &str, byte_offset: usize) -> Option<String> {
     namespace
 }
 
+fn large_import_map_until_byte(text: &str, byte_offset: usize) -> ImportMap {
+    let mut imports = ImportMap::default();
+    let mut statement = String::new();
+    let mut current_byte = 0usize;
+
+    for raw_line in text.split_inclusive('\n') {
+        if current_byte > byte_offset {
+            break;
+        }
+        current_byte += raw_line.len();
+        let line = strip_large_line_comment(raw_line.trim_end_matches(['\r', '\n']).trim_start());
+        if statement.is_empty() {
+            if !line.starts_with("use ") {
+                continue;
+            }
+            statement.push_str(line);
+        } else {
+            statement.push(' ');
+            statement.push_str(line);
+        }
+
+        if statement.contains(';') {
+            index_large_use_statement(&statement, &mut imports);
+            statement.clear();
+        }
+    }
+
+    imports
+}
+
+fn index_large_use_statement(statement: &str, imports: &mut ImportMap) {
+    let Some(rest) = statement
+        .trim()
+        .trim_end_matches(';')
+        .strip_prefix("use ")
+        .map(str::trim)
+    else {
+        return;
+    };
+    let (kind, rest) = if let Some(rest) = rest.strip_prefix("function ") {
+        (LargeUseKind::Function, rest.trim())
+    } else if let Some(rest) = rest.strip_prefix("const ") {
+        (LargeUseKind::Constant, rest.trim())
+    } else {
+        (LargeUseKind::Class, rest)
+    };
+
+    if let Some(open) = rest.find('{')
+        && let Some(close) = rest.rfind('}')
+    {
+        let prefix = rest[..open].trim().trim_end_matches('\\');
+        for item in rest[open + 1..close].split(',') {
+            index_large_use_item(kind, prefix, item, imports);
+        }
+        return;
+    }
+
+    for item in rest.split(',') {
+        index_large_use_item(kind, "", item, imports);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum LargeUseKind {
+    Class,
+    Function,
+    Constant,
+}
+
+fn index_large_use_item(kind: LargeUseKind, prefix: &str, item: &str, imports: &mut ImportMap) {
+    let item = item.trim();
+    if item.is_empty() {
+        return;
+    }
+    let (target, alias) = split_large_use_alias(item);
+    let target = target.trim().trim_matches('\\');
+    if target.is_empty() {
+        return;
+    }
+    let fqn = if prefix.is_empty() {
+        target.to_string()
+    } else {
+        format!("{prefix}\\{target}")
+    };
+    let alias = alias.unwrap_or_else(|| target.rsplit('\\').next().unwrap_or(target).to_string());
+    match kind {
+        LargeUseKind::Class => imports.insert_class(alias, fqn),
+        LargeUseKind::Function => imports.insert_function(alias, fqn),
+        LargeUseKind::Constant => imports.insert_constant(alias, fqn),
+    }
+}
+
+fn split_large_use_alias(item: &str) -> (String, Option<String>) {
+    let parts = item.split_whitespace().collect::<Vec<_>>();
+    if parts.len() >= 3
+        && let Some(index) = parts
+            .iter()
+            .position(|part| part.eq_ignore_ascii_case("as"))
+        && index > 0
+        && let Some(alias) = parts.get(index + 1)
+    {
+        return (parts[..index].join(" "), Some((*alias).to_string()));
+    }
+    (item.to_string(), None)
+}
+
 fn is_large_name_char(character: char) -> bool {
     is_large_identifier_char(character) || character == '\\'
 }
@@ -1522,6 +1628,10 @@ fn definition_for_position_with_cache(
     let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
         return Err(SkipReason::InvalidCursorPosition);
     };
+
+    if php_document_uses_large_analysis(text) {
+        return large_definition_for_position(uri, text, byte_offset, open_documents, cache);
+    }
 
     let Some(tree) = parse_php(text) else {
         return Err(SkipReason::ParseError);
@@ -1614,6 +1724,34 @@ fn definition_for_position_with_cache(
     }
 
     Err(SkipReason::UnresolvedCallable(symbol_name))
+}
+
+fn large_definition_for_position(
+    uri: &Url,
+    text: &str,
+    byte_offset: usize,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<GotoDefinitionResponse, SkipReason> {
+    let namespace = large_namespace_at_byte(text, byte_offset);
+    let imports = large_import_map_until_byte(text, byte_offset);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let open_paths = open_project_documents(open_documents);
+
+    if let Some((class_name, constant_name)) = static_constant_reference_context(text, byte_offset)
+        && let Some(class_info) = index.resolve_class(&class_name, namespace.as_deref(), &imports)
+        && let Some((_, constant_info)) =
+            resolve_class_constant_info(&index, class_info, &constant_name)
+    {
+        return location_response(constant_info.location.as_ref(), &open_paths);
+    }
+
+    if let Ok(call) = large_call_at_byte(text, byte_offset) {
+        let signature = index.resolve_large_call(&call.target, namespace.as_deref(), &imports)?;
+        return location_response(signature.location.as_ref(), &open_paths);
+    }
+
+    Err(SkipReason::NoSupportedCall)
 }
 
 fn declaration_for_position_with_cache(
@@ -5824,6 +5962,25 @@ struct LargeClassBuilder {
     body_depth: Option<usize>,
 }
 
+struct PendingLargeFunction {
+    name: String,
+    name_start_byte: usize,
+    start_byte: usize,
+    parameters_text: String,
+}
+
+struct LargeResolvedFunctionDeclaration {
+    name: String,
+    name_start_byte: usize,
+    parameters: Vec<String>,
+    is_variadic: bool,
+}
+
+struct LargeFunctionSpan {
+    start_byte: usize,
+    end_byte: usize,
+}
+
 #[allow(deprecated)]
 fn large_file_analysis(text: &str) -> LargeFileAnalysis {
     let mut analysis = LargeFileAnalysis::default();
@@ -5835,6 +5992,7 @@ fn large_file_analysis(text: &str) -> LargeFileAnalysis {
     let mut byte_offset = 0usize;
     let mut in_block_comment = false;
     let mut block_comment_start = None;
+    let mut pending_function: Option<PendingLargeFunction> = None;
 
     for (line_index, raw_line) in text.split_inclusive('\n').enumerate() {
         let line_start = byte_offset;
@@ -5900,6 +6058,39 @@ fn large_file_analysis(text: &str) -> LargeFileAnalysis {
             namespace = Some(name);
         }
 
+        if let Some(mut pending) = pending_function.take() {
+            let close = code.find(')');
+            let parameters_part = close.map_or(code, |close| &code[..close]);
+            if !pending.parameters_text.is_empty() && !parameters_part.trim().is_empty() {
+                pending.parameters_text.push('\n');
+            }
+            pending.parameters_text.push_str(parameters_part);
+            if close.is_some() {
+                let declaration = LargeFunctionDeclaration {
+                    name: pending.name,
+                    name_relative_start: 0,
+                    parameters: large_parameter_names(&pending.parameters_text),
+                    is_variadic: pending.parameters_text.contains("..."),
+                }
+                .with_name_start(pending.name_start_byte);
+                push_large_function_declaration(
+                    &mut analysis,
+                    &line_map,
+                    text,
+                    &mut class_stack,
+                    namespace.as_deref(),
+                    declaration,
+                    LargeFunctionSpan {
+                        start_byte: pending.start_byte,
+                        end_byte: line_end,
+                    },
+                );
+            } else {
+                pending_function = Some(pending);
+                continue;
+            }
+        }
+
         if class_stack.is_empty() {
             if let Some((name, name_relative)) = large_const_from_line(code) {
                 analysis.constants.push(LargeConstant {
@@ -5912,27 +6103,22 @@ fn large_file_analysis(text: &str) -> LargeFileAnalysis {
             if let Some(declaration) = large_function_from_line(code)
                 && declaration.name != "__anonymous"
             {
-                analysis.functions.push(LargeFunction {
-                    name: declaration.name.clone(),
-                    namespace: namespace.clone(),
-                    name_start_byte: code_start + declaration.name_relative_start,
-                    parameters: declaration.parameters,
-                    is_variadic: declaration.is_variadic,
-                });
-                if let Some(symbol) = large_document_symbol(
+                push_large_function_declaration(
+                    &mut analysis,
                     &line_map,
                     text,
-                    &declaration.name,
-                    SymbolKind::FUNCTION,
-                    LargeSymbolRange {
+                    &mut class_stack,
+                    namespace.as_deref(),
+                    declaration.with_absolute_name_start(code_start),
+                    LargeFunctionSpan {
                         start_byte: line_start,
                         end_byte: line_end,
-                        name_start_byte: code_start + declaration.name_relative_start,
                     },
-                    None,
-                ) {
-                    analysis.document_symbols.push(symbol);
-                }
+                );
+            } else if let Some(pending) =
+                large_pending_function_from_line(code, code_start, line_start)
+            {
+                pending_function = Some(pending);
             }
         }
 
@@ -5968,36 +6154,30 @@ fn large_file_analysis(text: &str) -> LargeFileAnalysis {
                 start_byte: line_start,
                 body_depth: (opens > closes).then_some(brace_depth + opens - closes),
             });
-        } else if let Some(builder) = class_stack.last_mut() {
+        } else if !class_stack.is_empty() {
             if let Some(declaration) = large_function_from_line(code)
                 && declaration.name != "__anonymous"
             {
-                let name_start = code_start + declaration.name_relative_start;
-                builder.class.methods.push(LargeMethod {
-                    name: declaration.name.clone(),
-                    name_start_byte: name_start,
-                    parameters: declaration.parameters,
-                    is_variadic: declaration.is_variadic,
-                    is_abstract: !code.contains('{') || code.contains("abstract"),
-                });
-                if let Some(symbol) = large_document_symbol(
+                push_large_function_declaration(
+                    &mut analysis,
                     &line_map,
                     text,
-                    &declaration.name,
-                    SymbolKind::METHOD,
-                    LargeSymbolRange {
+                    &mut class_stack,
+                    namespace.as_deref(),
+                    declaration.with_absolute_name_start(code_start),
+                    LargeFunctionSpan {
                         start_byte: line_start,
                         end_byte: line_end,
-                        name_start_byte: name_start,
                     },
-                    None,
-                ) && let Some(children) = analysis.document_symbols[builder.symbol_index]
-                    .children
-                    .as_mut()
-                {
-                    children.push(symbol);
-                }
+                );
+            } else if let Some(pending) =
+                large_pending_function_from_line(code, code_start, line_start)
+            {
+                pending_function = Some(pending);
             }
+            let Some(builder) = class_stack.last_mut() else {
+                continue;
+            };
             if let Some((name, name_relative)) = large_const_from_line(code) {
                 let name_start = code_start + name_relative;
                 builder.class.constants.push(LargeConstant {
@@ -6150,6 +6330,22 @@ struct LargeFunctionDeclaration {
     is_variadic: bool,
 }
 
+impl LargeFunctionDeclaration {
+    fn with_absolute_name_start(self, code_start: usize) -> LargeResolvedFunctionDeclaration {
+        let name_start_byte = code_start + self.name_relative_start;
+        self.with_name_start(name_start_byte)
+    }
+
+    fn with_name_start(self, name_start_byte: usize) -> LargeResolvedFunctionDeclaration {
+        LargeResolvedFunctionDeclaration {
+            name: self.name,
+            name_start_byte,
+            parameters: self.parameters,
+            is_variadic: self.is_variadic,
+        }
+    }
+}
+
 fn large_function_from_line(line: &str) -> Option<LargeFunctionDeclaration> {
     let keyword_start = find_large_keyword(line, "function")?;
     let after_keyword = keyword_start + "function".len();
@@ -6170,6 +6366,90 @@ fn large_function_from_line(line: &str) -> Option<LargeFunctionDeclaration> {
         parameters: large_parameter_names(parameters_text),
         is_variadic: parameters_text.contains("..."),
     })
+}
+
+fn large_pending_function_from_line(
+    line: &str,
+    code_start: usize,
+    line_start: usize,
+) -> Option<PendingLargeFunction> {
+    let keyword_start = find_large_keyword(line, "function")?;
+    let after_keyword = keyword_start + "function".len();
+    let rest = line[after_keyword..].trim_start();
+    let name = leading_large_identifier(rest)?;
+    let name_relative_start = after_keyword + line[after_keyword..].find(name)?;
+    let open =
+        line[name_relative_start + name.len()..].find('(')? + name_relative_start + name.len();
+    if line[open + 1..].contains(')') {
+        return None;
+    }
+    Some(PendingLargeFunction {
+        name: name.to_string(),
+        name_start_byte: code_start + name_relative_start,
+        start_byte: line_start,
+        parameters_text: line[open + 1..].to_string(),
+    })
+}
+
+#[allow(deprecated)]
+fn push_large_function_declaration(
+    analysis: &mut LargeFileAnalysis,
+    line_map: &LargeLineIndex,
+    text: &str,
+    class_stack: &mut [LargeClassBuilder],
+    namespace: Option<&str>,
+    declaration: LargeResolvedFunctionDeclaration,
+    span: LargeFunctionSpan,
+) {
+    if let Some(builder) = class_stack.last_mut() {
+        builder.class.methods.push(LargeMethod {
+            name: declaration.name.clone(),
+            name_start_byte: declaration.name_start_byte,
+            parameters: declaration.parameters,
+            is_variadic: declaration.is_variadic,
+            is_abstract: false,
+        });
+        if let Some(symbol) = large_document_symbol(
+            line_map,
+            text,
+            &declaration.name,
+            SymbolKind::METHOD,
+            LargeSymbolRange {
+                start_byte: span.start_byte,
+                end_byte: span.end_byte,
+                name_start_byte: declaration.name_start_byte,
+            },
+            None,
+        ) && let Some(children) = analysis.document_symbols[builder.symbol_index]
+            .children
+            .as_mut()
+        {
+            children.push(symbol);
+        }
+        return;
+    }
+
+    analysis.functions.push(LargeFunction {
+        name: declaration.name.clone(),
+        namespace: namespace.map(str::to_string),
+        name_start_byte: declaration.name_start_byte,
+        parameters: declaration.parameters,
+        is_variadic: declaration.is_variadic,
+    });
+    if let Some(symbol) = large_document_symbol(
+        line_map,
+        text,
+        &declaration.name,
+        SymbolKind::FUNCTION,
+        LargeSymbolRange {
+            start_byte: span.start_byte,
+            end_byte: span.end_byte,
+            name_start_byte: declaration.name_start_byte,
+        },
+        None,
+    ) {
+        analysis.document_symbols.push(symbol);
+    }
 }
 
 fn large_const_from_line(line: &str) -> Option<(String, usize)> {
@@ -13206,6 +13486,32 @@ mod tests {
         text
     }
 
+    fn generated_large_importing_document(repetitions: usize) -> String {
+        let mut text = String::from(
+            "<?php\nnamespace App\\Http\\Controllers;\n\nuse App\\Enums\\ExternalApp;\nuse App\\Models\\{account,\n    customer_supplier,\n    order};\n\nclass LargeController\n{\n    public function sync($shopId, $customerId): void\n    {\n",
+        );
+        for index in 0..repetitions {
+            text.push_str(&format!("        $total += {index};\n"));
+        }
+        text.push_str(
+            "        if (ExternalApp::USER_SYSTEM) {}\n        customer_supplier::accumulatePoints($shopId, $customerId);\n    }\n}\n",
+        );
+        text
+    }
+
+    fn generated_large_customer_supplier_document(repetitions: usize) -> String {
+        let mut text = String::from(
+            "<?php\nnamespace App\\Models;\n\nclass customer_supplier\n{\n    public const KIND = 'customer';\n",
+        );
+        for index in 0..repetitions {
+            text.push_str(&format!("    protected $field{index};\n"));
+        }
+        text.push_str(
+            "    public static function accumulatePoints(\n        $shopId,\n        $customerId\n    ) {\n    }\n}\n",
+        );
+        text
+    }
+
     #[test]
     fn parse_diagnostics_handles_deep_error_trees_without_stack_overflow() {
         let diagnostics = analyze_parse_diagnostics(&deeply_nested_if_document(2_048, false));
@@ -13375,6 +13681,107 @@ mod tests {
             ))
         );
         assert!(analysis.actions.is_empty());
+    }
+
+    #[test]
+    fn large_file_code_action_resolves_grouped_import_and_multiline_method() {
+        let project_root = unique_project_root();
+        let app_dir = project_root.join("app");
+        fs::create_dir_all(app_dir.join("Models")).expect("create models dir");
+        fs::create_dir_all(app_dir.join("Http/Controllers")).expect("create controllers dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+        let caller_path = app_dir.join("Http/Controllers/LargeController.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
+        let model_path = app_dir.join("Models/customer_supplier.php");
+        let model_uri = Url::from_file_path(&model_path).expect("model uri");
+        let caller_text = generated_large_importing_document(9_000);
+        let model_text = generated_large_customer_supplier_document(9_000);
+        let byte_offset = caller_text
+            .find("customer_supplier::accumulatePoints($shopId, $customerId)")
+            .map(|offset| offset + "customer_supplier::accumulatePoints($shop".len())
+            .expect("call offset");
+        let position = lsp_position_for_byte_offset(&caller_text, byte_offset).expect("position");
+        let open_documents = HashMap::from([(model_uri, model_text)]);
+        let mut cache = ProjectIndexCache::default();
+
+        let analysis = analyze_code_actions_for_position_with_cache(
+            &caller_uri,
+            &caller_text,
+            position,
+            &open_documents,
+            &mut cache,
+        );
+
+        assert_ne!(analysis.skip_reason, Some(SkipReason::ParseError));
+        assert_eq!(analysis.actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &analysis.actions[0] else {
+            panic!("code action");
+        };
+        let edits = action
+            .edit
+            .clone()
+            .expect("workspace edit")
+            .changes
+            .expect("changes")
+            .remove(&caller_uri)
+            .expect("caller edits");
+        assert_eq!(
+            apply_edits(&caller_text, &edits),
+            caller_text.replace(
+                "customer_supplier::accumulatePoints($shopId, $customerId)",
+                "customer_supplier::accumulatePoints(shopId: $shopId, customerId: $customerId)"
+            )
+        );
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn large_file_definition_resolves_imported_static_constant_without_parse_error() {
+        let project_root = unique_project_root();
+        let app_dir = project_root.join("app");
+        fs::create_dir_all(app_dir.join("Enums")).expect("create enums dir");
+        fs::create_dir_all(app_dir.join("Http/Controllers")).expect("create controllers dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+        fs::write(
+            app_dir.join("Enums/ExternalApp.php"),
+            "<?php\nnamespace App\\Enums;\nfinal class ExternalApp { public const USER_SYSTEM = 2; }\n",
+        )
+        .expect("write enum");
+        let caller_path = app_dir.join("Http/Controllers/LargeController.php");
+        let caller_uri = Url::from_file_path(&caller_path).expect("caller uri");
+        let caller_text = generated_large_importing_document(9_000);
+        let byte_offset = caller_text
+            .find("ExternalApp::USER_SYSTEM")
+            .map(|offset| offset + "ExternalApp::USER".len())
+            .expect("constant offset");
+        let position = lsp_position_for_byte_offset(&caller_text, byte_offset).expect("position");
+        let mut cache = ProjectIndexCache::default();
+
+        let analysis = analyze_definition_for_position_with_cache(
+            &caller_uri,
+            &caller_text,
+            position,
+            &HashMap::new(),
+            &mut cache,
+        );
+
+        assert_ne!(analysis.skip_reason, Some(SkipReason::ParseError));
+        assert!(
+            analysis.definition.is_some(),
+            "skip reason: {:?}",
+            analysis.skip_reason
+        );
+
+        fs::remove_dir_all(project_root).expect("remove project root");
     }
 
     #[test]

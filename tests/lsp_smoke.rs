@@ -270,6 +270,44 @@ impl LspProcess {
             .cloned()
     }
 
+    fn definition_with_logs(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> (Option<Value>, Vec<String>) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }
+        }));
+
+        let mut logs = Vec::new();
+        loop {
+            let message = self.read_message();
+            if message.get("id").and_then(Value::as_i64) == Some(id) {
+                return (
+                    message
+                        .get("result")
+                        .filter(|result| !result.is_null())
+                        .cloned(),
+                    logs,
+                );
+            }
+            if message.get("method").and_then(Value::as_str) == Some("window/logMessage")
+                && let Some(log) = message["params"]["message"].as_str()
+            {
+                logs.push(log.to_string());
+            }
+        }
+    }
+
     fn declaration(&mut self, uri: &str, line: u32, character: u32) -> Option<Value> {
         let response = self.request(
             "textDocument/declaration",
@@ -4042,15 +4080,14 @@ fn lsp_large_posapp_code_action_does_not_report_parse_error() {
     }
 
     let text = std::fs::read_to_string(fixture).expect("read SyncOrderController fixture");
-    let root = temp_project("sync-order-code-action");
+    let root = Path::new("/Volumes/Avocado/code/posapp-vn/dev-admin-api");
     let mut server = LspProcess::start(&root);
-    let file = root.join("SyncOrderController.php");
-    let uri = server.open_php(&file, &text);
+    let uri = server.open_php(fixture, &text);
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
     assert_eq!(notification["params"]["uri"], uri);
 
-    let (_actions, logs) = server.code_actions_with_logs(&uri, 2777, 28);
+    let (actions, logs) = server.code_actions_with_logs(&uri, 2777, 28);
 
     assert!(
         logs.iter()
@@ -4058,7 +4095,22 @@ fn lsp_large_posapp_code_action_does_not_report_parse_error() {
             .all(|log| !log.contains("PHP parse error")),
         "unexpected codeAction logs: {logs:?}"
     );
-    std::fs::remove_dir_all(root).expect("remove temp root");
+    assert!(
+        actions
+            .iter()
+            .any(|action| action["title"] == "[Rephactor] Add names to arguments"),
+        "expected named-argument action, got {actions:?}"
+    );
+
+    let (definition, definition_logs) = server.definition_with_logs(&uri, 2770, 83);
+    assert!(
+        definition_logs
+            .iter()
+            .filter(|log| log.contains("Rephactor definition"))
+            .all(|log| !log.contains("PHP parse error")),
+        "unexpected definition logs: {definition_logs:?}"
+    );
+    assert!(definition.is_some());
 }
 
 #[test]
