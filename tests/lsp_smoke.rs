@@ -3985,6 +3985,30 @@ fn lsp_handles_posapp_sync_order_controller_without_stack_overflow() {
 
     assert_eq!(notification["params"]["uri"], uri);
     assert!(notification["params"]["diagnostics"].is_array());
+    assert!(!server.document_symbols(&uri).is_empty());
+    assert!(!server.folding_ranges(&uri).is_empty());
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_handles_posapp_order_model_without_stack_overflow() {
+    let fixture = Path::new("/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Models/order.php");
+    if !fixture.is_file() {
+        return;
+    }
+
+    let text = std::fs::read_to_string(fixture).expect("read order model fixture");
+    let root = temp_project("order-model-stack");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("order.php");
+    let uri = server.open_php(&file, &text);
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    assert!(notification["params"]["diagnostics"].is_array());
+    assert!(!server.document_symbols(&uri).is_empty());
+    assert!(!server.folding_ranges(&uri).is_empty());
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

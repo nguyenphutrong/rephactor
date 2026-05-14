@@ -2143,6 +2143,12 @@ fn completion_for_position_with_cache(
 }
 
 fn document_symbols_for_text(text: &str) -> Result<DocumentSymbolResponse, SkipReason> {
+    if php_document_uses_large_analysis(text) {
+        return Ok(DocumentSymbolResponse::Nested(
+            large_file_analysis(text).document_symbols,
+        ));
+    }
+
     let Some(tree) = parse_php(text) else {
         return Err(SkipReason::ParseError);
     };
@@ -2336,6 +2342,13 @@ fn ancestor_path(path: &Path, levels: usize) -> &Path {
 }
 
 fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> {
+    if php_document_uses_large_analysis(text) {
+        let mut ranges = large_file_analysis(text).folding_ranges;
+        collect_custom_region_folding_ranges(text, &mut ranges);
+        ranges.sort_by_key(|range| (range.start_line, range.end_line));
+        return Ok(ranges);
+    }
+
     let Some(tree) = parse_php_allowing_errors(text) else {
         return Err(SkipReason::ParseError);
     };
@@ -5485,6 +5498,599 @@ fn php_document_uses_large_analysis(text: &str) -> bool {
     !php_document_supports_full_parse(text) && php_document_supports_large_analysis(text)
 }
 
+#[derive(Debug, Default)]
+struct LargeFileAnalysis {
+    document_symbols: Vec<DocumentSymbol>,
+    folding_ranges: Vec<FoldingRange>,
+    functions: Vec<LargeFunction>,
+    constants: Vec<LargeConstant>,
+    classes: Vec<LargeClass>,
+}
+
+#[derive(Debug)]
+struct LargeFunction {
+    name: String,
+    namespace: Option<String>,
+    name_start_byte: usize,
+    parameters: Vec<String>,
+    is_variadic: bool,
+}
+
+#[derive(Debug)]
+struct LargeConstant {
+    name: String,
+    namespace: Option<String>,
+    name_start_byte: usize,
+}
+
+#[derive(Debug)]
+struct LargeClass {
+    name: String,
+    namespace: Option<String>,
+    name_start_byte: usize,
+    kind: SymbolKind,
+    methods: Vec<LargeMethod>,
+    properties: Vec<LargeProperty>,
+    constants: Vec<LargeConstant>,
+}
+
+#[derive(Debug)]
+struct LargeMethod {
+    name: String,
+    name_start_byte: usize,
+    parameters: Vec<String>,
+    is_variadic: bool,
+    is_abstract: bool,
+}
+
+#[derive(Debug)]
+struct LargeProperty {
+    name: String,
+    name_start_byte: usize,
+    is_static: bool,
+}
+
+struct LargeClassBuilder {
+    class: LargeClass,
+    symbol_index: usize,
+    start_byte: usize,
+    body_depth: Option<usize>,
+}
+
+#[allow(deprecated)]
+fn large_file_analysis(text: &str) -> LargeFileAnalysis {
+    let mut analysis = LargeFileAnalysis::default();
+    let line_map = LargeLineIndex::new(text);
+    let mut namespace = None;
+    let mut class_stack: Vec<LargeClassBuilder> = Vec::new();
+    let mut brace_stack: Vec<(usize, usize)> = Vec::new();
+    let mut brace_depth = 0usize;
+    let mut byte_offset = 0usize;
+    let mut in_block_comment = false;
+    let mut block_comment_start = None;
+
+    for (line_index, raw_line) in text.split_inclusive('\n').enumerate() {
+        let line_start = byte_offset;
+        let line_end = line_start + raw_line.len();
+        byte_offset = line_end;
+        let line_without_newline = raw_line.trim_end_matches(['\r', '\n']);
+        let code_start =
+            line_start + line_without_newline.len() - line_without_newline.trim_start().len();
+        let trimmed = line_without_newline.trim_start();
+
+        if in_block_comment {
+            if trimmed.contains("*/") {
+                in_block_comment = false;
+                if let Some((start_byte, start_line)) = block_comment_start.take()
+                    && start_line < line_index as u32
+                    && let Some(range) = folding_range_for_bytes(
+                        &line_map,
+                        text,
+                        start_byte,
+                        line_end,
+                        FoldingRangeKind::Comment,
+                    )
+                {
+                    analysis.folding_ranges.push(range);
+                }
+            }
+            continue;
+        }
+        if let Some(comment_start) = trimmed.find("/*") {
+            let absolute_start = line_start + raw_line.len() - trimmed.len() + comment_start;
+            if !trimmed[comment_start..].contains("*/") {
+                in_block_comment = true;
+                block_comment_start = Some((absolute_start, line_index as u32));
+                continue;
+            }
+        }
+
+        let code = strip_large_line_comment(trimmed);
+        let opens = code.bytes().filter(|byte| *byte == b'{').count();
+        let closes = code.bytes().filter(|byte| *byte == b'}').count();
+
+        while let Some(builder) = class_stack.last()
+            && builder
+                .body_depth
+                .is_some_and(|body_depth| brace_depth < body_depth)
+        {
+            let builder = class_stack.pop().expect("class builder");
+            if let Some(symbol) = analysis.document_symbols.get_mut(builder.symbol_index) {
+                symbol.range = line_map
+                    .range_for_bytes(text, builder.start_byte, line_end)
+                    .unwrap_or(symbol.range);
+                symbol.children = (!builder.class.methods.is_empty()
+                    || !builder.class.properties.is_empty()
+                    || !builder.class.constants.is_empty())
+                .then_some(symbol.children.take().unwrap_or_default());
+            }
+            analysis.classes.push(builder.class);
+        }
+
+        if namespace.is_none()
+            && let Some((name, _)) = large_namespace_from_line(code)
+        {
+            namespace = Some(name);
+        }
+
+        if class_stack.is_empty() {
+            if let Some((name, name_relative)) = large_const_from_line(code) {
+                analysis.constants.push(LargeConstant {
+                    name: name.clone(),
+                    namespace: namespace.clone(),
+                    name_start_byte: code_start + name_relative,
+                });
+            }
+
+            if let Some(declaration) = large_function_from_line(code)
+                && declaration.name != "__anonymous"
+            {
+                analysis.functions.push(LargeFunction {
+                    name: declaration.name.clone(),
+                    namespace: namespace.clone(),
+                    name_start_byte: code_start + declaration.name_relative_start,
+                    parameters: declaration.parameters,
+                    is_variadic: declaration.is_variadic,
+                });
+                if let Some(symbol) = large_document_symbol(
+                    &line_map,
+                    text,
+                    &declaration.name,
+                    SymbolKind::FUNCTION,
+                    LargeSymbolRange {
+                        start_byte: line_start,
+                        end_byte: line_end,
+                        name_start_byte: code_start + declaration.name_relative_start,
+                    },
+                    None,
+                ) {
+                    analysis.document_symbols.push(symbol);
+                }
+            }
+        }
+
+        if let Some(declaration) = large_class_from_line(code) {
+            let name_start = code_start + declaration.name_relative_start;
+            let symbol_index = analysis.document_symbols.len();
+            analysis.document_symbols.push(
+                large_document_symbol(
+                    &line_map,
+                    text,
+                    &declaration.name,
+                    declaration.kind,
+                    LargeSymbolRange {
+                        start_byte: line_start,
+                        end_byte: line_end,
+                        name_start_byte: name_start,
+                    },
+                    Some(Vec::new()),
+                )
+                .expect("valid large class symbol"),
+            );
+            class_stack.push(LargeClassBuilder {
+                class: LargeClass {
+                    name: declaration.name,
+                    namespace: namespace.clone(),
+                    name_start_byte: name_start,
+                    kind: declaration.kind,
+                    methods: Vec::new(),
+                    properties: Vec::new(),
+                    constants: Vec::new(),
+                },
+                symbol_index,
+                start_byte: line_start,
+                body_depth: (opens > closes).then_some(brace_depth + opens - closes),
+            });
+        } else if let Some(builder) = class_stack.last_mut() {
+            if let Some(declaration) = large_function_from_line(code)
+                && declaration.name != "__anonymous"
+            {
+                let name_start = code_start + declaration.name_relative_start;
+                builder.class.methods.push(LargeMethod {
+                    name: declaration.name.clone(),
+                    name_start_byte: name_start,
+                    parameters: declaration.parameters,
+                    is_variadic: declaration.is_variadic,
+                    is_abstract: !code.contains('{') || code.contains("abstract"),
+                });
+                if let Some(symbol) = large_document_symbol(
+                    &line_map,
+                    text,
+                    &declaration.name,
+                    SymbolKind::METHOD,
+                    LargeSymbolRange {
+                        start_byte: line_start,
+                        end_byte: line_end,
+                        name_start_byte: name_start,
+                    },
+                    None,
+                ) && let Some(children) = analysis.document_symbols[builder.symbol_index]
+                    .children
+                    .as_mut()
+                {
+                    children.push(symbol);
+                }
+            }
+            if let Some((name, name_relative)) = large_const_from_line(code) {
+                let name_start = code_start + name_relative;
+                builder.class.constants.push(LargeConstant {
+                    name: name.clone(),
+                    namespace: None,
+                    name_start_byte: name_start,
+                });
+                if let Some(symbol) = large_document_symbol(
+                    &line_map,
+                    text,
+                    &name,
+                    SymbolKind::CONSTANT,
+                    LargeSymbolRange {
+                        start_byte: line_start,
+                        end_byte: line_end,
+                        name_start_byte: name_start,
+                    },
+                    None,
+                ) && let Some(children) = analysis.document_symbols[builder.symbol_index]
+                    .children
+                    .as_mut()
+                {
+                    children.push(symbol);
+                }
+            }
+            for property in large_properties_from_line(code) {
+                let name_start = code_start + property.name_relative_start;
+                builder.class.properties.push(LargeProperty {
+                    name: property.name.clone(),
+                    name_start_byte: name_start,
+                    is_static: property.is_static,
+                });
+                if let Some(symbol) = large_document_symbol(
+                    &line_map,
+                    text,
+                    &format!("${}", property.name),
+                    SymbolKind::PROPERTY,
+                    LargeSymbolRange {
+                        start_byte: line_start,
+                        end_byte: line_end,
+                        name_start_byte: name_start,
+                    },
+                    None,
+                ) && let Some(children) = analysis.document_symbols[builder.symbol_index]
+                    .children
+                    .as_mut()
+                {
+                    children.push(symbol);
+                }
+            }
+        }
+
+        for (index, byte) in code.bytes().enumerate() {
+            match byte {
+                b'{' => {
+                    brace_stack.push((code_start + index, line_index));
+                    brace_depth += 1;
+                    if let Some(builder) = class_stack
+                        .iter_mut()
+                        .rev()
+                        .find(|builder| builder.body_depth.is_none())
+                    {
+                        builder.body_depth = Some(brace_depth);
+                    }
+                }
+                b'}' => {
+                    if let Some((start_byte, start_line)) = brace_stack.pop()
+                        && start_line < line_index
+                        && let Some(range) = folding_range_for_bytes(
+                            &line_map,
+                            text,
+                            start_byte,
+                            code_start + index + 1,
+                            FoldingRangeKind::Region,
+                        )
+                    {
+                        analysis.folding_ranges.push(range);
+                    }
+                    brace_depth = brace_depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let text_end = text.len();
+    while let Some(builder) = class_stack.pop() {
+        if let Some(symbol) = analysis.document_symbols.get_mut(builder.symbol_index) {
+            symbol.range = line_map
+                .range_for_bytes(text, builder.start_byte, text_end)
+                .unwrap_or(symbol.range);
+            if symbol.children.as_ref().is_some_and(Vec::is_empty) {
+                symbol.children = None;
+            }
+        }
+        analysis.classes.push(builder.class);
+    }
+
+    analysis
+}
+
+fn strip_large_line_comment(line: &str) -> &str {
+    line.split("//").next().unwrap_or(line)
+}
+
+fn large_namespace_from_line(line: &str) -> Option<(String, usize)> {
+    let rest = line.strip_prefix("namespace")?.trim_start();
+    let end = rest.find([';', '{']).unwrap_or(rest.len());
+    let name = rest[..end].trim();
+    (!name.is_empty()).then(|| (clean_name_text(name), line.find(name).unwrap_or_default()))
+}
+
+struct LargeClassDeclaration {
+    name: String,
+    name_relative_start: usize,
+    kind: SymbolKind,
+}
+
+fn large_class_from_line(line: &str) -> Option<LargeClassDeclaration> {
+    for (keyword, kind) in [
+        ("class", SymbolKind::CLASS),
+        ("interface", SymbolKind::INTERFACE),
+        ("trait", SymbolKind::CLASS),
+    ] {
+        let Some(keyword_start) = find_large_keyword(line, keyword) else {
+            continue;
+        };
+        if keyword == "class" && line[..keyword_start].trim_end().ends_with("new") {
+            continue;
+        }
+        let after_keyword = keyword_start + keyword.len();
+        let rest = line[after_keyword..].trim_start();
+        let name = leading_large_identifier(rest)?;
+        if matches!(name, "extends" | "implements") {
+            continue;
+        }
+        return Some(LargeClassDeclaration {
+            name: name.to_string(),
+            name_relative_start: after_keyword + line[after_keyword..].find(name)?,
+            kind,
+        });
+    }
+    None
+}
+
+struct LargeFunctionDeclaration {
+    name: String,
+    name_relative_start: usize,
+    parameters: Vec<String>,
+    is_variadic: bool,
+}
+
+fn large_function_from_line(line: &str) -> Option<LargeFunctionDeclaration> {
+    let keyword_start = find_large_keyword(line, "function")?;
+    let after_keyword = keyword_start + "function".len();
+    let rest = line[after_keyword..].trim_start();
+    let (name, name_relative_start, parameter_search_start) =
+        if let Some(name) = leading_large_identifier(rest) {
+            let name_relative_start = after_keyword + line[after_keyword..].find(name)?;
+            (name, name_relative_start, name_relative_start + name.len())
+        } else {
+            ("__anonymous", after_keyword, after_keyword)
+        };
+    let open = line[parameter_search_start..].find('(')? + parameter_search_start;
+    let close = line[open + 1..].find(')')? + open + 1;
+    let parameters_text = &line[open + 1..close];
+    Some(LargeFunctionDeclaration {
+        name: name.to_string(),
+        name_relative_start,
+        parameters: large_parameter_names(parameters_text),
+        is_variadic: parameters_text.contains("..."),
+    })
+}
+
+fn large_const_from_line(line: &str) -> Option<(String, usize)> {
+    let keyword_start = find_large_keyword(line, "const")?;
+    let after_keyword = keyword_start + "const".len();
+    let rest = line[after_keyword..].trim_start();
+    let name = leading_large_identifier(rest)?;
+    Some((
+        name.to_string(),
+        after_keyword + line[after_keyword..].find(name)?,
+    ))
+}
+
+struct LargePropertyDeclaration {
+    name: String,
+    name_relative_start: usize,
+    is_static: bool,
+}
+
+fn large_properties_from_line(line: &str) -> Vec<LargePropertyDeclaration> {
+    let trimmed = line.trim_start();
+    if !trimmed.ends_with(';')
+        || !(trimmed.starts_with("public")
+            || trimmed.starts_with("protected")
+            || trimmed.starts_with("private")
+            || trimmed.starts_with("var")
+            || trimmed.starts_with("static")
+            || trimmed.starts_with("readonly"))
+    {
+        return Vec::new();
+    }
+    let is_static = trimmed.split_whitespace().any(|part| part == "static");
+    let mut properties = Vec::new();
+    let mut search_start = 0;
+    while let Some(relative) = line[search_start..].find('$') {
+        let dollar = search_start + relative;
+        let Some(name) = leading_large_identifier(&line[dollar + 1..]) else {
+            search_start = dollar + 1;
+            continue;
+        };
+        properties.push(LargePropertyDeclaration {
+            name: name.to_string(),
+            name_relative_start: dollar + 1,
+            is_static,
+        });
+        search_start = dollar + 1 + name.len();
+    }
+    properties
+}
+
+fn large_parameter_names(parameters_text: &str) -> Vec<String> {
+    parameters_text
+        .split(',')
+        .filter_map(|parameter| {
+            let dollar = parameter.find('$')?;
+            let name = leading_large_identifier(&parameter[dollar + 1..])?;
+            Some(name.to_string())
+        })
+        .collect()
+}
+
+fn find_large_keyword(line: &str, keyword: &str) -> Option<usize> {
+    let mut search_start = 0;
+    while let Some(relative) = line[search_start..].find(keyword) {
+        let start = search_start + relative;
+        let end = start + keyword.len();
+        let before = line[..start].chars().next_back();
+        let after = line[end..].chars().next();
+        if before.is_none_or(|character| !is_large_identifier_char(character))
+            && after.is_none_or(|character| !is_large_identifier_char(character))
+        {
+            return Some(start);
+        }
+        search_start = end;
+    }
+    None
+}
+
+fn leading_large_identifier(text: &str) -> Option<&str> {
+    let text = text.trim_start();
+    let mut end = 0;
+    for character in text.chars() {
+        if is_large_identifier_char(character) {
+            end += character.len_utf8();
+        } else {
+            break;
+        }
+    }
+    (end > 0).then_some(&text[..end])
+}
+
+fn is_large_identifier_char(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
+}
+
+struct LargeLineIndex {
+    line_starts: Vec<usize>,
+}
+
+impl LargeLineIndex {
+    fn new(text: &str) -> Self {
+        let mut line_starts = vec![0];
+        for (index, byte) in text.bytes().enumerate() {
+            if byte == b'\n' {
+                line_starts.push(index + 1);
+            }
+        }
+        Self { line_starts }
+    }
+
+    fn range_for_bytes(&self, text: &str, start_byte: usize, end_byte: usize) -> Option<Range> {
+        Some(Range {
+            start: self.position_for_byte(text, start_byte)?,
+            end: self.position_for_byte(text, end_byte)?,
+        })
+    }
+
+    fn position_for_byte(&self, text: &str, byte_offset: usize) -> Option<Position> {
+        if byte_offset > text.len() || !text.is_char_boundary(byte_offset) {
+            return None;
+        }
+        let line_index = match self.line_starts.binary_search(&byte_offset) {
+            Ok(index) => index,
+            Err(index) => index.checked_sub(1)?,
+        };
+        let line_start = self.line_starts[line_index];
+        let character = text[line_start..byte_offset]
+            .chars()
+            .map(|character| character.len_utf16() as u32)
+            .sum();
+        Some(Position {
+            line: line_index as u32,
+            character,
+        })
+    }
+}
+
+#[allow(deprecated)]
+struct LargeSymbolRange {
+    start_byte: usize,
+    end_byte: usize,
+    name_start_byte: usize,
+}
+
+#[allow(deprecated)]
+fn large_document_symbol(
+    line_map: &LargeLineIndex,
+    text: &str,
+    name: &str,
+    kind: SymbolKind,
+    range: LargeSymbolRange,
+    children: Option<Vec<DocumentSymbol>>,
+) -> Option<DocumentSymbol> {
+    Some(DocumentSymbol {
+        name: name.to_string(),
+        detail: None,
+        kind,
+        tags: None,
+        deprecated: None,
+        range: line_map.range_for_bytes(text, range.start_byte, range.end_byte)?,
+        selection_range: line_map.range_for_bytes(
+            text,
+            range.name_start_byte,
+            range.name_start_byte + name.len(),
+        )?,
+        children,
+    })
+}
+
+fn folding_range_for_bytes(
+    line_map: &LargeLineIndex,
+    text: &str,
+    start_byte: usize,
+    end_byte: usize,
+    kind: FoldingRangeKind,
+) -> Option<FoldingRange> {
+    let start = line_map.position_for_byte(text, start_byte)?;
+    let end = line_map.position_for_byte(text, end_byte)?;
+    (start.line < end.line).then_some(FoldingRange {
+        start_line: start.line,
+        start_character: Some(start.character),
+        end_line: end.line,
+        end_character: Some(end.character),
+        kind: Some(kind),
+        collapsed_text: None,
+    })
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PhpRegion {
     start: usize,
@@ -5711,6 +6317,11 @@ impl SymbolIndex {
     }
 
     fn index_text_at_path(&mut self, text: &str, path: Option<&Path>) {
+        if php_document_uses_large_analysis(text) {
+            self.index_large_file(text, path);
+            return;
+        }
+
         let Some(tree) = parse_php(text) else {
             return;
         };
@@ -5718,6 +6329,86 @@ impl SymbolIndex {
         let imports = ImportMap::from_root(root, text);
 
         index_children(self, root, text, path, None, &imports);
+    }
+
+    fn index_large_file(&mut self, text: &str, path: Option<&Path>) {
+        let analysis = large_file_analysis(text);
+        for function in analysis.functions {
+            let name = qualify_name(&function.name, function.namespace.as_deref());
+            self.add_function(
+                name.clone(),
+                Signature {
+                    name,
+                    parameters: function.parameters,
+                    parameter_types: Vec::new(),
+                    return_type: None,
+                    is_variadic: function.is_variadic,
+                    is_abstract: false,
+                    location: source_location(path, function.name_start_byte),
+                    doc_summary: None,
+                },
+            );
+        }
+
+        for constant in analysis.constants {
+            let fqn = qualify_name(&constant.name, constant.namespace.as_deref());
+            self.add_constant(
+                fqn.clone(),
+                ConstantInfo {
+                    fqn,
+                    location: source_location(path, constant.name_start_byte),
+                },
+            );
+        }
+
+        for class in analysis.classes {
+            let fqn = qualify_name(&class.name, class.namespace.as_deref());
+            let mut class_info = ClassInfo {
+                fqn: fqn.clone(),
+                kind: Some(class.kind),
+                location: source_location(path, class.name_start_byte),
+                ..ClassInfo::default()
+            };
+
+            for method in class.methods {
+                let signature = Signature {
+                    name: method.name.clone(),
+                    parameters: method.parameters,
+                    parameter_types: Vec::new(),
+                    return_type: None,
+                    is_variadic: method.is_variadic,
+                    is_abstract: method.is_abstract,
+                    location: source_location(path, method.name_start_byte),
+                    doc_summary: None,
+                };
+                if method.name.eq_ignore_ascii_case("__construct") {
+                    class_info.constructor = Some(signature);
+                } else {
+                    class_info
+                        .methods
+                        .insert(normalize_method_key(&method.name), signature);
+                }
+            }
+
+            class_info.properties = class
+                .properties
+                .into_iter()
+                .map(|property| ClassPropertyInfo {
+                    name: property.name,
+                    is_static: property.is_static,
+                    location: source_location(path, property.name_start_byte),
+                })
+                .collect();
+            class_info.constants = class
+                .constants
+                .into_iter()
+                .map(|constant| ClassConstantInfo {
+                    name: constant.name,
+                    location: source_location(path, constant.name_start_byte),
+                })
+                .collect();
+            self.add_class(fqn, class_info);
+        }
     }
 
     fn add_function(&mut self, fqn: String, signature: Signature) {
@@ -12212,6 +12903,17 @@ mod tests {
         text
     }
 
+    fn generated_large_php_document(repetitions: usize) -> String {
+        let mut text = String::from(
+            "<?php\nnamespace App\\Large;\n\nconst GLOBAL_FLAG = true;\nfunction helper($value, ...$rest) {}\n\nclass HugeModel\n{\n    public const KIND = 'huge';\n    protected static $table = 'huge_models';\n\n    public function calculate($order, $notify): void\n    {\n",
+        );
+        for index in 0..repetitions {
+            text.push_str(&format!("        $total += {index};\n"));
+        }
+        text.push_str("    }\n}\n");
+        text
+    }
+
     #[test]
     fn parse_diagnostics_handles_deep_error_trees_without_stack_overflow() {
         let diagnostics = analyze_parse_diagnostics(&deeply_nested_if_document(2_048, false));
@@ -12230,6 +12932,74 @@ mod tests {
         );
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn large_file_analysis_returns_symbols_and_folding_without_full_parse() {
+        let text = generated_large_php_document(9_000);
+
+        assert!(php_document_uses_large_analysis(&text));
+        assert!(parse_php(&text).is_none());
+
+        let symbols = analyze_document_symbols(&text).symbols.expect("symbols");
+        let DocumentSymbolResponse::Nested(symbols) = symbols else {
+            panic!("nested document symbols");
+        };
+        let class_symbol = symbols
+            .iter()
+            .find(|symbol| symbol.name == "HugeModel")
+            .expect("class symbol");
+        let children = class_symbol.children.as_ref().expect("class children");
+
+        assert!(symbols.iter().any(|symbol| symbol.name == "helper"));
+        assert!(children.iter().any(|symbol| symbol.name == "calculate"));
+        assert!(children.iter().any(|symbol| symbol.name == "$table"));
+        assert!(children.iter().any(|symbol| symbol.name == "KIND"));
+        assert!(!analyze_folding_ranges(&text).ranges.is_empty());
+    }
+
+    #[test]
+    fn large_file_index_finds_class_method_function_and_constant() {
+        let text = generated_large_php_document(24_000);
+
+        assert!(php_document_uses_large_analysis(&text));
+
+        let mut index = SymbolIndex::default();
+        index.index_text(&text);
+
+        assert!(
+            index
+                .functions
+                .contains_key(&normalize_symbol_key("App\\Large\\helper"))
+        );
+        assert!(
+            index
+                .constants
+                .contains_key(&normalize_symbol_key("App\\Large\\GLOBAL_FLAG"))
+        );
+        let class_info = index
+            .classes
+            .get(&normalize_symbol_key("App\\Large\\HugeModel"))
+            .expect("class indexed");
+
+        assert_eq!(class_info.kind, Some(SymbolKind::CLASS));
+        assert!(
+            class_info
+                .methods
+                .contains_key(&normalize_method_key("calculate"))
+        );
+        assert!(
+            class_info
+                .properties
+                .iter()
+                .any(|property| property.name == "table")
+        );
+        assert!(
+            class_info
+                .constants
+                .iter()
+                .any(|constant| constant.name == "KIND")
+        );
     }
 
     #[test]
