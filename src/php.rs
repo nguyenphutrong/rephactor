@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{MAIN_SEPARATOR, Path, PathBuf};
 
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeLens, Command, CompletionItem,
@@ -1881,10 +1881,7 @@ fn include_literal_target(
     let (first_start, _, _) = segments.first()?;
     let (_, last_end, _) = segments.last()?;
     let before_quote = node_text.get(..*first_start)?;
-    let relative = segments
-        .iter()
-        .map(|(_, _, segment)| segment.as_str())
-        .collect::<String>();
+    let relative = concatenated_include_path(node_text, &segments)?;
     if relative.contains("://") {
         return None;
     }
@@ -1925,6 +1922,38 @@ fn quoted_string_segments(text: &str) -> Vec<(usize, usize, String)> {
     }
 
     segments
+}
+
+fn concatenated_include_path(text: &str, segments: &[(usize, usize, String)]) -> Option<String> {
+    let mut path = String::new();
+    let mut previous_end = None;
+
+    for (start, end, segment) in segments {
+        if let Some(previous_end) = previous_end {
+            let between = text.get(previous_end..*start)?;
+            if contains_directory_separator_constant(between) {
+                if !path.ends_with(['/', '\\']) {
+                    path.push(MAIN_SEPARATOR);
+                }
+                path.push_str(segment.trim_start_matches(['/', '\\']));
+            } else {
+                path.push_str(segment);
+            }
+        } else {
+            path.push_str(segment);
+        }
+        previous_end = Some(*end);
+    }
+
+    Some(path)
+}
+
+fn contains_directory_separator_constant(text: &str) -> bool {
+    text.chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase()
+        .contains("directory_separator")
 }
 
 fn include_path_base<'a>(

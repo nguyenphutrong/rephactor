@@ -4665,6 +4665,27 @@ fn lsp_returns_document_links_for_concatenated_literal_require_paths() {
 }
 
 #[test]
+fn lsp_returns_document_links_for_directory_separator_require_paths() {
+    let root = temp_project("document-links-directory-separator");
+    let mut server = LspProcess::start(&root);
+    let lib_dir = root.join("lib");
+    std::fs::create_dir_all(&lib_dir).expect("create lib dir");
+    let target = lib_dir.join("helpers.php");
+    std::fs::write(&target, "<?php\nfunction helper() {}\n").expect("write helper");
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nrequire __DIR__ . '/lib' . DIRECTORY_SEPARATOR . 'helpers.php';\n",
+    );
+
+    let links = server.document_links(&uri);
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["target"], file_uri(&target));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_document_links_for_parent_dir_require_paths() {
     let root = temp_project("document-links-parent-dir");
     let mut server = LspProcess::start(&root);
