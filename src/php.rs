@@ -9763,6 +9763,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "sort" => &["array", "flags"],
         "str_contains" => &["haystack", "needle"],
         "str_ends_with" => &["haystack", "needle"],
+        "str_ireplace" => &["search", "replace", "subject", "count"],
         "str_pad" => &["string", "length", "pad_string", "pad_type"],
         "str_repeat" => &["string", "times"],
         "str_starts_with" => &["haystack", "needle"],
@@ -9774,6 +9775,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "strtolower" => &["string"],
         "strtoupper" => &["string"],
         "substr" => &["string", "offset", "length"],
+        "substr_replace" => &["string", "replace", "offset", "length"],
+        "strtr" => &["string", "from", "to"],
         "sprintf" => &["format", "values"],
         "sqrt" => &["num"],
         "strtotime" => &["datetime", "base_timestamp"],
@@ -9924,6 +9927,7 @@ fn internal_function_parameter_types(
         "sort" => &[Some("array"), Some("int")],
         "str_contains" => &[Some("string"), Some("string")],
         "str_ends_with" => &[Some("string"), Some("string")],
+        "str_ireplace" => &[None, None, None, None],
         "str_pad" => &[Some("string"), Some("int"), Some("string"), Some("int")],
         "str_repeat" => &[Some("string"), Some("int")],
         "str_starts_with" => &[Some("string"), Some("string")],
@@ -9934,6 +9938,8 @@ fn internal_function_parameter_types(
         "strtolower" => &[Some("string")],
         "strtoupper" => &[Some("string")],
         "substr" => &[Some("string"), Some("int"), Some("int")],
+        "substr_replace" => &[Some("string"), Some("string"), Some("int"), Some("int")],
+        "strtr" => &[Some("string"), None, Some("string")],
         "sprintf" => &[Some("string"), None],
         "sqrt" => &[Some("float")],
         "strtotime" => &[Some("string"), Some("int")],
@@ -9994,12 +10000,15 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "sha1"
         | "sprintf"
         | "preg_quote"
+        | "str_ireplace"
         | "str_pad"
         | "str_repeat"
         | "strtolower"
         | "strtoupper"
         | "strval"
+        | "strtr"
         | "substr"
+        | "substr_replace"
         | "trim"
         | "ucfirst"
         | "ucwords" => "string",
@@ -10114,6 +10123,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "sort",
         "str_contains",
         "str_ends_with",
+        "str_ireplace",
         "str_pad",
         "str_repeat",
         "str_starts_with",
@@ -10125,6 +10135,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "strtolower",
         "strtoupper",
         "substr",
+        "substr_replace",
+        "strtr",
         "sprintf",
         "sqrt",
         "strtotime",

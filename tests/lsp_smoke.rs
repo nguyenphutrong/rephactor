@@ -1789,17 +1789,23 @@ fn lsp_returns_string_internal_function_metadata() {
     let root = temp_project("string-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nucw;\nstr_pa;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nucw;\nstr_pa;\nsubstr_re;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 3);
 
     assert!(items.iter().any(|item| item["label"] == "ucwords"));
+    let replace_items = server.completion(&completion_uri, 3, 9);
+    assert!(
+        replace_items
+            .iter()
+            .any(|item| item["label"] == "substr_replace")
+    );
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\nucfirst([]);\n",
+        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\nucfirst([]);\nsubstr_replace([], [], 'bad');\nstrtr([], [], 'x');\nfunction takes_int(int $value) {}\ntakes_int(str_ireplace('x', 'y', 'xyz'));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1824,6 +1830,18 @@ fn lsp_returns_string_internal_function_metadata() {
         diagnostic["message"] == "argument type mismatch for string: expected string, got array"
             && diagnostic["severity"] == 1
     }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for replace: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for offset: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
 
     let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
@@ -1846,6 +1864,24 @@ fn lsp_returns_string_internal_function_metadata() {
 
     assert!(ucfirst_markdown.contains("ucfirst($string)"));
     assert!(ucfirst_markdown.contains("[PHP manual](https://www.php.net/ucfirst)"));
+
+    let substr_replace_hover = server.hover(&diagnostics_uri, 5, 5).expect("hover result");
+    let substr_replace_markdown = substr_replace_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(
+        substr_replace_markdown.contains("substr_replace($string, $replace, $offset, $length)")
+    );
+    assert!(substr_replace_markdown.contains("[PHP manual](https://www.php.net/substr_replace)"));
+
+    let strtr_hover = server.hover(&diagnostics_uri, 6, 3).expect("hover result");
+    let strtr_markdown = strtr_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(strtr_markdown.contains("strtr($string, $from, $to)"));
+    assert!(strtr_markdown.contains("[PHP manual](https://www.php.net/strtr)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
