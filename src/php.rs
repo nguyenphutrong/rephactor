@@ -9284,7 +9284,8 @@ fn format_php_text(text: &str, ensure_final_newline: bool, php_only: bool) -> St
     let formatted = trim_trailing_whitespace(text, ensure_final_newline);
     if php_only {
         let formatted = normalize_php_declaration_blank_lines(&formatted, ensure_final_newline);
-        normalize_php_brace_placement(&formatted, ensure_final_newline)
+        let formatted = normalize_php_brace_placement(&formatted, ensure_final_newline);
+        normalize_php_indentation(&formatted, ensure_final_newline)
     } else {
         formatted
     }
@@ -9435,6 +9436,50 @@ fn is_control_declaration_line(trimmed: &str) -> bool {
     ]
     .iter()
     .any(|prefix| trimmed.starts_with(prefix))
+}
+
+fn normalize_php_indentation(text: &str, ensure_final_newline: bool) -> String {
+    let had_final_newline = text.ends_with('\n');
+    let mut level = 0usize;
+    let mut output = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            output.push(String::new());
+            continue;
+        }
+
+        let leading_closes = trimmed
+            .chars()
+            .take_while(|character| *character == '}')
+            .count();
+        level = level.saturating_sub(leading_closes);
+
+        if trimmed == "<?php" || trimmed.starts_with("namespace ") || trimmed.starts_with("use ") {
+            output.push(trimmed.to_string());
+        } else {
+            output.push(format!("{}{}", "    ".repeat(level), trimmed));
+        }
+
+        let opens = trimmed
+            .chars()
+            .filter(|character| *character == '{')
+            .count();
+        let closes = trimmed
+            .chars()
+            .filter(|character| *character == '}')
+            .count();
+        level = level
+            .saturating_add(opens)
+            .saturating_sub(closes.saturating_sub(leading_closes));
+    }
+
+    let mut formatted = output.join("\n");
+    if ensure_final_newline || had_final_newline {
+        formatted.push('\n');
+    }
+    formatted
 }
 
 fn variable_types_at_byte(

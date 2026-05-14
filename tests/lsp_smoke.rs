@@ -5931,6 +5931,46 @@ fn lsp_range_formats_php_brace_placement() {
 }
 
 #[test]
+fn lsp_formats_php_indentation() {
+    let root = temp_project("formatting-indentation");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction run()\n{\nif ($ok) {\nreturn true;\n}\n}\n",
+    );
+
+    let edits = server.formatting(&uri);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "<?php\n\nfunction run()\n{\n    if ($ok) {\n        return true;\n    }\n}\n"
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_range_formats_php_indentation() {
+    let root = temp_project("range-formatting-indentation");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction run()\n{\nif ($ok) {\nreturn true;\n}\n}\n",
+    );
+
+    let edits = server.range_formatting(&uri, 1, 7);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "function run()\n{\n    if ($ok) {\n        return true;\n    }\n}\n"
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_range_formats_php_declaration_blank_lines() {
     let root = temp_project("range-formatting-declaration-blank-lines");
     let mut server = LspProcess::start(&root);
