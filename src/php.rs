@@ -9283,7 +9283,8 @@ fn trim_trailing_whitespace(text: &str, ensure_final_newline: bool) -> String {
 fn format_php_text(text: &str, ensure_final_newline: bool, php_only: bool) -> String {
     let formatted = trim_trailing_whitespace(text, ensure_final_newline);
     if php_only {
-        normalize_php_declaration_blank_lines(&formatted, ensure_final_newline)
+        let formatted = normalize_php_declaration_blank_lines(&formatted, ensure_final_newline);
+        normalize_php_brace_placement(&formatted, ensure_final_newline)
     } else {
         formatted
     }
@@ -9381,6 +9382,59 @@ fn is_class_like_declaration_line(trimmed: &str) -> bool {
         || trimmed.starts_with("interface ")
         || trimmed.starts_with("trait ")
         || trimmed.starts_with("enum ")
+}
+
+fn normalize_php_brace_placement(text: &str, ensure_final_newline: bool) -> String {
+    let had_final_newline = text.ends_with('\n');
+    let mut output: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        if line.trim() == "{"
+            && let Some(previous) = output.last_mut()
+            && is_control_declaration_line(previous.trim())
+        {
+            previous.push_str(" {");
+            continue;
+        }
+
+        if let Some((declaration, brace)) = split_class_or_function_opening_brace(line) {
+            output.push(declaration);
+            output.push(brace);
+        } else {
+            output.push(line.to_string());
+        }
+    }
+
+    let mut formatted = output.join("\n");
+    if ensure_final_newline || had_final_newline {
+        formatted.push('\n');
+    }
+    formatted
+}
+
+fn split_class_or_function_opening_brace(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim_end();
+    let declaration = trimmed.strip_suffix('{')?.trim_end();
+    if !is_class_or_function_declaration_line(declaration.trim_start()) {
+        return None;
+    }
+    let indent = &line[..line.len().saturating_sub(line.trim_start().len())];
+    Some((declaration.to_string(), format!("{indent}{{")))
+}
+
+fn is_class_or_function_declaration_line(trimmed: &str) -> bool {
+    is_class_like_declaration_line(trimmed)
+        || trimmed.starts_with("function ")
+        || trimmed.contains(" function ")
+}
+
+fn is_control_declaration_line(trimmed: &str) -> bool {
+    [
+        "if ", "elseif ", "else", "for ", "foreach ", "while ", "do", "switch ", "try", "catch ",
+        "finally",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
 }
 
 fn variable_types_at_byte(

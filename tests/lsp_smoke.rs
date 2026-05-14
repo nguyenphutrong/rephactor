@@ -5861,7 +5861,7 @@ fn lsp_formats_trailing_whitespace_and_final_newline() {
     assert_eq!(edits.len(), 1);
     assert_eq!(
         edits[0]["newText"],
-        "<?php\n\nfunction run() {\n    return true;\n}\n"
+        "<?php\n\nfunction run()\n{\n    return true;\n}\n"
     );
     assert_eq!(
         edits[0]["range"]["start"],
@@ -5886,6 +5886,46 @@ fn lsp_formats_php_declaration_blank_lines() {
     assert_eq!(
         edits[0]["newText"],
         "<?php\nnamespace App;\n\nuse App\\Support\\Mailer;\nuse App\\Support\\Logger;\n\nclass Sender {}\n\nfunction helper() {}\n"
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_formats_php_brace_placement() {
+    let root = temp_project("formatting-brace-placement");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nclass Sender {\n    public function run() {\n        if ($ok)\n        {\n            return true;\n        }\n    }\n}\n",
+    );
+
+    let edits = server.formatting(&uri);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "<?php\n\nclass Sender\n{\n    public function run()\n    {\n        if ($ok) {\n            return true;\n        }\n    }\n}\n"
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_range_formats_php_brace_placement() {
+    let root = temp_project("range-formatting-brace-placement");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nfunction run() {\n    if ($ok)\n    {\n        return true;\n    }\n}\n",
+    );
+
+    let edits = server.range_formatting(&uri, 1, 7);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "function run()\n{\n    if ($ok) {\n        return true;\n    }\n}\n"
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
@@ -5923,7 +5963,7 @@ fn lsp_range_formats_trailing_whitespace() {
     let edits = server.range_formatting(&uri, 1, 3);
 
     assert_eq!(edits.len(), 1);
-    assert_eq!(edits[0]["newText"], "function run() {\n    return true;\n");
+    assert_eq!(edits[0]["newText"], "function run()\n{\n    return true;\n");
     assert_eq!(
         edits[0]["range"]["start"],
         json!({ "line": 1, "character": 0 })
