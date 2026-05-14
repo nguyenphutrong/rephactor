@@ -166,11 +166,11 @@ classes.
 Hover V1 shows a concise PHP signature, class FQN, constant FQN, class constant
 label, or property label, source location, and the nearest PHPDoc summary plus
 tag lines when available. Hover for seeded PHP internal functions, PHP
-internal class/interface symbols, and seeded PHP internal methods links to the
-official PHP manual, and seeded PHP internal constants show concise constant
-labels. Seeded internal functions include conservative parameter and return
-metadata for simple scalar/array contracts. It intentionally avoids rich PHPDoc
-rendering and
+internal class/interface symbols, seeded PHP internal constructors, and seeded
+PHP internal methods links to the official PHP manual, and seeded PHP internal
+constants show concise constant labels. Seeded internal functions include
+conservative parameter and return metadata for simple scalar/array contracts.
+It intentionally avoids rich PHPDoc rendering and
 returns no hover for ambiguous or dynamic symbols.
 
 Completion V1 returns deterministic prefix, camel-case, and underscore-aware
