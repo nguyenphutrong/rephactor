@@ -2241,9 +2241,11 @@ fn folding_kind_for_node(node: Node) -> Option<FoldingRangeKind> {
     match node.kind() {
         "comment" => Some(FoldingRangeKind::Comment),
         "namespace_use_declaration" => Some(FoldingRangeKind::Imports),
-        "compound_statement" | "declaration_list" | "heredoc" | "nowdoc" => {
-            Some(FoldingRangeKind::Region)
-        }
+        "array_creation_expression"
+        | "compound_statement"
+        | "declaration_list"
+        | "heredoc"
+        | "nowdoc" => Some(FoldingRangeKind::Region),
         _ => None,
     }
 }

@@ -4361,6 +4361,27 @@ fn lsp_returns_folding_ranges_for_heredoc_and_custom_regions() {
 }
 
 #[test]
+fn lsp_returns_folding_ranges_for_array_literals() {
+    let root = temp_project("folding-range-array-literal");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\n$config = [\n    'invoice' => [\n        'enabled' => true,\n    ],\n];\n",
+    );
+
+    let ranges = server.folding_ranges(&uri);
+
+    assert!(ranges.iter().any(|range| range["kind"] == "region"
+        && range["startLine"] == 1
+        && range["endLine"] == 5));
+    assert!(ranges.iter().any(|range| range["kind"] == "region"
+        && range["startLine"] == 2
+        && range["endLine"] == 4));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_parameter_name_inlay_hints() {
     let root = temp_project("inlay-hints");
     let mut server = LspProcess::start(&root);
