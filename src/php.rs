@@ -9655,9 +9655,13 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "file_put_contents" => &["filename", "data", "flags", "context"],
         "filesize" => &["filename"],
         "fclose" => &["stream"],
+        "feof" => &["stream"],
         "floor" => &["num"],
         "floatval" => &["value"],
+        "fgets" => &["stream", "length"],
         "fopen" => &["filename", "mode", "use_include_path", "context"],
+        "fread" => &["stream", "length"],
+        "fwrite" => &["stream", "data", "length"],
         "gettype" => &["value"],
         "hash" => &["algo", "data", "binary", "options"],
         "html_entity_decode" => &["string", "flags", "encoding"],
@@ -9789,9 +9793,13 @@ fn internal_function_parameter_types(
         "file_put_contents" => &[Some("string"), None, Some("int"), None],
         "filesize" => &[Some("string")],
         "fclose" => &[None],
+        "feof" => &[None],
         "floor" => &[Some("int")],
         "floatval" => &[None],
+        "fgets" => &[None, Some("int")],
         "fopen" => &[Some("string"), Some("string"), Some("bool"), None],
+        "fread" => &[None, Some("int")],
+        "fwrite" => &[None, Some("string"), Some("int")],
         "gettype" => &[None],
         "hash" => &[Some("string"), Some("string"), Some("bool"), Some("array")],
         "html_entity_decode" => &[Some("string"), Some("int"), Some("string")],
@@ -9892,8 +9900,8 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "array_filter" | "array_intersect" | "array_keys" | "array_map" | "array_merge"
         | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
         | "preg_split" => "array",
-        "array_key_exists" | "fclose" | "file_exists" | "in_array" | "is_array" | "is_bool"
-        | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
+        "array_key_exists" | "fclose" | "feof" | "file_exists" | "in_array" | "is_array"
+        | "is_bool" | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
         | "is_readable" | "is_string" | "is_writable" | "asort" | "ksort" | "rsort" | "sort"
         | "str_contains" | "str_ends_with" | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
@@ -9949,9 +9957,13 @@ fn internal_function_names() -> Vec<&'static str> {
         "file_put_contents",
         "filesize",
         "fclose",
+        "feof",
         "floor",
         "floatval",
+        "fgets",
         "fopen",
+        "fread",
+        "fwrite",
         "gettype",
         "hash",
         "html_entity_decode",

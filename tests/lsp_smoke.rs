@@ -1586,7 +1586,7 @@ fn lsp_returns_filesystem_io_internal_function_metadata() {
     let root = temp_project("filesystem-io-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nfile_get;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nfile_get;\nfwri;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 8);
@@ -1596,11 +1596,13 @@ fn lsp_returns_filesystem_io_internal_function_metadata() {
             .iter()
             .any(|item| item["label"] == "file_get_contents")
     );
+    let stream_items = server.completion(&completion_uri, 2, 4);
+    assert!(stream_items.iter().any(|item| item["label"] == "fwrite"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nfile_get_contents([], 'bad', null, 'bad');\nfile_put_contents([], 'data', 'bad');\nfunction takes_string(string $value) {}\ntakes_string(filesize('/tmp/file'));\n",
+        "<?php\nfile_get_contents([], 'bad', null, 'bad');\nfile_put_contents([], 'data', 'bad');\nfgets($stream, 'bad');\nfread($stream, 'bad');\nfwrite($stream, [], 'bad');\nfunction takes_string(string $value) {}\ntakes_string(filesize('/tmp/file'));\nfunction takes_string_again(string $value) {}\ntakes_string_again(feof($stream));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1627,7 +1629,19 @@ fn lsp_returns_filesystem_io_internal_function_metadata() {
             && diagnostic["severity"] == 1
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for length: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for data: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for value: expected string, got int"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got bool"
             && diagnostic["severity"] == 1
     }));
 
@@ -1640,6 +1654,22 @@ fn lsp_returns_filesystem_io_internal_function_metadata() {
         )
     );
     assert!(markdown.contains("[PHP manual](https://www.php.net/file_get_contents)"));
+
+    let fwrite_hover = server.hover(&diagnostics_uri, 5, 2).expect("hover result");
+    let fwrite_markdown = fwrite_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(fwrite_markdown.contains("fwrite($stream, $data, $length)"));
+    assert!(fwrite_markdown.contains("[PHP manual](https://www.php.net/fwrite)"));
+
+    let feof_hover = server.hover(&diagnostics_uri, 9, 22).expect("hover result");
+    let feof_markdown = feof_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(feof_markdown.contains("feof($stream)"));
+    assert!(feof_markdown.contains("[PHP manual](https://www.php.net/feof)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
