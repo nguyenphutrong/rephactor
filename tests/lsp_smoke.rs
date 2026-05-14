@@ -1526,7 +1526,7 @@ fn lsp_returns_filesystem_internal_function_metadata() {
     let root = temp_project("filesystem-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nfile_ex;\nscan;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nfile_ex;\nscan;\nmkd;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 7);
@@ -1538,11 +1538,13 @@ fn lsp_returns_filesystem_internal_function_metadata() {
             .iter()
             .any(|item| item["label"] == "scandir")
     );
+    let mutation_items = server.completion(&completion_uri, 3, 3);
+    assert!(mutation_items.iter().any(|item| item["label"] == "mkdir"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nfile_exists([]);\ndirname('/tmp', 'bad');\nglob([], 'bad');\nscandir([], 'bad');\nopendir([]);\n",
+        "<?php\nfile_exists([]);\ndirname('/tmp', 'bad');\nglob([], 'bad');\nscandir([], 'bad');\nopendir([]);\ncopy([], []);\nmkdir([], 'bad', 'bad');\nunlink([]);\nfunction takes_string(string $value) {}\ntakes_string(rename('/tmp/a', '/tmp/b'));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1576,6 +1578,26 @@ fn lsp_returns_filesystem_internal_function_metadata() {
             == "argument type mismatch for sorting_order: expected int, got string"
             && diagnostic["severity"] == 1
     }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for from: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for to: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for permissions: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for recursive: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got bool"
+            && diagnostic["severity"] == 1
+    }));
 
     let hover = server.hover(&diagnostics_uri, 2, 2).expect("hover result");
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
@@ -1598,6 +1620,22 @@ fn lsp_returns_filesystem_internal_function_metadata() {
 
     assert!(scandir_markdown.contains("scandir($directory, $sorting_order, $context)"));
     assert!(scandir_markdown.contains("[PHP manual](https://www.php.net/scandir)"));
+
+    let copy_hover = server.hover(&diagnostics_uri, 6, 2).expect("hover result");
+    let copy_markdown = copy_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(copy_markdown.contains("copy($from, $to, $context)"));
+    assert!(copy_markdown.contains("[PHP manual](https://www.php.net/copy)"));
+
+    let mkdir_hover = server.hover(&diagnostics_uri, 7, 2).expect("hover result");
+    let mkdir_markdown = mkdir_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(mkdir_markdown.contains("mkdir($directory, $permissions, $recursive, $context)"));
+    assert!(mkdir_markdown.contains("[PHP manual](https://www.php.net/mkdir)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

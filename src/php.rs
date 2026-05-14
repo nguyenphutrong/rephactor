@@ -9686,6 +9686,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "class_exists" => &["class", "autoload"],
         "closedir" => &["dir_handle"],
         "count" => &["value", "mode"],
+        "copy" => &["from", "to", "context"],
         "date" => &["format", "timestamp"],
         "dirname" => &["path", "levels"],
         "explode" => &["separator", "string", "limit"],
@@ -9748,6 +9749,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "md5" => &["string", "binary"],
         "method_exists" => &["object_or_class", "method"],
         "min" => &["value", "values"],
+        "mkdir" => &["directory", "permissions", "recursive", "context"],
         "opendir" => &["directory", "context"],
         "parse_url" => &["url", "component"],
         "pathinfo" => &["path", "flags"],
@@ -9766,7 +9768,9 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "rawurlencode" => &["string"],
         "readdir" => &["dir_handle"],
         "realpath" => &["path"],
+        "rename" => &["from", "to", "context"],
         "round" => &["num", "precision", "mode"],
+        "rmdir" => &["directory", "context"],
         "scandir" => &["directory", "sorting_order", "context"],
         "rsort" => &["array", "flags"],
         "rtrim" => &["string", "characters"],
@@ -9797,6 +9801,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "trim" => &["string", "characters"],
         "ucfirst" => &["string"],
         "ucwords" => &["string", "separators"],
+        "unlink" => &["filename", "context"],
         "unserialize" => &["data", "options"],
         "urldecode" => &["string"],
         "urlencode" => &["string"],
@@ -9859,6 +9864,7 @@ fn internal_function_parameter_types(
         "ceil" => &[Some("int")],
         "class_exists" => &[Some("string"), Some("bool")],
         "closedir" => &[None],
+        "copy" => &[Some("string"), Some("string"), None],
         "date" => &[Some("string"), Some("int")],
         "dirname" => &[Some("string"), Some("int")],
         "explode" => &[Some("string"), Some("string"), Some("int")],
@@ -9915,6 +9921,7 @@ fn internal_function_parameter_types(
         "md5" => &[Some("string"), Some("bool")],
         "method_exists" => &[None, Some("string")],
         "min" => &[None, None],
+        "mkdir" => &[Some("string"), Some("int"), Some("bool"), None],
         "opendir" => &[Some("string"), None],
         "parse_url" => &[Some("string"), Some("int")],
         "pathinfo" => &[Some("string"), Some("int")],
@@ -9945,7 +9952,9 @@ fn internal_function_parameter_types(
         "rawurlencode" => &[Some("string")],
         "readdir" => &[None],
         "realpath" => &[Some("string")],
+        "rename" => &[Some("string"), Some("string"), None],
         "round" => &[Some("int"), Some("int"), None],
+        "rmdir" => &[Some("string"), None],
         "scandir" => &[Some("string"), Some("int"), None],
         "rsort" => &[Some("array"), Some("int")],
         "rtrim" => &[Some("string"), Some("string")],
@@ -9975,6 +9984,7 @@ fn internal_function_parameter_types(
         "trim" => &[Some("string"), Some("string")],
         "ucfirst" => &[Some("string")],
         "ucwords" => &[Some("string"), Some("string")],
+        "unlink" => &[Some("string"), None],
         "unserialize" => &[Some("string"), Some("array")],
         "urldecode" => &[Some("string")],
         "urlencode" => &[Some("string")],
@@ -9999,12 +10009,14 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "array_filter" | "array_intersect" | "array_keys" | "array_map" | "array_merge"
         | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
         | "preg_grep" | "preg_split" => "array",
-        "array_key_exists" | "class_exists" | "fclose" | "feof" | "file_exists"
+        "array_key_exists" | "class_exists" | "copy" | "fclose" | "feof" | "file_exists"
         | "filter_has_var" | "function_exists" | "in_array" | "interface_exists" | "is_array"
         | "is_bool" | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
-        | "is_readable" | "is_string" | "is_writable" | "method_exists" | "property_exists"
-        | "trait_exists" | "asort" | "ksort" | "rsort" | "sort" | "str_contains"
-        | "str_ends_with" | "str_starts_with" => "bool",
+        | "is_readable" | "is_string" | "is_writable" | "method_exists" | "mkdir"
+        | "property_exists" | "rename" | "rmdir" | "trait_exists" | "unlink" | "asort"
+        | "ksort" | "rsort" | "sort" | "str_contains" | "str_ends_with" | "str_starts_with" => {
+            "bool"
+        }
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
         | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all"
         | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
@@ -10090,6 +10102,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "class_exists",
         "closedir",
         "count",
+        "copy",
         "date",
         "dirname",
         "explode",
@@ -10146,6 +10159,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "md5",
         "method_exists",
         "min",
+        "mkdir",
         "opendir",
         "parse_url",
         "pathinfo",
@@ -10164,7 +10178,9 @@ fn internal_function_names() -> Vec<&'static str> {
         "rawurlencode",
         "readdir",
         "realpath",
+        "rename",
         "round",
+        "rmdir",
         "scandir",
         "rsort",
         "rtrim",
@@ -10195,6 +10211,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "trim",
         "ucfirst",
         "ucwords",
+        "unlink",
         "unserialize",
         "urldecode",
         "urlencode",
