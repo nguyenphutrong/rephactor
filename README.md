@@ -310,8 +310,9 @@ Selection Range V1 returns syntax-tree ancestor ranges for smart selection
 expansion.
 
 Import refactors support adding an import for a resolvable fully-qualified
-class, function, or constant name, shortening that usage, sorting simple class
-imports, and removing unused simple class/function/constant imports.
+class, function, or constant name, shortening that usage, sorting simple
+class/function/constant imports, and removing unused simple
+class/function/constant imports.
 Destructive grouped-import rewrites are intentionally skipped.
 
 Zed currently applies LSP code actions directly. It does not show a PHPStorm-

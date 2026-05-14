@@ -6895,9 +6895,7 @@ fn sort_imports_action(
 ) -> Result<Option<CodeAction>, SkipReason> {
     let normal_imports = imports
         .iter()
-        .filter(|import| {
-            import.kind == ImportKind::Class && !import.is_grouped && !import.has_alias
-        })
+        .filter(|import| is_simple_sortable_import(import))
         .collect::<Vec<_>>();
     if normal_imports.len() < 2 {
         return Ok(None);
@@ -6921,24 +6919,30 @@ fn sort_imports_action(
     let sorted = {
         let mut imports = normal_imports
             .iter()
-            .map(|import| import.fqn.clone())
+            .map(|import| (import.kind, import.fqn.clone()))
             .collect::<Vec<_>>();
-        imports.sort_by_key(|import| normalize_symbol_key(import));
+        imports.sort_by_key(|(kind, fqn)| {
+            format!("{} {}", import_keyword(*kind), normalize_symbol_key(fqn))
+        });
         imports
     };
     if sorted
         .iter()
-        .map(|fqn| normalize_symbol_key(fqn))
-        .eq(normal_imports
-            .iter()
-            .map(|import| normalize_symbol_key(&import.fqn)))
+        .map(|(kind, fqn)| format!("{} {}", import_keyword(*kind), normalize_symbol_key(fqn)))
+        .eq(normal_imports.iter().map(|import| {
+            format!(
+                "{} {}",
+                import_keyword(import.kind),
+                normalize_symbol_key(&import.fqn)
+            )
+        }))
     {
         return Ok(None);
     }
 
     let new_text = sorted
         .iter()
-        .map(|fqn| format!("use {fqn};\n"))
+        .map(|(kind, fqn)| format!("{} {fqn};\n", import_keyword(*kind)))
         .collect::<String>();
     let edit = TextEdit::new(range_for_bytes(text, start_byte, end_byte)?, new_text);
 
@@ -6997,6 +7001,14 @@ fn is_simple_removable_import(import: &ImportDeclaration) -> bool {
         && !import.has_alias
 }
 
+fn is_simple_sortable_import(import: &ImportDeclaration) -> bool {
+    matches!(
+        import.kind,
+        ImportKind::Class | ImportKind::Function | ImportKind::Const
+    ) && !import.is_grouped
+        && !import.has_alias
+}
+
 fn insert_import_edit_with_kind(
     text: &str,
     root: Node,
@@ -7008,11 +7020,7 @@ fn insert_import_edit_with_kind(
     let Some(position) = lsp_position_for_byte_offset(text, insert_byte) else {
         return Err(SkipReason::InvalidCursorPosition);
     };
-    let prefix = match kind {
-        ImportKind::Class => "use",
-        ImportKind::Function => "use function",
-        ImportKind::Const => "use const",
-    };
+    let prefix = import_keyword(kind);
 
     Ok(TextEdit::new(
         Range {
@@ -7021,6 +7029,14 @@ fn insert_import_edit_with_kind(
         },
         format!("{prefix} {fqn};\n"),
     ))
+}
+
+fn import_keyword(kind: ImportKind) -> &'static str {
+    match kind {
+        ImportKind::Class => "use",
+        ImportKind::Function => "use function",
+        ImportKind::Const => "use const",
+    }
 }
 
 fn import_insert_byte(text: &str, root: Node, imports: &[ImportDeclaration]) -> usize {
@@ -10162,6 +10178,19 @@ mod tests {
         assert_eq!(
             apply_edits(text, &edits),
             "<?php\nnamespace App\\Http;\nuse App\\A;\nuse Zed\\B;\nnew B();\nnew A();\n"
+        );
+    }
+
+    #[test]
+    fn sorts_simple_function_and_const_imports() {
+        let text = "<?php\nnamespace App\\Http;\nuse function Zed\\send_report;\nuse const App\\API_VERSION;\nuse function App\\send_invoice;\nsend_report();\nsend_invoice();\necho API_VERSION;\n";
+
+        let action = action_by_title(text, 5, 1, "[Rephactor] Sort imports");
+        let edits = edits_from_action(action);
+
+        assert_eq!(
+            apply_edits(text, &edits),
+            "<?php\nnamespace App\\Http;\nuse const App\\API_VERSION;\nuse function App\\send_invoice;\nuse function Zed\\send_report;\nsend_report();\nsend_invoice();\necho API_VERSION;\n"
         );
     }
 
