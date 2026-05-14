@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
@@ -861,6 +862,9 @@ pub fn formatting_edits_for_text(text: &str) -> Vec<TextEdit> {
     if text.is_empty() {
         return Vec::new();
     }
+    if is_mixed_php_document(text) {
+        return mixed_php_formatting_edits(text);
+    }
 
     let formatted = format_php_text(text, true, is_php_only_document(text));
     if formatted == text {
@@ -895,12 +899,35 @@ pub fn range_formatting_edits_for_text(text: &str, range: Range) -> Vec<TextEdit
         return Vec::new();
     };
 
-    let formatted = format_php_text(selected_text, false, is_php_only_document(text));
+    let php_only = is_php_only_document(text)
+        || (is_mixed_php_document(text) && byte_range_in_php_region(text, start_byte, end_byte));
+    let formatted = format_php_text(selected_text, false, php_only);
     if formatted == selected_text {
         return Vec::new();
     }
 
     vec![TextEdit::new(range, formatted)]
+}
+
+fn mixed_php_formatting_edits(text: &str) -> Vec<TextEdit> {
+    let mut edits = Vec::new();
+    for region in php_regions(text) {
+        let Some(region_text) = text.get(region.start..region.end) else {
+            continue;
+        };
+        let formatted = format_php_text(region_text, false, true);
+        if formatted == region_text {
+            continue;
+        }
+        let Some(start) = lsp_position_for_byte_offset(text, region.start) else {
+            continue;
+        };
+        let Some(end) = lsp_position_for_byte_offset(text, region.end) else {
+            continue;
+        };
+        edits.push(TextEdit::new(Range { start, end }, formatted));
+    }
+    edits
 }
 
 pub fn inline_values_for_range(text: &str, range: Range) -> Vec<InlineValue> {
@@ -987,6 +1014,9 @@ fn import_code_actions_with_cache(
     let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
         return Err(SkipReason::InvalidCursorPosition);
     };
+    if is_mixed_php_document(text) && !byte_in_php_region(text, byte_offset) {
+        return Err(SkipReason::NoSupportedCall);
+    }
     let Some(tree) = parse_php(text) else {
         return Err(SkipReason::ParseError);
     };
@@ -5370,11 +5400,88 @@ fn parse_php(text: &str) -> Option<tree_sitter::Tree> {
 }
 
 fn parse_php_allowing_errors(text: &str) -> Option<tree_sitter::Tree> {
+    let parse_text = php_parse_text(text);
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_php::LANGUAGE_PHP.into())
         .ok()?;
-    parser.parse(text, None)
+    parser.parse(parse_text.as_ref(), None)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PhpRegion {
+    start: usize,
+    end: usize,
+}
+
+fn php_parse_text(text: &str) -> Cow<'_, str> {
+    if !is_mixed_php_document(text) {
+        return Cow::Borrowed(text);
+    }
+
+    let regions = php_regions(text);
+    let mut bytes = text.as_bytes().to_vec();
+    for byte in &mut bytes {
+        if *byte != b'\n' {
+            *byte = b' ';
+        }
+    }
+    for region in regions {
+        bytes[region.start..region.end].copy_from_slice(&text.as_bytes()[region.start..region.end]);
+    }
+    Cow::Owned(String::from_utf8(bytes).unwrap_or_else(|_| text.to_string()))
+}
+
+fn is_mixed_php_document(text: &str) -> bool {
+    let Some(first_open) = text.find("<?") else {
+        return false;
+    };
+    first_open > 0 || text.contains("?>")
+}
+
+fn byte_in_php_region(text: &str, byte_offset: usize) -> bool {
+    php_regions(text)
+        .iter()
+        .any(|region| region.start <= byte_offset && byte_offset <= region.end)
+}
+
+fn byte_range_in_php_region(text: &str, start_byte: usize, end_byte: usize) -> bool {
+    php_regions(text).iter().any(|region| {
+        region.start <= start_byte
+            && start_byte <= region.end
+            && (end_byte <= region.end
+                || text
+                    .get(region.end..end_byte)
+                    .is_some_and(|suffix| suffix.trim().is_empty()))
+    })
+}
+
+fn php_regions(text: &str) -> Vec<PhpRegion> {
+    let bytes = text.as_bytes();
+    let mut regions = Vec::new();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        let Some(relative_open) = text[index..].find("<?") else {
+            break;
+        };
+        let open = index + relative_open;
+        if !text[open..].starts_with("<?php") && !text[open..].starts_with("<?=") {
+            index = open + 2;
+            continue;
+        }
+        let close = text[open..]
+            .find("?>")
+            .map(|relative_close| open + relative_close + 2)
+            .unwrap_or(bytes.len());
+        regions.push(PhpRegion {
+            start: open,
+            end: close,
+        });
+        index = close;
+    }
+
+    regions
 }
 
 impl ImportMap {

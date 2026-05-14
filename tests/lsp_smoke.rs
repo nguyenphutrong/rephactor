@@ -3664,6 +3664,49 @@ fn lsp_returns_nested_document_symbols() {
 }
 
 #[test]
+fn lsp_handles_php_symbols_inside_mixed_html() {
+    let root = temp_project("mixed-html-php-symbols");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<html>\n<?php\nfunction send_invoice($invoice) {}\nsend_;\n?>\n</html>\n",
+    );
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let symbols = server.document_symbols(&uri);
+    assert!(
+        symbols
+            .iter()
+            .any(|symbol| symbol["name"] == "send_invoice")
+    );
+
+    let items = server.completion(&uri, 3, 5);
+    assert!(items.iter().any(|item| item["label"] == "send_invoice"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_ignores_malformed_html_around_valid_php() {
+    let root = temp_project("mixed-html-malformed-valid-php");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<div><span\n<?php\nfunction ok() {}\nok();\n?>\n");
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    assert_eq!(
+        notification["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics array")
+            .len(),
+        0
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_workspace_symbols_from_composer_project() {
     let root = temp_project("workspace-symbol");
     let src_dir = root.join("src");
@@ -5966,6 +6009,34 @@ fn lsp_range_formats_php_indentation() {
     assert_eq!(
         edits[0]["newText"],
         "function run()\n{\n    if ($ok) {\n        return true;\n    }\n}\n"
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_range_formats_only_php_region_inside_mixed_html() {
+    let root = temp_project("range-formatting-mixed-html-php");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<div>   \n<?php   \nfunction run() {\nreturn true;\n}\n?>\n</div>   \n",
+    );
+
+    let edits = server.range_formatting(&uri, 1, 6);
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "<?php\n\nfunction run()\n{\n    return true;\n}\n?>\n"
+    );
+    assert_eq!(
+        edits[0]["range"]["start"],
+        json!({ "line": 1, "character": 0 })
+    );
+    assert_eq!(
+        edits[0]["range"]["end"],
+        json!({ "line": 6, "character": 0 })
     );
     std::fs::remove_dir_all(root).expect("remove temp root");
 }

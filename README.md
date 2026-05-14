@@ -45,6 +45,8 @@ of the same resolver and project index.
 - Provide deterministic `textDocument/completion` for basic symbols.
 - Add conservative `use` declaration edits for unambiguous class completions.
 - Provide `textDocument/documentSymbol` for outline and breadcrumbs.
+- Detect PHP regions inside mixed HTML/PHP documents for PHP diagnostics,
+  completion, formatting, and document symbols.
 - Provide `workspace/symbol` for Composer-indexed project symbols.
 - Provide `textDocument/references` for exact AST symbol references.
 - Publish parse diagnostics for open PHP documents.
@@ -298,6 +300,9 @@ formatting. Whole-document formatting also ensures a final newline. For
 PHP-only documents, it conservatively normalizes blank lines around
 namespace/use/class/function declarations and simple brace placement for
 class/function/control blocks, then normalizes indentation by brace depth.
+Mixed HTML/PHP documents are PHP-region aware: Rephactor masks non-PHP text for
+PHP parsing and limits formatting edits to PHP regions. Embedded JS/CSS
+intelligence remains the responsibility of external JS/CSS language servers.
 
 Inlay Hint V1 shows parameter names for resolved positional call arguments. It
 also shows conservative return-type hints for function-like declarations,
@@ -382,6 +387,8 @@ files that are not open in the editor are picked up on the next request.
 - Interface/base method implementation lookup across indexed PHP files.
 - Type hierarchy for indexed class/interface inheritance.
 - Parse diagnostics for open PHP documents.
+- PHP diagnostics, completion, formatting, and document symbols inside mixed
+  HTML/PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Unresolved type-annotation diagnostics for open PHP documents.
 - Unresolved PHPDoc `@param`, `@return`, and `@throws` type diagnostics for
@@ -561,6 +568,7 @@ Rephactor returns no action instead of guessing for:
 - completion for dynamic receivers or unresolved classes
 - PSR-12 structural formatting beyond declaration blank-line and simple brace
   placement/indentation normalization
+- embedded JS/CSS code intelligence inside mixed HTML/PHP documents
 - static-analysis diagnostics beyond parser, callable-resolution, and
   conservative return/argument/assignment type mismatch errors
 - Composer autoload modes other than `psr-4`, `classmap`, and `files` entries
