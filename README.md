@@ -304,7 +304,8 @@ conservative type hints, including anonymous functions.
 Inline Value V1 returns PHP variable lookup ranges for debugger inline values.
 
 Document Link V1 links literal relative `include`/`require` paths, including
-`__DIR__` and `dirname(__FILE__)` concatenated literals, to files on disk.
+concatenated string literals plus `__DIR__` and `dirname(__FILE__)` prefixes,
+to files on disk.
 
 Selection Range V1 returns syntax-tree ancestor ranges for smart selection
 expansion.
@@ -455,8 +456,8 @@ files that are not open in the editor are picked up on the next request.
 - PHPDoc parameter-type inlay hints for untyped function-like parameters,
   including anonymous functions.
 - Inline value variable lookups for PHP variables in debugger ranges.
-- Document links for literal relative include/require paths and `__DIR__` or
-  `dirname(__FILE__)` concatenated literals.
+- Document links for literal relative include/require paths, concatenated
+  string literals, and `__DIR__` or `dirname(__FILE__)` prefixes.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Conservative function import refactors for normal

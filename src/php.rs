@@ -1877,24 +1877,57 @@ fn include_literal_target(
     base_dir: &Path,
 ) -> Option<(PathBuf, usize, usize)> {
     let node_text = node_text(node, text);
-    let quote_index = node_text.find(['"', '\''])?;
-    let quote = node_text.as_bytes()[quote_index] as char;
-    let before_quote = node_text.get(..quote_index)?;
-    let rest = node_text.get(quote_index + 1..)?;
-    let end_quote = rest.find(quote)?;
-    let relative = rest.get(..end_quote)?;
+    let segments = quoted_string_segments(node_text);
+    let (first_start, _, _) = segments.first()?;
+    let (_, last_end, _) = segments.last()?;
+    let before_quote = node_text.get(..*first_start)?;
+    let relative = segments
+        .iter()
+        .map(|(_, _, segment)| segment.as_str())
+        .collect::<String>();
     if relative.contains("://") {
         return None;
     }
 
-    let start_byte = node.start_byte() + quote_index + 1;
-    let end_byte = start_byte + relative.len();
+    let start_byte = node.start_byte() + first_start + 1;
+    let end_byte = node.start_byte() + last_end - 1;
     let target = if include_path_is_base_relative(before_quote) {
         base_dir.join(relative.trim_start_matches(['/', '\\']))
     } else {
         base_dir.join(relative)
     };
     Some((target, start_byte, end_byte))
+}
+
+fn quoted_string_segments(text: &str) -> Vec<(usize, usize, String)> {
+    let mut segments = Vec::new();
+    let mut index = 0;
+    let bytes = text.as_bytes();
+
+    while index < bytes.len() {
+        let quote = bytes[index] as char;
+        if quote != '\'' && quote != '"' {
+            index += 1;
+            continue;
+        }
+
+        let segment_start = index;
+        index += 1;
+        let content_start = index;
+        while index < bytes.len() && bytes[index] as char != quote {
+            index += 1;
+        }
+        if index >= bytes.len() {
+            break;
+        }
+
+        if let Some(content) = text.get(content_start..index) {
+            segments.push((segment_start, index + 1, content.to_string()));
+        }
+        index += 1;
+    }
+
+    segments
 }
 
 fn include_path_is_base_relative(before_quote: &str) -> bool {
