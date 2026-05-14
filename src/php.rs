@@ -9767,6 +9767,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "method_exists" => &["object_or_class", "method"],
         "min" => &["value", "values"],
         "mkdir" => &["directory", "permissions", "recursive", "context"],
+        "nl2br" => &["string", "use_xhtml"],
         "opendir" => &["directory", "context"],
         "parse_url" => &["url", "component"],
         "pathinfo" => &["path", "flags"],
@@ -9778,7 +9779,9 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "preg_replace" => &["pattern", "replacement", "subject", "limit", "count"],
         "preg_replace_callback" => &["pattern", "callback", "subject", "limit", "count", "flags"],
         "preg_split" => &["pattern", "subject", "limit", "flags"],
+        "parse_str" => &["string", "result"],
         "pow" => &["num", "exponent"],
+        "printf" => &["format", "values"],
         "random_bytes" => &["length"],
         "random_int" => &["min", "max"],
         "range" => &["start", "end", "step"],
@@ -9797,8 +9800,10 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "serialize" => &["value"],
         "sha1" => &["string", "binary"],
         "sort" => &["array", "flags"],
+        "sscanf" => &["string", "format", "vars"],
         "str_contains" => &["haystack", "needle"],
         "str_ends_with" => &["haystack", "needle"],
+        "str_getcsv" => &["string", "separator", "enclosure", "escape"],
         "str_ireplace" => &["search", "replace", "subject", "count"],
         "str_pad" => &["string", "length", "pad_string", "pad_type"],
         "str_repeat" => &["string", "times"],
@@ -9810,6 +9815,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "strlen" => &["string"],
         "strtolower" => &["string"],
         "strtoupper" => &["string"],
+        "strip_tags" => &["string", "allowed_tags"],
         "substr" => &["string", "offset", "length"],
         "substr_replace" => &["string", "replace", "offset", "length"],
         "strtr" => &["string", "from", "to"],
@@ -9829,6 +9835,9 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "unserialize" => &["data", "options"],
         "urldecode" => &["string"],
         "urlencode" => &["string"],
+        "vprintf" => &["format", "values"],
+        "vsprintf" => &["format", "values"],
+        "wordwrap" => &["string", "width", "break", "cut"],
         _ => return None,
     };
 
@@ -9850,6 +9859,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
                 | "array_replace"
                 | "array_replace_recursive"
                 | "compact"
+                | "printf"
+                | "sscanf"
                 | "sprintf"
         ),
         is_abstract: false,
@@ -9969,6 +9980,7 @@ fn internal_function_parameter_types(
         "method_exists" => &[None, Some("string")],
         "min" => &[None, None],
         "mkdir" => &[Some("string"), Some("int"), Some("bool"), None],
+        "nl2br" => &[Some("string"), Some("bool")],
         "opendir" => &[Some("string"), None],
         "parse_url" => &[Some("string"), Some("int")],
         "pathinfo" => &[Some("string"), Some("int")],
@@ -9992,7 +10004,9 @@ fn internal_function_parameter_types(
         "preg_replace" => &[Some("string"), None, None, Some("int"), None],
         "preg_replace_callback" => &[Some("string"), None, None, Some("int"), None, Some("int")],
         "preg_split" => &[Some("string"), Some("string"), Some("int"), Some("int")],
+        "parse_str" => &[Some("string"), None],
         "pow" => &[Some("float"), Some("float")],
+        "printf" => &[Some("string"), None],
         "random_bytes" => &[Some("int")],
         "random_int" => &[Some("int"), Some("int")],
         "range" => &[None, None, None],
@@ -10011,8 +10025,15 @@ fn internal_function_parameter_types(
         "serialize" => &[None],
         "sha1" => &[Some("string"), Some("bool")],
         "sort" => &[Some("array"), Some("int")],
+        "sscanf" => &[Some("string"), Some("string"), None],
         "str_contains" => &[Some("string"), Some("string")],
         "str_ends_with" => &[Some("string"), Some("string")],
+        "str_getcsv" => &[
+            Some("string"),
+            Some("string"),
+            Some("string"),
+            Some("string"),
+        ],
         "str_ireplace" => &[None, None, None, None],
         "str_pad" => &[Some("string"), Some("int"), Some("string"), Some("int")],
         "str_repeat" => &[Some("string"), Some("int")],
@@ -10023,6 +10044,7 @@ fn internal_function_parameter_types(
         "strlen" => &[Some("string")],
         "strtolower" => &[Some("string")],
         "strtoupper" => &[Some("string")],
+        "strip_tags" => &[Some("string"), Some("string")],
         "substr" => &[Some("string"), Some("int"), Some("int")],
         "substr_replace" => &[Some("string"), Some("string"), Some("int"), Some("int")],
         "strtr" => &[Some("string"), None, Some("string")],
@@ -10042,6 +10064,9 @@ fn internal_function_parameter_types(
         "unserialize" => &[Some("string"), Some("array")],
         "urldecode" => &[Some("string")],
         "urlencode" => &[Some("string")],
+        "vprintf" => &[Some("string"), Some("array")],
+        "vsprintf" => &[Some("string"), Some("array")],
+        "wordwrap" => &[Some("string"), Some("int"), Some("string"), Some("bool")],
         _ => &[][..],
     };
     let imports = ImportMap::default();
@@ -10080,7 +10105,9 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "explode"
         | "range"
         | "preg_grep"
-        | "preg_split" => "array",
+        | "preg_split"
+        | "sscanf"
+        | "str_getcsv" => "array",
         "array_key_exists"
         | "array_walk"
         | "array_walk_recursive"
@@ -10128,8 +10155,8 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
         | "extract" | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match"
-        | "preg_match_all" | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time"
-        | "random_int" => "int",
+        | "preg_match_all" | "printf" | "round" | "strlen" | "strpos" | "strrpos" | "strtotime"
+        | "time" | "random_int" | "vprintf" => "int",
         "array_product" | "array_sum" | "disk_free_space" | "disk_total_space" => "float",
         "base64_decode"
         | "base64_encode"
@@ -10167,6 +10194,7 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "strtoupper"
         | "strval"
         | "strtr"
+        | "strip_tags"
         | "substr"
         | "substr_replace"
         | "sys_get_temp_dir"
@@ -10175,7 +10203,10 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "ucfirst"
         | "ucwords"
         | "urldecode"
-        | "urlencode" => "string",
+        | "urlencode"
+        | "vsprintf"
+        | "wordwrap" => "string",
+        "nl2br" => "string",
         "lcfirst" => "string",
         "boolval" => "bool",
         "floatval" | "pow" | "sqrt" => "float",
@@ -10291,7 +10322,9 @@ fn internal_function_names() -> Vec<&'static str> {
         "method_exists",
         "min",
         "mkdir",
+        "nl2br",
         "opendir",
+        "parse_str",
         "parse_url",
         "pathinfo",
         "property_exists",
@@ -10303,6 +10336,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "preg_replace_callback",
         "preg_split",
         "pow",
+        "printf",
         "random_bytes",
         "random_int",
         "range",
@@ -10321,8 +10355,10 @@ fn internal_function_names() -> Vec<&'static str> {
         "serialize",
         "sha1",
         "sort",
+        "sscanf",
         "str_contains",
         "str_ends_with",
+        "str_getcsv",
         "str_ireplace",
         "str_pad",
         "str_repeat",
@@ -10334,6 +10370,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "strlen",
         "strtolower",
         "strtoupper",
+        "strip_tags",
         "substr",
         "substr_replace",
         "strtr",
@@ -10353,6 +10390,9 @@ fn internal_function_names() -> Vec<&'static str> {
         "unserialize",
         "urldecode",
         "urlencode",
+        "vprintf",
+        "vsprintf",
+        "wordwrap",
     ]
 }
 

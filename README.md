@@ -521,10 +521,12 @@ files that are not open in the editor are picked up on the next request.
   `chgrp`, `chmod`, `chown`, `copy`, `disk_free_space`, `disk_total_space`,
   `filesize`, `filter_has_var`, `filter_input`, `filter_var`, `fclose`, `feof`,
   `fgets`, `fopen`, `fread`, `fwrite`, `is_file`, `is_link`, `link`, `mkdir`,
-  `readlink`, `rename`, `rmdir`, `symlink`, `sys_get_temp_dir`, `tempnam`, `touch`, `unlink`,
+  `nl2br`, `parse_str`, `printf`, `readlink`, `rename`, `rmdir`, `sscanf`,
+  `str_getcsv`, `strip_tags`, `symlink`, `sys_get_temp_dir`, `tempnam`, `touch`, `unlink`,
   `closedir`, `glob`, `opendir`, `readdir`, `scandir`, `preg_grep`, `preg_match_all`,
   `preg_quote`, `preg_replace`, `preg_replace_callback`, `preg_split`,
-  `htmlspecialchars`, `mb_strlen`, `mb_substr`, `urldecode`, and `urlencode`,
+  `htmlspecialchars`, `mb_strlen`, `mb_substr`, `urldecode`, `urlencode`,
+  `vprintf`, `vsprintf`, and `wordwrap`,
   with PHP manual links in hover.
 - Calls that already contain safe named arguments and still have remaining
   positional arguments. Rephactor inserts only the missing names.

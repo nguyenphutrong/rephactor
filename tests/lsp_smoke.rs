@@ -1901,7 +1901,7 @@ fn lsp_returns_string_internal_function_metadata() {
     let completion_file = root.join("completion.php");
     let completion_uri = server.open_php(
         &completion_file,
-        "<?php\nucw;\nstr_pa;\nsubstr_re;\nurlen;\n",
+        "<?php\nucw;\nstr_pa;\nsubstr_re;\nurlen;\nwordw;\n",
     );
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
@@ -1916,11 +1916,13 @@ fn lsp_returns_string_internal_function_metadata() {
     );
     let url_items = server.completion(&completion_uri, 4, 5);
     assert!(url_items.iter().any(|item| item["label"] == "urlencode"));
+    let format_items = server.completion(&completion_uri, 5, 5);
+    assert!(format_items.iter().any(|item| item["label"] == "wordwrap"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\nucfirst([]);\nsubstr_replace([], [], 'bad');\nstrtr([], [], 'x');\nbase64_decode([], 'bad');\nrawurlencode([]);\nfunction takes_int(int $value) {}\ntakes_int(str_ireplace('x', 'y', 'xyz'));\ntakes_int(urlencode('x'));\n",
+        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\nucfirst([]);\nsubstr_replace([], [], 'bad');\nstrtr([], [], 'x');\nbase64_decode([], 'bad');\nrawurlencode([]);\nwordwrap([], 'bad', [], 'bad');\nstr_getcsv([], [], []);\nvprintf([], 'bad');\nparse_str([]);\nfunction takes_int(int $value) {}\ntakes_int(str_ireplace('x', 'y', 'xyz'));\ntakes_int(urlencode('x'));\nfunction takes_string(string $value) {}\ntakes_string(printf('%s', 'x'));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1959,6 +1961,26 @@ fn lsp_returns_string_internal_function_metadata() {
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for strict: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for width: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for cut: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for separator: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for format: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got int"
             && diagnostic["severity"] == 1
     }));
 
@@ -2010,8 +2032,24 @@ fn lsp_returns_string_internal_function_metadata() {
     assert!(base64_markdown.contains("base64_decode($string, $strict)"));
     assert!(base64_markdown.contains("[PHP manual](https://www.php.net/base64_decode)"));
 
+    let wordwrap_hover = server.hover(&diagnostics_uri, 9, 5).expect("hover result");
+    let wordwrap_markdown = wordwrap_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(wordwrap_markdown.contains("wordwrap($string, $width, $break, $cut)"));
+    assert!(wordwrap_markdown.contains("[PHP manual](https://www.php.net/wordwrap)"));
+
+    let getcsv_hover = server.hover(&diagnostics_uri, 10, 5).expect("hover result");
+    let getcsv_markdown = getcsv_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(getcsv_markdown.contains("str_getcsv($string, $separator, $enclosure, $escape)"));
+    assert!(getcsv_markdown.contains("[PHP manual](https://www.php.net/str_getcsv)"));
+
     let urlencode_hover = server
-        .hover(&diagnostics_uri, 11, 12)
+        .hover(&diagnostics_uri, 15, 12)
         .expect("hover result");
     let urlencode_markdown = urlencode_hover["contents"]["value"]
         .as_str()
