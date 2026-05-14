@@ -1570,9 +1570,12 @@ fn hover_for_position_with_cache(
     let imports = ImportMap::from_root(root, text);
     let index = cache.index_for_document(uri, text, open_documents);
 
-    if let Ok(call) = find_call_at_byte(root, text, byte_offset) {
+    if let Ok(target) = find_call_at_byte(root, text, byte_offset)
+        .map(|call| call.target)
+        .or_else(|_| find_call_target_at_byte(root, text, byte_offset))
+    {
         let signature = index.resolve(
-            &call.target,
+            &target,
             root,
             text,
             byte_offset,
@@ -1580,7 +1583,7 @@ fn hover_for_position_with_cache(
             &imports,
         )?;
         return Ok(hover_from_parts(
-            signature_label(&call.target, &signature),
+            signature_label(&target, &signature),
             signature.location.as_ref(),
             signature.doc_summary.as_deref(),
         ));
@@ -6551,6 +6554,21 @@ fn find_call_at_byte(root: Node, text: &str, byte_offset: usize) -> Result<CallI
     call_info(node, text)
 }
 
+fn find_call_target_at_byte(
+    root: Node,
+    text: &str,
+    byte_offset: usize,
+) -> Result<CallTarget, SkipReason> {
+    let Some(node) = find_smallest_call(root, byte_offset) else {
+        return Err(SkipReason::NoSupportedCall);
+    };
+    if node.kind() != "function_call_expression" {
+        return Err(SkipReason::NoSupportedCall);
+    }
+
+    call_target_for_call_node(node, text)
+}
+
 fn find_smallest_name<'tree>(node: Node<'tree>, byte_offset: usize) -> Option<Node<'tree>> {
     if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
         return None;
@@ -6872,8 +6890,11 @@ fn edits_for_call(
         return Err(SkipReason::UnpackingArgument);
     }
 
-    if call.arguments.len() > signature.parameters.len() || call.arguments.is_empty() {
+    if call.arguments.len() > signature.parameters.len() {
         return Err(SkipReason::UnsafeNamedArguments);
+    }
+    if call.arguments.is_empty() {
+        return Err(SkipReason::NoEdits);
     }
 
     let mut edits = Vec::new();
@@ -9685,6 +9706,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "is_writable" => &["filename"],
         "json_decode" => &["json", "associative", "depth", "flags"],
         "json_encode" => &["value", "flags", "depth"],
+        "json_last_error" => &[][..],
+        "json_last_error_msg" => &[][..],
         "ksort" => &["array", "flags"],
         "lcfirst" => &["string"],
         "ltrim" => &["string", "characters"],
@@ -9828,6 +9851,8 @@ fn internal_function_parameter_types(
         "is_writable" => &[Some("string")],
         "json_decode" => &[Some("string"), Some("bool"), Some("int"), Some("int")],
         "json_encode" => &[None, Some("int"), Some("int")],
+        "json_last_error" => &[],
+        "json_last_error_msg" => &[],
         "ksort" => &[Some("array"), Some("int")],
         "lcfirst" => &[Some("string")],
         "ltrim" => &[Some("string"), Some("string")],
@@ -9915,13 +9940,39 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "is_readable" | "is_string" | "is_writable" | "asort" | "ksort" | "rsort" | "sort"
         | "str_contains" | "str_ends_with" | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
-        | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all" | "round" | "strlen"
-        | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
-        "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "random_bytes"
-        | "realpath" | "rtrim" | "date" | "file_get_contents" | "gettype" | "hash"
-        | "html_entity_decode" | "htmlspecialchars" | "http_build_query" | "mb_strtolower"
-        | "mb_strtoupper" | "mb_substr" | "md5" | "serialize" | "sha1" | "sprintf" | "str_pad"
-        | "str_repeat" | "strtolower" | "strtoupper" | "strval" | "substr" | "trim" | "ucfirst"
+        | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all"
+        | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
+        "basename"
+        | "dirname"
+        | "implode"
+        | "json_encode"
+        | "ltrim"
+        | "random_bytes"
+        | "realpath"
+        | "rtrim"
+        | "date"
+        | "file_get_contents"
+        | "gettype"
+        | "hash"
+        | "html_entity_decode"
+        | "htmlspecialchars"
+        | "http_build_query"
+        | "json_last_error_msg"
+        | "mb_strtolower"
+        | "mb_strtoupper"
+        | "mb_substr"
+        | "md5"
+        | "serialize"
+        | "sha1"
+        | "sprintf"
+        | "str_pad"
+        | "str_repeat"
+        | "strtolower"
+        | "strtoupper"
+        | "strval"
+        | "substr"
+        | "trim"
+        | "ucfirst"
         | "ucwords" => "string",
         "lcfirst" => "string",
         "boolval" => "bool",
@@ -9997,6 +10048,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "is_writable",
         "json_decode",
         "json_encode",
+        "json_last_error",
+        "json_last_error_msg",
         "ksort",
         "lcfirst",
         "ltrim",

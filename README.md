@@ -504,6 +504,7 @@ files that are not open in the editor are picked up on the next request.
 - Project symbols under Composer `autoload` and `autoload-dev` `psr-4`,
   `classmap`, and `files` entries.
 - A seed set of PHP internal functions, such as `str_replace`, `json_encode`,
+  `json_decode`, `json_last_error`, `json_last_error_msg`,
   `preg_match`, `in_array`, `str_starts_with`, `array_values`, `file_exists`,
   `dirname`, `basename`, `realpath`, `str_pad`, `str_repeat`, `strpos`, `ltrim`,
   `is_string`, `array_chunk`, `array_combine`, `array_diff`, `array_fill`,

@@ -1393,6 +1393,60 @@ fn lsp_returns_datetime_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_json_internal_function_metadata() {
+    let root = temp_project("json-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\njson_last;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 9);
+
+    assert!(items.iter().any(|item| item["label"] == "json_last_error"));
+    assert!(
+        items
+            .iter()
+            .any(|item| item["label"] == "json_last_error_msg")
+    );
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\njson_last_error();\njson_last_error_msg();\nfunction takes_string(string $value) {}\ntakes_string(json_last_error());\nfunction takes_int(int $value) {}\ntakes_int(json_last_error_msg());\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got int"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("json_last_error()"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/json_last_error)"));
+
+    let message_hover = server.hover(&diagnostics_uri, 2, 5).expect("hover result");
+    let message_markdown = message_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(message_markdown.contains("json_last_error_msg()"));
+    assert!(message_markdown.contains("[PHP manual](https://www.php.net/json_last_error_msg)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_math_internal_function_metadata() {
     let root = temp_project("math-internal-functions");
     let mut server = LspProcess::start(&root);
