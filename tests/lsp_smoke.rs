@@ -113,6 +113,10 @@ impl LspProcess {
             initialize["result"]["capabilities"]["selectionRangeProvider"],
             json!(true)
         );
+        assert_eq!(
+            initialize["result"]["capabilities"]["experimental"]["typeHierarchyProvider"],
+            json!(true)
+        );
         server.notify("initialized", json!({}));
         server
     }
@@ -264,6 +268,49 @@ impl LspProcess {
             .get("result")
             .filter(|result| !result.is_null())
             .cloned()
+    }
+
+    fn prepare_type_hierarchy(&mut self, uri: &str, line: u32, character: u32) -> Vec<Value> {
+        let response = self.request(
+            "textDocument/prepareTypeHierarchy",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+        response
+            .get("result")
+            .and_then(|result| result.as_array())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn type_hierarchy_supertypes(&mut self, item: &Value) -> Vec<Value> {
+        let response = self.request(
+            "typeHierarchy/supertypes",
+            json!({
+                "item": item
+            }),
+        );
+        response
+            .get("result")
+            .and_then(|result| result.as_array())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn type_hierarchy_subtypes(&mut self, item: &Value) -> Vec<Value> {
+        let response = self.request(
+            "typeHierarchy/subtypes",
+            json!({
+                "item": item
+            }),
+        );
+        response
+            .get("result")
+            .and_then(|result| result.as_array())
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn selection_range(&mut self, uri: &str, line: u32, character: u32) -> Vec<Value> {
@@ -2690,6 +2737,129 @@ fn lsp_returns_implementations_for_interface_method() {
         implementations[0]["range"]["start"],
         json!({ "line": 2, "character": 54 })
     );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_type_hierarchy_for_same_file_classes() {
+    let root = temp_project("type-hierarchy-same-file");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\ninterface Sender {}\nclass BaseSender {}\nclass EmailSender extends BaseSender implements Sender {}\n";
+    let uri = server.open_php(&file, text);
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let base_items = server.prepare_type_hierarchy(&uri, 2, 8);
+    assert_eq!(base_items.len(), 1);
+    assert_eq!(base_items[0]["name"], "BaseSender");
+
+    let subtypes = server.type_hierarchy_subtypes(&base_items[0]);
+    assert_eq!(subtypes.len(), 1);
+    assert_eq!(subtypes[0]["name"], "EmailSender");
+
+    let child_items = server.prepare_type_hierarchy(&uri, 3, 8);
+    let supertypes = server.type_hierarchy_supertypes(&child_items[0]);
+    let names = supertypes
+        .iter()
+        .map(|item| item["name"].as_str().expect("name"))
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["BaseSender", "Sender"]);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_type_hierarchy_for_composer_psr4_classes() {
+    let root = temp_project("type-hierarchy-psr4");
+    let src_dir = root.join("src");
+    let contracts_dir = src_dir.join("Contracts");
+    let mail_dir = src_dir.join("Mail");
+    std::fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+    std::fs::create_dir_all(&mail_dir).expect("create mail dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .expect("write composer");
+    let sender_path = contracts_dir.join("Sender.php");
+    let email_path = mail_dir.join("EmailSender.php");
+    std::fs::write(
+        &sender_path,
+        "<?php\nnamespace App\\Contracts;\ninterface Sender {}\n",
+    )
+    .expect("write sender");
+    std::fs::write(
+        &email_path,
+        "<?php\nnamespace App\\Mail;\nclass EmailSender implements \\App\\Contracts\\Sender {}\n",
+    )
+    .expect("write email sender");
+
+    let mut server = LspProcess::start(&root);
+    let uri = server.open_php(
+        &sender_path,
+        "<?php\nnamespace App\\Contracts;\ninterface Sender {}\n",
+    );
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.prepare_type_hierarchy(&uri, 2, 12);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["detail"], "App\\Contracts\\Sender");
+
+    let subtypes = server.type_hierarchy_subtypes(&items[0]);
+    assert_eq!(subtypes.len(), 1);
+    assert_eq!(subtypes[0]["detail"], "App\\Mail\\EmailSender");
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_type_hierarchy_for_interface_implementations() {
+    let root = temp_project("type-hierarchy-interface");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\ninterface Sender {}\nclass EmailSender implements Sender {}\nclass SmsSender implements Sender {}\n";
+    let uri = server.open_php(&file, text);
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.prepare_type_hierarchy(&uri, 1, 12);
+    let subtypes = server.type_hierarchy_subtypes(&items[0]);
+    let names = subtypes
+        .iter()
+        .map(|item| item["name"].as_str().expect("name"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, vec!["EmailSender", "SmsSender"]);
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_type_hierarchy_parent_chain() {
+    let root = temp_project("type-hierarchy-parent-chain");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let text = "<?php\nclass GrandParentSender {}\nclass ParentSender extends GrandParentSender {}\nclass ChildSender extends ParentSender {}\n";
+    let uri = server.open_php(&file, text);
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let child_items = server.prepare_type_hierarchy(&uri, 3, 8);
+    let parents = server.type_hierarchy_supertypes(&child_items[0]);
+    assert_eq!(parents.len(), 1);
+    assert_eq!(parents[0]["name"], "ParentSender");
+
+    let grandparents = server.type_hierarchy_supertypes(&parents[0]);
+    assert_eq!(grandparents.len(), 1);
+    assert_eq!(grandparents[0]["name"], "GrandParentSender");
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_returns_empty_type_hierarchy_for_unresolved_symbol() {
+    let root = temp_project("type-hierarchy-unresolved");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nnew MissingSender();\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.prepare_type_hierarchy(&uri, 1, 6);
+    assert!(items.is_empty());
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

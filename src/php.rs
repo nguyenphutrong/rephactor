@@ -11,8 +11,8 @@ use tower_lsp::lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel,
     InlineValue, InlineValueVariableLookup, Location, MarkupContent, MarkupKind,
     ParameterInformation, ParameterLabel, Position, Range, RenameFile, ResourceOp, SelectionRange,
-    SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit, Url,
-    WorkspaceEdit,
+    SignatureHelp, SignatureInformation, SymbolInformation, SymbolKind, TextEdit,
+    TypeHierarchyItem, Url, WorkspaceEdit,
 };
 use tree_sitter::{Node, Parser};
 
@@ -35,6 +35,7 @@ struct Signature {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ClassInfo {
     fqn: String,
+    kind: Option<SymbolKind>,
     location: Option<SourceLocation>,
     doc_summary: Option<String>,
     methods: HashMap<String, Signature>,
@@ -199,6 +200,13 @@ pub struct DocumentSymbolAnalysis {
 #[derive(Debug)]
 pub struct WorkspaceSymbolAnalysis {
     pub symbols: Vec<SymbolInformation>,
+    pub skip_reason: Option<SkipReason>,
+    pub index_cache_status: IndexCacheStatus,
+}
+
+#[derive(Debug)]
+pub struct TypeHierarchyAnalysis {
+    pub items: Vec<TypeHierarchyItem>,
     pub skip_reason: Option<SkipReason>,
     pub index_cache_status: IndexCacheStatus,
 }
@@ -666,6 +674,58 @@ pub fn analyze_workspace_symbols(
         symbols,
         index_cache_status,
     }
+}
+
+pub fn analyze_prepare_type_hierarchy_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> TypeHierarchyAnalysis {
+    let index_cache_status = cache.status_for_document(uri);
+    match prepare_type_hierarchy_with_cache(uri, text, position, open_documents, cache) {
+        Ok(items) => TypeHierarchyAnalysis {
+            skip_reason: items.is_empty().then_some(SkipReason::NoEdits),
+            items,
+            index_cache_status,
+        },
+        Err(reason) => TypeHierarchyAnalysis {
+            items: Vec::new(),
+            skip_reason: Some(reason),
+            index_cache_status,
+        },
+    }
+}
+
+pub fn analyze_type_hierarchy_supertypes(
+    root_uri: Option<&Url>,
+    item: &TypeHierarchyItem,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> TypeHierarchyAnalysis {
+    analyze_type_hierarchy_related(
+        root_uri,
+        item,
+        open_documents,
+        cache,
+        TypeHierarchyDirection::Super,
+    )
+}
+
+pub fn analyze_type_hierarchy_subtypes(
+    root_uri: Option<&Url>,
+    item: &TypeHierarchyItem,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> TypeHierarchyAnalysis {
+    analyze_type_hierarchy_related(
+        root_uri,
+        item,
+        open_documents,
+        cache,
+        TypeHierarchyDirection::Sub,
+    )
 }
 
 pub fn analyze_references_for_position_with_cache(
@@ -1451,6 +1511,229 @@ fn implementation_for_position_with_cache(
     } else {
         Ok(GotoDefinitionResponse::Array(locations))
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TypeHierarchyDirection {
+    Super,
+    Sub,
+}
+
+fn prepare_type_hierarchy_with_cache(
+    uri: &Url,
+    text: &str,
+    position: Position,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> Result<Vec<TypeHierarchyItem>, SkipReason> {
+    let Some(byte_offset) = byte_offset_for_lsp_position(text, position) else {
+        return Err(SkipReason::InvalidCursorPosition);
+    };
+    let Some(tree) = parse_php(text) else {
+        return Err(SkipReason::ParseError);
+    };
+    let root = tree.root_node();
+    let namespace = namespace_at_byte(root, text, byte_offset);
+    let imports = ImportMap::from_root(root, text);
+    let index = cache.index_for_document(uri, text, open_documents);
+    let open_paths = open_project_documents(open_documents);
+    let Some(class_info) = type_hierarchy_class_at_position(
+        &index,
+        root,
+        text,
+        byte_offset,
+        namespace.as_deref(),
+        &imports,
+    ) else {
+        return Ok(Vec::new());
+    };
+    let Some(item) = type_hierarchy_item_for_class(class_info, &open_paths) else {
+        return Ok(Vec::new());
+    };
+
+    Ok(vec![item])
+}
+
+fn analyze_type_hierarchy_related(
+    root_uri: Option<&Url>,
+    item: &TypeHierarchyItem,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+    direction: TypeHierarchyDirection,
+) -> TypeHierarchyAnalysis {
+    let (index_cache_status, index) =
+        type_hierarchy_index(root_uri, &item.uri, open_documents, cache);
+    let open_paths = open_project_documents(open_documents);
+    let Some(fqn) = type_hierarchy_item_fqn(item) else {
+        return TypeHierarchyAnalysis {
+            items: Vec::new(),
+            skip_reason: Some(SkipReason::NoSupportedCall),
+            index_cache_status,
+        };
+    };
+    let Some(class_info) = index.classes.get(&normalize_symbol_key(&fqn)) else {
+        return TypeHierarchyAnalysis {
+            items: Vec::new(),
+            skip_reason: Some(SkipReason::UnresolvedCallable(fqn)),
+            index_cache_status,
+        };
+    };
+
+    let items = match direction {
+        TypeHierarchyDirection::Super => {
+            type_hierarchy_supertypes_for_class(&index, class_info, &open_paths)
+        }
+        TypeHierarchyDirection::Sub => {
+            type_hierarchy_subtypes_for_class(&index, class_info, &open_paths)
+        }
+    };
+
+    TypeHierarchyAnalysis {
+        skip_reason: items.is_empty().then_some(SkipReason::NoEdits),
+        items,
+        index_cache_status,
+    }
+}
+
+fn type_hierarchy_index(
+    root_uri: Option<&Url>,
+    item_uri: &Url,
+    open_documents: &HashMap<Url, String>,
+    cache: &mut ProjectIndexCache,
+) -> (IndexCacheStatus, SymbolIndex) {
+    if let Some(project_root) = root_uri.and_then(project_root_from_workspace_uri) {
+        let status = cache.status_for_project_root(&project_root);
+        return (
+            status,
+            cache.index_for_project_root(&project_root, open_documents),
+        );
+    }
+    if let Some(project_root) = project_root_for_uri(item_uri) {
+        let status = cache.status_for_project_root(&project_root);
+        return (
+            status,
+            cache.index_for_project_root(&project_root, open_documents),
+        );
+    }
+
+    let mut index = SymbolIndex::default();
+    for (path, open_text) in open_project_documents(open_documents) {
+        index.index_text_at_path(&open_text, Some(&path));
+    }
+    (IndexCacheStatus::NoProject, index)
+}
+
+fn type_hierarchy_class_at_position<'a>(
+    index: &'a SymbolIndex,
+    root: Node,
+    text: &str,
+    byte_offset: usize,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Option<&'a ClassInfo> {
+    if let Some(name_node) = find_class_like_declaration_name_at_byte(root, byte_offset) {
+        let class_name = clean_name_text(node_text(name_node, text));
+        let declaration_namespace = namespace_at_byte(root, text, name_node.start_byte());
+        return index.resolve_class(&class_name, declaration_namespace.as_deref(), imports);
+    }
+
+    let name_node = find_name_reference_at_byte(root, text, byte_offset)?;
+    let class_name = clean_name_text(node_text(name_node, text));
+    index.resolve_class(&class_name, namespace, imports)
+}
+
+fn find_class_like_declaration_name_at_byte<'tree>(
+    node: Node<'tree>,
+    byte_offset: usize,
+) -> Option<Node<'tree>> {
+    if byte_offset < node.start_byte() || byte_offset > node.end_byte() {
+        return None;
+    }
+    if matches!(
+        node.kind(),
+        "class_declaration" | "interface_declaration" | "trait_declaration"
+    ) && let Some(name_node) = node.child_by_field_name("name")
+        && name_node.start_byte() <= byte_offset
+        && byte_offset <= name_node.end_byte()
+    {
+        return Some(name_node);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = find_class_like_declaration_name_at_byte(child, byte_offset) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+fn type_hierarchy_supertypes_for_class(
+    index: &SymbolIndex,
+    class_info: &ClassInfo,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Vec<TypeHierarchyItem> {
+    let mut items = class_info
+        .parents
+        .iter()
+        .chain(class_info.interfaces.iter())
+        .chain(class_info.traits.iter())
+        .filter_map(|related_name| index.classes.get(&normalize_symbol_key(related_name)))
+        .filter_map(|related_info| type_hierarchy_item_for_class(related_info, open_paths))
+        .collect::<Vec<_>>();
+    items.sort_by_key(|item| item.detail.clone().unwrap_or_else(|| item.name.clone()));
+    items
+}
+
+fn type_hierarchy_subtypes_for_class(
+    index: &SymbolIndex,
+    target: &ClassInfo,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Vec<TypeHierarchyItem> {
+    let target_key = normalize_symbol_key(&target.fqn);
+    let mut items = index
+        .classes
+        .values()
+        .filter(|class_info| normalize_symbol_key(&class_info.fqn) != target_key)
+        .filter(|class_info| {
+            class_info
+                .parents
+                .iter()
+                .chain(class_info.interfaces.iter())
+                .chain(class_info.traits.iter())
+                .any(|related_name| normalize_symbol_key(related_name) == target_key)
+        })
+        .filter_map(|class_info| type_hierarchy_item_for_class(class_info, open_paths))
+        .collect::<Vec<_>>();
+    items.sort_by_key(|item| item.detail.clone().unwrap_or_else(|| item.name.clone()));
+    items
+}
+
+fn type_hierarchy_item_for_class(
+    class_info: &ClassInfo,
+    open_paths: &HashMap<PathBuf, String>,
+) -> Option<TypeHierarchyItem> {
+    let location = location_for_source(class_info.location.as_ref()?, open_paths)?;
+    Some(TypeHierarchyItem {
+        name: last_name_segment(&class_info.fqn).to_string(),
+        kind: class_info.kind.unwrap_or(SymbolKind::CLASS),
+        tags: None,
+        detail: Some(class_info.fqn.clone()),
+        uri: location.uri,
+        range: location.range,
+        selection_range: location.range,
+        data: Some(serde_json::Value::String(class_info.fqn.clone())),
+    })
+}
+
+fn type_hierarchy_item_fqn(item: &TypeHierarchyItem) -> Option<String> {
+    item.data
+        .as_ref()
+        .and_then(|data| data.as_str())
+        .map(|data| data.to_string())
+        .or_else(|| item.detail.clone())
+        .or_else(|| Some(item.name.clone()))
 }
 
 fn implementation_locations_for_method(
@@ -5872,6 +6155,7 @@ fn index_class(
     let fqn = qualify_name(node_text(name_node, text), namespace);
     let mut class_info = ClassInfo {
         fqn: fqn.clone(),
+        kind: Some(class_like_symbol_kind(node.kind())),
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_hover_before(text, node.start_byte()),
         parents: class_like_names_from_direct_child(node, "base_clause", text, namespace),
@@ -6014,6 +6298,13 @@ fn index_method(
 
 fn method_is_abstract(node: Node, text: &str) -> bool {
     node.child_by_field_name("body").is_none() || node_text(node, text).contains("abstract")
+}
+
+fn class_like_symbol_kind(kind: &str) -> SymbolKind {
+    match kind {
+        "interface_declaration" => SymbolKind::INTERFACE,
+        _ => SymbolKind::CLASS,
+    }
 }
 
 fn collect_document_symbols(node: Node, text: &str) -> Result<Vec<DocumentSymbol>, SkipReason> {
@@ -6222,7 +6513,7 @@ fn workspace_symbols_for_index(
         if workspace_query_matches(&class_info.fqn, query)
             && let Some(symbol) = symbol_information(
                 class_info.fqn.clone(),
-                SymbolKind::CLASS,
+                class_info.kind.unwrap_or(SymbolKind::CLASS),
                 class_info.location.as_ref(),
                 None,
                 open_documents,

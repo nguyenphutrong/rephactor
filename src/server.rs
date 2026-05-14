@@ -9,11 +9,12 @@ use crate::php::{
     analyze_diagnostics_for_document_with_cache, analyze_document_highlights,
     analyze_document_links, analyze_document_symbols, analyze_folding_ranges,
     analyze_hover_for_position_with_cache, analyze_implementation_for_position_with_cache,
-    analyze_inlay_hints_for_range_with_cache, analyze_references_for_position_with_cache,
-    analyze_rename_for_position_with_cache, analyze_selection_ranges,
-    analyze_signature_help_for_position_with_cache,
-    analyze_type_definition_for_position_with_cache, analyze_workspace_symbols,
-    formatting_edits_for_text, inline_values_for_range, range_formatting_edits_for_text,
+    analyze_inlay_hints_for_range_with_cache, analyze_prepare_type_hierarchy_with_cache,
+    analyze_references_for_position_with_cache, analyze_rename_for_position_with_cache,
+    analyze_selection_ranges, analyze_signature_help_for_position_with_cache,
+    analyze_type_definition_for_position_with_cache, analyze_type_hierarchy_subtypes,
+    analyze_type_hierarchy_supertypes, analyze_workspace_symbols, formatting_edits_for_text,
+    inline_values_for_range, range_formatting_edits_for_text,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::request::{
@@ -35,8 +36,9 @@ use tower_lsp::lsp_types::{
     OneOf, ReferenceParams, RenameParams, SelectionRange, SelectionRangeParams,
     SelectionRangeProviderCapability, ServerCapabilities, ServerInfo, SignatureHelp,
     SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, TypeDefinitionProviderCapability, Url, WorkspaceEdit,
-    WorkspaceSymbolParams,
+    TextDocumentSyncKind, TextEdit, TypeDefinitionProviderCapability, TypeHierarchyItem,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Url,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -143,6 +145,9 @@ fn server_capabilities() -> ServerCapabilities {
         document_formatting_provider: Some(OneOf::Left(true)),
         document_range_formatting_provider: Some(OneOf::Left(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+        experimental: Some(serde_json::json!({
+            "typeHierarchyProvider": true
+        })),
         ..ServerCapabilities::default()
     }
 }
@@ -607,6 +612,154 @@ impl LanguageServer for RephactorLanguageServer {
             .await;
 
         Ok(analysis.definition)
+    }
+
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let started_at = Instant::now();
+        let document_and_open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            let open_documents = documents.texts();
+            documents
+                .get(&uri)
+                .map(|document| (document.text.clone(), open_documents))
+        };
+
+        let analysis = if let Some((document_text, open_documents)) = document_and_open_documents {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_prepare_type_hierarchy_with_cache(
+                &uri,
+                &document_text,
+                position,
+                &open_documents,
+                &mut index_cache,
+            )
+        } else {
+            crate::php::TypeHierarchyAnalysis {
+                items: Vec::new(),
+                skip_reason: Some(crate::php::SkipReason::NoSupportedCall),
+                index_cache_status: crate::php::IndexCacheStatus::NoProject,
+            }
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor prepareTypeHierarchy {}:{}:{} -> {} item(s) in {}ms ({})",
+            uri,
+            position.line,
+            position.character,
+            analysis.items.len(),
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if analysis.items.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok((!analysis.items.is_empty()).then_some(analysis.items))
+    }
+
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let started_at = Instant::now();
+        let root_uri = self
+            .root_uri
+            .read()
+            .expect("root uri lock poisoned")
+            .clone();
+        let open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.texts()
+        };
+        let analysis = {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_type_hierarchy_supertypes(
+                root_uri.as_ref(),
+                &params.item,
+                &open_documents,
+                &mut index_cache,
+            )
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor typeHierarchy/supertypes {} -> {} item(s) in {}ms ({})",
+            params.item.name,
+            analysis.items.len(),
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if analysis.items.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok((!analysis.items.is_empty()).then_some(analysis.items))
+    }
+
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let started_at = Instant::now();
+        let root_uri = self
+            .root_uri
+            .read()
+            .expect("root uri lock poisoned")
+            .clone();
+        let open_documents = {
+            let documents = self.documents.read().expect("document lock poisoned");
+            documents.texts()
+        };
+        let analysis = {
+            let mut index_cache = self.index_cache.write().expect("index cache lock poisoned");
+            analyze_type_hierarchy_subtypes(
+                root_uri.as_ref(),
+                &params.item,
+                &open_documents,
+                &mut index_cache,
+            )
+        };
+        let elapsed = started_at.elapsed();
+
+        let mut log_message = format!(
+            "Rephactor typeHierarchy/subtypes {} -> {} item(s) in {}ms ({})",
+            params.item.name,
+            analysis.items.len(),
+            elapsed.as_millis(),
+            analysis.index_cache_status
+        );
+        if analysis.items.is_empty()
+            && let Some(reason) = &analysis.skip_reason
+        {
+            log_message.push_str(": ");
+            log_message.push_str(&reason.to_string());
+        }
+
+        self.client
+            .log_message(MessageType::INFO, log_message)
+            .await;
+
+        Ok((!analysis.items.is_empty()).then_some(analysis.items))
     }
 
     async fn selection_range(

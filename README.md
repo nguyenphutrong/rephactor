@@ -37,6 +37,8 @@ of the same resolver and project index.
 - Provide `textDocument/declaration` for implemented methods.
 - Provide `textDocument/typeDefinition` for locally typed variables.
 - Provide `textDocument/implementation` for class/interface inheritance.
+- Provide `textDocument/prepareTypeHierarchy`, `typeHierarchy/supertypes`,
+  and `typeHierarchy/subtypes` for indexed class/interface inheritance.
 - Provide `textDocument/hover` for resolved symbols.
 - Provide `textDocument/rename` for exact AST symbol references.
 - Provide `textDocument/codeLens` reference counts for declarations.
@@ -372,6 +374,7 @@ files that are not open in the editor are picked up on the next request.
   `$this->property` access.
 - Class/interface implementation lookup across indexed PHP files.
 - Interface/base method implementation lookup across indexed PHP files.
+- Type hierarchy for indexed class/interface inheritance.
 - Parse diagnostics for open PHP documents.
 - Unresolved and ambiguous callable diagnostics for open PHP documents.
 - Unresolved type-annotation diagnostics for open PHP documents.
