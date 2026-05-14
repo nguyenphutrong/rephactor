@@ -1271,17 +1271,17 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     let root = temp_project("array-utility-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\narray_rev;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\narray_red;\narray_rev;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 9);
 
-    assert!(items.iter().any(|item| item["label"] == "array_reverse"));
+    assert!(items.iter().any(|item| item["label"] == "array_reduce"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\n",
+        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1304,6 +1304,14 @@ fn lsp_returns_array_utility_internal_function_metadata() {
 
     assert!(markdown.contains("array_reverse($array, $preserve_keys)"));
     assert!(markdown.contains("[PHP manual](https://www.php.net/array_reverse)"));
+
+    let reduce_hover = server.hover(&diagnostics_uri, 3, 8).expect("hover result");
+    let reduce_markdown = reduce_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(reduce_markdown.contains("array_reduce($array, $callback, $initial)"));
+    assert!(reduce_markdown.contains("[PHP manual](https://www.php.net/array_reduce)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

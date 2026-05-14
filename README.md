@@ -506,8 +506,9 @@ files that are not open in the editor are picked up on the next request.
 - A seed set of PHP internal functions, such as `str_replace`, `json_encode`,
   `preg_match`, `in_array`, `str_starts_with`, `array_values`, `file_exists`,
   `dirname`, `basename`, `realpath`, `str_repeat`, `strpos`, `ltrim`,
-  `is_string`, `array_reverse`, `array_unique`, `date`, `strtotime`, `round`,
-  `abs`, `hash`, `md5`, `serialize`, `gettype`, `intval`, `strval`,
+  `is_string`, `array_reduce`, `array_reverse`, `array_unique`, `date`,
+  `strtotime`, `round`, `abs`, `hash`, `md5`, `serialize`, `gettype`,
+  `intval`, `strval`,
   `file_get_contents`, `file_put_contents`, `filesize`, `fopen`, `is_file`,
   `preg_match_all`, `preg_split`, `htmlspecialchars`, `mb_strlen`, and
   `mb_substr`, with PHP manual links in hover.
