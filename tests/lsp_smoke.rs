@@ -2541,6 +2541,93 @@ fn lsp_returns_runtime_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_preserves_internal_function_metadata_after_registry_migration() {
+    let root = temp_project("internal-function-registry");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(
+        &completion_file,
+        "<?php\nstr_repl;\narray_chu;\nfilter_v;\nmkd;\n",
+    );
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let string_items = server.completion(&completion_uri, 1, 8);
+    assert!(
+        string_items
+            .iter()
+            .any(|item| item["label"] == "str_replace")
+    );
+    let array_items = server.completion(&completion_uri, 2, 9);
+    assert!(
+        array_items
+            .iter()
+            .any(|item| item["label"] == "array_chunk")
+    );
+    let filter_items = server.completion(&completion_uri, 3, 8);
+    assert!(
+        filter_items
+            .iter()
+            .any(|item| item["label"] == "filter_var")
+    );
+    let filesystem_items = server.completion(&completion_uri, 4, 3);
+    assert!(filesystem_items.iter().any(|item| item["label"] == "mkdir"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nstr_replace('a', 'b', 'abc');\narray_chunk([], 'bad');\nfilter_var('abc', 'bad');\nmkdir([], 'bad', 'bad');\nfunction takes_string(string $value) {}\ntakes_string(array_chunk([], 2));\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for length: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for filter: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for directory: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for permissions: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for recursive: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+
+    let replace_hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
+    let replace_markdown = replace_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(replace_markdown.contains("str_replace($search, $replace, $subject, $count)"));
+    assert!(replace_markdown.contains("[PHP manual](https://www.php.net/str_replace)"));
+
+    let signature_help = server
+        .signature_help(&diagnostics_uri, 1, 23)
+        .expect("signature help result");
+    assert_eq!(
+        signature_help["signatures"][0]["label"],
+        "str_replace($search, $replace, $subject, $count)"
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_declaration_for_implemented_method() {
     let root = temp_project("method-declaration");
     let mut server = LspProcess::start(&root);
