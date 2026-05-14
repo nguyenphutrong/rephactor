@@ -305,7 +305,7 @@ Inline Value V1 returns PHP variable lookup ranges for debugger inline values.
 
 Document Link V1 links literal relative `include`/`require` paths, including
 concatenated string literals plus `__DIR__`, `dirname(__FILE__)`, and
-`dirname(__DIR__)` prefixes, to files on disk.
+`dirname(__DIR__)` prefixes with optional dirname levels, to files on disk.
 
 Selection Range V1 returns syntax-tree ancestor ranges for smart selection
 expansion.
@@ -458,7 +458,7 @@ files that are not open in the editor are picked up on the next request.
 - Inline value variable lookups for PHP variables in debugger ranges.
 - Document links for literal relative include/require paths, concatenated
   string literals, and `__DIR__`, `dirname(__FILE__)`, or `dirname(__DIR__)`
-  prefixes.
+  prefixes with optional dirname levels.
 - Syntax-tree selection ranges.
 - Conservative class import refactors for normal `use Foo\Bar;` declarations.
 - Conservative function import refactors for normal

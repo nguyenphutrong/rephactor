@@ -1938,9 +1938,16 @@ fn include_path_base<'a>(
         .collect::<String>()
         .to_ascii_lowercase();
 
-    if normalized.contains("dirname(__dir__)") {
+    if let Some(levels) = dirname_levels(&normalized, "__dir__") {
         return (
-            base_dir.parent().unwrap_or(base_dir),
+            ancestor_path(base_dir, levels),
+            relative.trim_start_matches(['/', '\\']),
+        );
+    }
+
+    if let Some(levels) = dirname_levels(&normalized, "__file__") {
+        return (
+            ancestor_path(base_dir, levels.saturating_sub(1)),
             relative.trim_start_matches(['/', '\\']),
         );
     }
@@ -1950,6 +1957,28 @@ fn include_path_base<'a>(
     }
 
     (base_dir, relative)
+}
+
+fn dirname_levels(normalized: &str, argument: &str) -> Option<usize> {
+    let prefix = format!("dirname({argument}");
+    let start = normalized.find(&prefix)?;
+    let rest = normalized.get(start + prefix.len()..)?;
+    if rest.starts_with(')') {
+        return Some(1);
+    }
+    let level_text = rest.strip_prefix(',')?.split(')').next()?;
+    level_text
+        .parse::<usize>()
+        .ok()
+        .filter(|levels| *levels > 0)
+}
+
+fn ancestor_path(path: &Path, levels: usize) -> &Path {
+    let mut current = path;
+    for _ in 0..levels {
+        current = current.parent().unwrap_or(current);
+    }
+    current
 }
 
 fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> {
