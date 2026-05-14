@@ -1956,17 +1956,28 @@ fn lsp_returns_regex_escaping_internal_function_metadata() {
     let root = temp_project("regex-escaping-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nhtmlsp;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nhtmlsp;\npreg_rep;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 6);
 
     assert!(items.iter().any(|item| item["label"] == "htmlspecialchars"));
+    let regex_items = server.completion(&completion_uri, 2, 8);
+    assert!(
+        regex_items
+            .iter()
+            .any(|item| item["label"] == "preg_replace")
+    );
+    assert!(
+        regex_items
+            .iter()
+            .any(|item| item["label"] == "preg_replace_callback")
+    );
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nhtmlspecialchars([], 'bad', []);\npreg_split([], [], 'bad');\nfunction takes_string(string $value) {}\ntakes_string(preg_match_all('/x/', 'x'));\n",
+        "<?php\nhtmlspecialchars([], 'bad', []);\npreg_split([], [], 'bad');\npreg_replace([], 'x', 'subject', 'bad');\npreg_replace_callback('/x/', $callback, 'subject', 'bad', null, 'bad');\nfunction takes_string(string $value) {}\ntakes_string(preg_match_all('/x/', 'x'));\nfunction takes_int(int $value) {}\ntakes_int(preg_quote('/'));\ntakes_string(preg_grep('/x/', []));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -2000,7 +2011,19 @@ fn lsp_returns_regex_escaping_internal_function_metadata() {
             && diagnostic["severity"] == 1
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for value: expected string, got int"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got array"
             && diagnostic["severity"] == 1
     }));
 
@@ -2009,6 +2032,24 @@ fn lsp_returns_regex_escaping_internal_function_metadata() {
 
     assert!(markdown.contains("htmlspecialchars($string, $flags, $encoding, $double_encode)"));
     assert!(markdown.contains("[PHP manual](https://www.php.net/htmlspecialchars)"));
+
+    let replace_hover = server.hover(&diagnostics_uri, 3, 5).expect("hover result");
+    let replace_markdown = replace_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(
+        replace_markdown.contains("preg_replace($pattern, $replacement, $subject, $limit, $count)")
+    );
+    assert!(replace_markdown.contains("[PHP manual](https://www.php.net/preg_replace)"));
+
+    let quote_hover = server.hover(&diagnostics_uri, 8, 12).expect("hover result");
+    let quote_markdown = quote_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(quote_markdown.contains("preg_quote($str, $delimiter)"));
+    assert!(quote_markdown.contains("[PHP manual](https://www.php.net/preg_quote)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

@@ -9742,8 +9742,12 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "opendir" => &["directory", "context"],
         "parse_url" => &["url", "component"],
         "pathinfo" => &["path", "flags"],
+        "preg_grep" => &["pattern", "array", "flags"],
         "preg_match_all" => &["pattern", "subject", "matches", "flags", "offset"],
         "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
+        "preg_quote" => &["str", "delimiter"],
+        "preg_replace" => &["pattern", "replacement", "subject", "limit", "count"],
+        "preg_replace_callback" => &["pattern", "callback", "subject", "limit", "count", "flags"],
         "preg_split" => &["pattern", "subject", "limit", "flags"],
         "pow" => &["num", "exponent"],
         "random_bytes" => &["length"],
@@ -9887,6 +9891,7 @@ fn internal_function_parameter_types(
         "opendir" => &[Some("string"), None],
         "parse_url" => &[Some("string"), Some("int")],
         "pathinfo" => &[Some("string"), Some("int")],
+        "preg_grep" => &[Some("string"), Some("array"), Some("int")],
         "preg_match_all" => &[
             Some("string"),
             Some("string"),
@@ -9901,6 +9906,9 @@ fn internal_function_parameter_types(
             Some("int"),
             Some("int"),
         ],
+        "preg_quote" => &[Some("string"), Some("string")],
+        "preg_replace" => &[Some("string"), None, None, Some("int"), None],
+        "preg_replace_callback" => &[Some("string"), None, None, Some("int"), None, Some("int")],
         "preg_split" => &[Some("string"), Some("string"), Some("int"), Some("int")],
         "pow" => &[Some("float"), Some("float")],
         "random_bytes" => &[Some("int")],
@@ -9954,7 +9962,7 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         "array_chunk" | "array_column" | "array_diff" | "array_fill" | "array_fill_keys"
         | "array_filter" | "array_intersect" | "array_keys" | "array_map" | "array_merge"
         | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
-        | "preg_split" => "array",
+        | "preg_grep" | "preg_split" => "array",
         "array_key_exists" | "fclose" | "feof" | "file_exists" | "in_array" | "is_array"
         | "is_bool" | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
         | "is_readable" | "is_string" | "is_writable" | "asort" | "ksort" | "rsort" | "sort"
@@ -9985,6 +9993,7 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "serialize"
         | "sha1"
         | "sprintf"
+        | "preg_quote"
         | "str_pad"
         | "str_repeat"
         | "strtolower"
@@ -10084,8 +10093,12 @@ fn internal_function_names() -> Vec<&'static str> {
         "opendir",
         "parse_url",
         "pathinfo",
+        "preg_grep",
         "preg_match_all",
         "preg_match",
+        "preg_quote",
+        "preg_replace",
+        "preg_replace_callback",
         "preg_split",
         "pow",
         "random_bytes",

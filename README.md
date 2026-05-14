@@ -514,7 +514,8 @@ files that are not open in the editor are picked up on the next request.
   `http_build_query`, `parse_url`, `pathinfo`, `serialize`, `gettype`, `intval`, `strval`,
   `ucfirst`, `ucwords`, `lcfirst`, `file_get_contents`, `file_put_contents`,
   `filesize`, `fclose`, `feof`, `fgets`, `fopen`, `fread`, `fwrite`, `is_file`,
-  `closedir`, `glob`, `opendir`, `readdir`, `scandir`, `preg_match_all`, `preg_split`,
+  `closedir`, `glob`, `opendir`, `readdir`, `scandir`, `preg_grep`, `preg_match_all`,
+  `preg_quote`, `preg_replace`, `preg_replace_callback`, `preg_split`,
   `htmlspecialchars`, `mb_strlen`, and
   `mb_substr`, with PHP manual links in hover.
 - Calls that already contain safe named arguments and still have remaining
