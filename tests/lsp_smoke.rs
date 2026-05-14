@@ -1271,17 +1271,17 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     let root = temp_project("array-utility-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\narray_fil;\narray_int;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nks;\narray_fil;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
-    let items = server.completion(&completion_uri, 1, 9);
+    let items = server.completion(&completion_uri, 1, 2);
 
-    assert!(items.iter().any(|item| item["label"] == "array_fill"));
+    assert!(items.iter().any(|item| item["label"] == "ksort"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\narray_diff('bad', []);\narray_chunk([], 'bad');\n",
+        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\narray_diff('bad', []);\narray_chunk([], 'bad');\nsort('bad', 'bad');\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1300,6 +1300,10 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for length: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
             && diagnostic["severity"] == 1
     }));
 
@@ -1332,6 +1336,14 @@ fn lsp_returns_array_utility_internal_function_metadata() {
 
     assert!(chunk_markdown.contains("array_chunk($array, $length, $preserve_keys)"));
     assert!(chunk_markdown.contains("[PHP manual](https://www.php.net/array_chunk)"));
+
+    let sort_hover = server.hover(&diagnostics_uri, 6, 2).expect("hover result");
+    let sort_markdown = sort_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(sort_markdown.contains("sort($array, $flags)"));
+    assert!(sort_markdown.contains("[PHP manual](https://www.php.net/sort)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
