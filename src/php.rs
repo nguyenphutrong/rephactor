@@ -9674,6 +9674,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "is_writable" => &["filename"],
         "json_decode" => &["json", "associative", "depth", "flags"],
         "json_encode" => &["value", "flags", "depth"],
+        "lcfirst" => &["string"],
         "ltrim" => &["string", "characters"],
         "max" => &["value", "values"],
         "mb_strlen" => &["string", "encoding"],
@@ -9708,6 +9709,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "strtotime" => &["datetime", "base_timestamp"],
         "time" => &[][..],
         "trim" => &["string", "characters"],
+        "ucfirst" => &["string"],
+        "ucwords" => &["string", "separators"],
         "unserialize" => &["data", "options"],
         _ => return None,
     };
@@ -9791,6 +9794,7 @@ fn internal_function_parameter_types(
         "is_writable" => &[Some("string")],
         "json_decode" => &[Some("string"), Some("bool"), Some("int"), Some("int")],
         "json_encode" => &[None, Some("int"), Some("int")],
+        "lcfirst" => &[Some("string")],
         "ltrim" => &[Some("string"), Some("string")],
         "max" => &[None, None],
         "mb_strlen" => &[Some("string"), Some("string")],
@@ -9836,6 +9840,8 @@ fn internal_function_parameter_types(
         "strtotime" => &[Some("string"), Some("int")],
         "time" => &[],
         "trim" => &[Some("string"), Some("string")],
+        "ucfirst" => &[Some("string")],
+        "ucwords" => &[Some("string"), Some("string")],
         "unserialize" => &[Some("string"), Some("array")],
         _ => &[][..],
     };
@@ -9868,7 +9874,8 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "date" | "file_get_contents" | "gettype" | "hash" | "html_entity_decode"
         | "htmlspecialchars" | "mb_strtolower" | "mb_strtoupper" | "mb_substr" | "md5"
         | "serialize" | "sha1" | "sprintf" | "str_pad" | "str_repeat" | "strtolower"
-        | "strtoupper" | "strval" | "substr" | "trim" => "string",
+        | "strtoupper" | "strval" | "substr" | "trim" | "ucfirst" | "ucwords" => "string",
+        "lcfirst" => "string",
         "boolval" => "bool",
         "floatval" => "float",
         _ => return None,
@@ -9931,6 +9938,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "is_writable",
         "json_decode",
         "json_encode",
+        "lcfirst",
         "ltrim",
         "max",
         "mb_strlen",
@@ -9965,6 +9973,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "strtotime",
         "time",
         "trim",
+        "ucfirst",
+        "ucwords",
         "unserialize",
     ]
 }

@@ -1521,17 +1521,17 @@ fn lsp_returns_string_internal_function_metadata() {
     let root = temp_project("string-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nstr_pa;\nstr_rep;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nucw;\nstr_pa;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
-    let items = server.completion(&completion_uri, 1, 6);
+    let items = server.completion(&completion_uri, 1, 3);
 
-    assert!(items.iter().any(|item| item["label"] == "str_pad"));
+    assert!(items.iter().any(|item| item["label"] == "ucwords"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\n",
+        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\nucfirst([]);\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1552,6 +1552,10 @@ fn lsp_returns_string_internal_function_metadata() {
         diagnostic["message"] == "argument type mismatch for length: expected int, got string"
             && diagnostic["severity"] == 1
     }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for string: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
 
     let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
     let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
@@ -1566,6 +1570,14 @@ fn lsp_returns_string_internal_function_metadata() {
 
     assert!(pad_markdown.contains("str_pad($string, $length, $pad_string, $pad_type)"));
     assert!(pad_markdown.contains("[PHP manual](https://www.php.net/str_pad)"));
+
+    let ucfirst_hover = server.hover(&diagnostics_uri, 4, 3).expect("hover result");
+    let ucfirst_markdown = ucfirst_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(ucfirst_markdown.contains("ucfirst($string)"));
+    assert!(ucfirst_markdown.contains("[PHP manual](https://www.php.net/ucfirst)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
