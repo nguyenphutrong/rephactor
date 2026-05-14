@@ -9678,6 +9678,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "array_unique" => &["array", "flags"],
         "array_values" => &["array"],
         "asort" => &["array", "flags"],
+        "base64_decode" => &["string", "strict"],
+        "base64_encode" => &["string"],
         "basename" => &["path", "suffix"],
         "boolval" => &["value"],
         "ceil" => &["num"],
@@ -9752,6 +9754,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "pow" => &["num", "exponent"],
         "random_bytes" => &["length"],
         "random_int" => &["min", "max"],
+        "rawurldecode" => &["string"],
+        "rawurlencode" => &["string"],
         "readdir" => &["dir_handle"],
         "realpath" => &["path"],
         "round" => &["num", "precision", "mode"],
@@ -9785,6 +9789,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "ucfirst" => &["string"],
         "ucwords" => &["string", "separators"],
         "unserialize" => &["data", "options"],
+        "urldecode" => &["string"],
+        "urlencode" => &["string"],
         _ => return None,
     };
 
@@ -9837,6 +9843,8 @@ fn internal_function_parameter_types(
         "array_unique" => &[Some("array"), Some("int")],
         "array_values" => &[Some("array")],
         "asort" => &[Some("array"), Some("int")],
+        "base64_decode" => &[Some("string"), Some("bool")],
+        "base64_encode" => &[Some("string")],
         "basename" => &[Some("string"), Some("string")],
         "boolval" => &[None],
         "ceil" => &[Some("int")],
@@ -9916,6 +9924,8 @@ fn internal_function_parameter_types(
         "pow" => &[Some("float"), Some("float")],
         "random_bytes" => &[Some("int")],
         "random_int" => &[Some("int"), Some("int")],
+        "rawurldecode" => &[Some("string")],
+        "rawurlencode" => &[Some("string")],
         "readdir" => &[None],
         "realpath" => &[Some("string")],
         "round" => &[Some("int"), Some("int"), None],
@@ -9948,6 +9958,8 @@ fn internal_function_parameter_types(
         "ucfirst" => &[Some("string")],
         "ucwords" => &[Some("string"), Some("string")],
         "unserialize" => &[Some("string"), Some("array")],
+        "urldecode" => &[Some("string")],
+        "urlencode" => &[Some("string")],
         _ => &[][..],
     };
     let imports = ImportMap::default();
@@ -9976,12 +9988,16 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
         | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all"
         | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
-        "basename"
+        "base64_decode"
+        | "base64_encode"
+        | "basename"
         | "dirname"
         | "implode"
         | "json_encode"
         | "ltrim"
         | "random_bytes"
+        | "rawurldecode"
+        | "rawurlencode"
         | "realpath"
         | "rtrim"
         | "date"
@@ -10011,7 +10027,9 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "substr_replace"
         | "trim"
         | "ucfirst"
-        | "ucwords" => "string",
+        | "ucwords"
+        | "urldecode"
+        | "urlencode" => "string",
         "lcfirst" => "string",
         "boolval" => "bool",
         "floatval" | "pow" | "sqrt" => "float",
@@ -10044,6 +10062,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "array_unique",
         "array_values",
         "asort",
+        "base64_decode",
+        "base64_encode",
         "basename",
         "boolval",
         "ceil",
@@ -10112,6 +10132,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "pow",
         "random_bytes",
         "random_int",
+        "rawurldecode",
+        "rawurlencode",
         "readdir",
         "realpath",
         "round",
@@ -10145,6 +10167,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "ucfirst",
         "ucwords",
         "unserialize",
+        "urldecode",
+        "urlencode",
     ]
 }
 

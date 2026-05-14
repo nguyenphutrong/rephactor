@@ -1789,7 +1789,10 @@ fn lsp_returns_string_internal_function_metadata() {
     let root = temp_project("string-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nucw;\nstr_pa;\nsubstr_re;\n");
+    let completion_uri = server.open_php(
+        &completion_file,
+        "<?php\nucw;\nstr_pa;\nsubstr_re;\nurlen;\n",
+    );
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 3);
@@ -1801,11 +1804,13 @@ fn lsp_returns_string_internal_function_metadata() {
             .iter()
             .any(|item| item["label"] == "substr_replace")
     );
+    let url_items = server.completion(&completion_uri, 4, 5);
+    assert!(url_items.iter().any(|item| item["label"] == "urlencode"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\nucfirst([]);\nsubstr_replace([], [], 'bad');\nstrtr([], [], 'x');\nfunction takes_int(int $value) {}\ntakes_int(str_ireplace('x', 'y', 'xyz'));\n",
+        "<?php\nstr_repeat('x', 'bad');\nstrpos([], 'x');\nstr_pad([], 'bad');\nucfirst([]);\nsubstr_replace([], [], 'bad');\nstrtr([], [], 'x');\nbase64_decode([], 'bad');\nrawurlencode([]);\nfunction takes_int(int $value) {}\ntakes_int(str_ireplace('x', 'y', 'xyz'));\ntakes_int(urlencode('x'));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1840,6 +1845,10 @@ fn lsp_returns_string_internal_function_metadata() {
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for value: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for strict: expected bool, got string"
             && diagnostic["severity"] == 1
     }));
 
@@ -1882,6 +1891,24 @@ fn lsp_returns_string_internal_function_metadata() {
 
     assert!(strtr_markdown.contains("strtr($string, $from, $to)"));
     assert!(strtr_markdown.contains("[PHP manual](https://www.php.net/strtr)"));
+
+    let base64_hover = server.hover(&diagnostics_uri, 7, 5).expect("hover result");
+    let base64_markdown = base64_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(base64_markdown.contains("base64_decode($string, $strict)"));
+    assert!(base64_markdown.contains("[PHP manual](https://www.php.net/base64_decode)"));
+
+    let urlencode_hover = server
+        .hover(&diagnostics_uri, 11, 12)
+        .expect("hover result");
+    let urlencode_markdown = urlencode_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(urlencode_markdown.contains("urlencode($string)"));
+    assert!(urlencode_markdown.contains("[PHP manual](https://www.php.net/urlencode)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
