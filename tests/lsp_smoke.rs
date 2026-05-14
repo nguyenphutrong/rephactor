@@ -1271,17 +1271,17 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     let root = temp_project("array-utility-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\narray_int;\narray_red;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\narray_fil;\narray_int;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
     let items = server.completion(&completion_uri, 1, 9);
 
-    assert!(items.iter().any(|item| item["label"] == "array_intersect"));
+    assert!(items.iter().any(|item| item["label"] == "array_fill"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\narray_diff('bad', []);\n",
+        "<?php\narray_reverse('bad');\narray_unique([], 'bad');\narray_reduce('bad', $callback);\narray_diff('bad', []);\narray_chunk([], 'bad');\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1296,6 +1296,10 @@ fn lsp_returns_array_utility_internal_function_metadata() {
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for length: expected int, got string"
             && diagnostic["severity"] == 1
     }));
 
@@ -1320,6 +1324,14 @@ fn lsp_returns_array_utility_internal_function_metadata() {
 
     assert!(diff_markdown.contains("array_diff($array, $arrays)"));
     assert!(diff_markdown.contains("[PHP manual](https://www.php.net/array_diff)"));
+
+    let chunk_hover = server.hover(&diagnostics_uri, 5, 8).expect("hover result");
+    let chunk_markdown = chunk_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(chunk_markdown.contains("array_chunk($array, $length, $preserve_keys)"));
+    assert!(chunk_markdown.contains("[PHP manual](https://www.php.net/array_chunk)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 
