@@ -286,8 +286,8 @@ Document Highlight V1 highlights exact matching AST names and PHP keywords in
 the current document.
 
 Folding Range V1 folds PHP declaration blocks, compound statements, array
-literals, imports, heredoc/nowdoc strings, comments, and custom
-`#region`/`#endregion` regions.
+literals, match expressions, imports, heredoc/nowdoc strings, comments, and
+custom `#region`/`#endregion` regions.
 
 Formatting V1 trims trailing spaces/tabs for whole-document and range
 formatting. Whole-document formatting also ensures a final newline. PSR-12
@@ -444,8 +444,8 @@ files that are not open in the editor are picked up on the next request.
 - Read-only assignment diagnostics for class-level PHPDoc `@property-read`
   properties.
 - Same-file document highlights for exact AST name and PHP keyword matches.
-- Folding ranges for PHP blocks, array literals, imports, heredoc/nowdoc
-  strings, comments, and custom `#region`/`#endregion` regions.
+- Folding ranges for PHP blocks, array literals, match expressions, imports,
+  heredoc/nowdoc strings, comments, and custom `#region`/`#endregion` regions.
 - Whole-document and range whitespace formatting for trailing whitespace; whole
   documents also get a final newline.
 - Parameter-name inlay hints for resolved positional call arguments.

@@ -4382,6 +4382,24 @@ fn lsp_returns_folding_ranges_for_array_literals() {
 }
 
 #[test]
+fn lsp_returns_folding_ranges_for_match_expressions() {
+    let root = temp_project("folding-range-match-expression");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\n$status = match ($code) {\n    200 => 'ok',\n    default => 'error',\n};\n",
+    );
+
+    let ranges = server.folding_ranges(&uri);
+
+    assert!(ranges.iter().any(|range| range["kind"] == "region"
+        && range["startLine"] == 1
+        && range["endLine"] == 4));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_parameter_name_inlay_hints() {
     let root = temp_project("inlay-hints");
     let mut server = LspProcess::start(&root);

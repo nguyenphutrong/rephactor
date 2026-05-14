@@ -2245,6 +2245,7 @@ fn folding_kind_for_node(node: Node) -> Option<FoldingRangeKind> {
         | "compound_statement"
         | "declaration_list"
         | "heredoc"
+        | "match_expression"
         | "nowdoc" => Some(FoldingRangeKind::Region),
         _ => None,
     }
