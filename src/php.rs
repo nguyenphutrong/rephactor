@@ -1478,30 +1478,38 @@ fn large_call_arguments(text: &str, start: usize, end: usize) -> Vec<ArgumentInf
             '(' | '[' | '{' => depth += 1,
             ')' | ']' | '}' => depth = depth.saturating_sub(1),
             ',' if depth == 0 => {
-                arguments.push(large_argument_info(text, segment_start, start + relative));
+                if let Some(argument) = large_argument_info(text, segment_start, start + relative) {
+                    arguments.push(argument);
+                }
                 segment_start = start + relative + 1;
             }
             _ => {}
         }
     }
-    arguments.push(large_argument_info(text, segment_start, end));
+    if let Some(argument) = large_argument_info(text, segment_start, end) {
+        arguments.push(argument);
+    }
     arguments
 }
 
-fn large_argument_info(text: &str, start: usize, end: usize) -> ArgumentInfo {
+fn large_argument_info(text: &str, start: usize, end: usize) -> Option<ArgumentInfo> {
     let segment = text.get(start..end).unwrap_or_default();
     let trimmed = segment.trim_start();
+    if trimmed.trim_end().is_empty() {
+        return None;
+    }
+
     let start_byte = start + segment.len() - trimmed.len();
     let name = trimmed
         .find(':')
         .and_then(|colon| leading_large_identifier(&trimmed[..colon]).map(str::to_string));
-    ArgumentInfo {
+    Some(ArgumentInfo {
         start_byte,
         end_byte: end,
         insert_byte: start_byte,
         name,
         is_unpacking: trimmed.starts_with("..."),
-    }
+    })
 }
 
 fn large_namespace_at_byte(text: &str, byte_offset: usize) -> Option<String> {
@@ -14846,10 +14854,10 @@ mod tests {
         for index in 0..14_000 {
             text.push_str(&format!("    $value += {index};\n"));
         }
-        text.push_str("}\n$user = getUser(1);\n");
+        text.push_str("}\n$user = getUser(\n    1,\n);\n");
         let byte_offset = text
-            .find("getUser(1)")
-            .map(|offset| offset + "getUser(".len())
+            .rfind("getUser(")
+            .map(|offset| offset + "getUser(\n    ".len())
             .expect("call offset");
         let position = lsp_position_for_byte_offset(&text, byte_offset).expect("position");
         let action = named_argument_code_action(&uri(), &text, position).expect("action");
@@ -14861,7 +14869,7 @@ mod tests {
         assert!(edits.iter().all(|edit| edit.new_text != "withTrash: "));
         assert_eq!(
             apply_edits(&text, &edits),
-            text.replace("getUser(1)", "getUser(id: 1)")
+            text.replace("getUser(\n    1,", "getUser(\n    id: 1,")
         );
     }
 

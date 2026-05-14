@@ -4114,6 +4114,35 @@ fn lsp_large_posapp_code_action_does_not_report_parse_error() {
 }
 
 #[test]
+fn lsp_large_posapp_code_action_does_not_name_omitted_optional_trailing_comma_argument() {
+    let fixture = Path::new(
+        "/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Http/Controllers/Api/v1/SyncOrderController.php",
+    );
+    if !fixture.is_file() {
+        return;
+    }
+
+    let text = std::fs::read_to_string(fixture).expect("read SyncOrderController fixture");
+    let root = Path::new("/Volumes/Avocado/code/posapp-vn/dev-admin-api");
+    let mut server = LspProcess::start(root);
+    let uri = server.open_php(fixture, &text);
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+    assert_eq!(notification["params"]["uri"], uri);
+
+    let actions = server.code_actions(&uri, 2776, 28);
+    let action = actions
+        .iter()
+        .find(|action| action["title"] == "[Rephactor] Add names to arguments")
+        .expect("named argument action");
+    let insert_texts = insert_texts(action, &uri);
+
+    assert_eq!(insert_texts.len(), 12);
+    assert!(insert_texts.contains(&"exchange_gift: ".to_string()));
+    assert!(!insert_texts.contains(&"ignore_point_accum_flg: ".to_string()));
+}
+
+#[test]
 fn lsp_does_not_report_laravel_false_positives_for_posapp_release_promotion_controller() {
     let fixture = Path::new(
         "/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Http/Controllers/Api/v1/Order/ReleasePromotionCodeFromOrder.php",
