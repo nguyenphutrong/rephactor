@@ -4114,6 +4114,43 @@ fn lsp_large_posapp_code_action_does_not_report_parse_error() {
 }
 
 #[test]
+fn lsp_does_not_report_laravel_false_positives_for_posapp_release_promotion_controller() {
+    let fixture = Path::new(
+        "/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Http/Controllers/Api/v1/Order/ReleasePromotionCodeFromOrder.php",
+    );
+    if !fixture.is_file() {
+        return;
+    }
+
+    let text = std::fs::read_to_string(fixture).expect("read ReleasePromotionCodeFromOrder");
+    let root = Path::new("/Volumes/Avocado/code/posapp-vn/dev-admin-api");
+    let mut server = LspProcess::start(root);
+    let uri = server.open_php(fixture, &text);
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    let messages = diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic["message"].as_str())
+        .collect::<Vec<_>>();
+    for unexpected in [
+        "unresolved type Request",
+        "unresolved type Throwable",
+        "unresolved callable $request->validate",
+        "unresolved callable $this->respondError",
+    ] {
+        assert!(
+            messages.iter().all(|message| *message != unexpected),
+            "unexpected diagnostic {unexpected}: {messages:?}"
+        );
+    }
+}
+
+#[test]
 fn lsp_handles_posapp_order_model_without_stack_overflow() {
     let fixture = Path::new("/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Models/order.php");
     if !fixture.is_file() {

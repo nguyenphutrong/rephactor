@@ -82,6 +82,7 @@ struct SymbolIndex {
     functions: HashMap<String, Vec<Signature>>,
     classes: HashMap<String, ClassInfo>,
     constants: HashMap<String, ConstantInfo>,
+    external_class_prefixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -320,17 +321,27 @@ pub fn analyze_diagnostics_for_document_with_cache(
             Err(
                 reason @ (SkipReason::UnresolvedCallable(_) | SkipReason::AmbiguousCallable(_)),
             ) => {
-                diagnostics.push(Diagnostic {
-                    range: call_target_range(text, call_node).unwrap_or_else(|_| Range::default()),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("rephactor".to_string()),
-                    message: reason.to_string(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                });
+                if !index.should_suppress_unresolved_callable(
+                    &call.target,
+                    root,
+                    text,
+                    call_node.start_byte(),
+                    namespace.as_deref(),
+                    &imports,
+                ) {
+                    diagnostics.push(Diagnostic {
+                        range: call_target_range(text, call_node)
+                            .unwrap_or_else(|_| Range::default()),
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        code: None,
+                        code_description: None,
+                        source: Some("rephactor".to_string()),
+                        message: reason.to_string(),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    });
+                }
             }
             Err(_) => {}
         }
@@ -353,6 +364,7 @@ pub fn analyze_diagnostics_for_document_with_cache(
         if index
             .resolve_class(&type_name, namespace.as_deref(), &imports)
             .is_some()
+            || index.is_known_external_class(&type_name, namespace.as_deref(), &imports)
         {
             continue;
         }
@@ -4096,6 +4108,7 @@ fn collect_local_call_assignment_return_types(
                 node.child_by_field_name("left"),
                 node.child_by_field_name("right"),
             )
+            && right.end_byte() <= context.byte_offset
             && left.kind() == "variable_name"
             && let Some(return_type) = inferred_call_return_type(right, context)
                 .or_else(|| assigned_variable_return_type(right, context.text, types))
@@ -5174,18 +5187,31 @@ fn is_builtin_type_name(name: &str) -> bool {
         "array"
             | "bool"
             | "callable"
+            | "closure"
+            | "countable"
+            | "datetime"
+            | "datetimeimmutable"
+            | "datetimeinterface"
+            | "datetimezone"
+            | "error"
+            | "exception"
             | "false"
             | "float"
+            | "invalidargumentexception"
             | "int"
             | "iterable"
+            | "logicexception"
             | "mixed"
             | "never"
             | "null"
             | "object"
             | "parent"
+            | "runtimeexception"
             | "self"
+            | "stdclass"
             | "static"
             | "string"
+            | "throwable"
             | "true"
             | "void"
     )
@@ -6811,6 +6837,8 @@ impl SymbolIndex {
     }
 
     fn index_project(&mut self, project_root: &Path, open_documents: &HashMap<PathBuf, String>) {
+        self.external_class_prefixes = composer_external_class_prefixes(project_root);
+
         let Some(paths) = composer_autoload_paths(project_root) else {
             return;
         };
@@ -7107,6 +7135,59 @@ impl SymbolIndex {
         }
 
         None
+    }
+
+    fn is_known_external_class(
+        &self,
+        class_name: &str,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> bool {
+        imports
+            .resolve_class_name(class_name, namespace)
+            .into_iter()
+            .any(|candidate| self.is_known_external_class_fqn(&candidate))
+    }
+
+    fn is_known_external_class_fqn(&self, class_name: &str) -> bool {
+        let class_name = clean_name_text(class_name)
+            .trim_start_matches('\\')
+            .to_string();
+        let normalized_class = normalize_symbol_key(&class_name);
+        self.external_class_prefixes.iter().any(|prefix| {
+            normalized_class == *prefix
+                || normalized_class
+                    .strip_prefix(prefix)
+                    .is_some_and(|suffix| suffix.starts_with('\\'))
+        })
+    }
+
+    fn should_suppress_unresolved_callable(
+        &self,
+        target: &CallTarget,
+        root: Node,
+        text: &str,
+        byte_offset: usize,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> bool {
+        match target {
+            CallTarget::Function(_) => false,
+            CallTarget::StaticMethod { class_name, .. }
+            | CallTarget::Constructor { class_name } => {
+                self.resolve_class(class_name, namespace, imports).is_none()
+                    && self.is_known_external_class(class_name, namespace, imports)
+            }
+            CallTarget::InstanceMethod { variable, .. } => {
+                let variable_types =
+                    variable_types_at_byte(root, text, byte_offset, namespace, imports, Some(self));
+                let Some(class_name) = variable_types.get(variable) else {
+                    return false;
+                };
+                self.resolve_class(class_name, namespace, imports).is_none()
+                    && self.is_known_external_class_fqn(class_name)
+            }
+        }
     }
 
     fn resolve_constant(
@@ -7750,12 +7831,13 @@ fn index_class(
         kind: Some(class_like_symbol_kind(node.kind())),
         location: source_location(path, name_node.start_byte()),
         doc_summary: phpdoc_hover_before(text, node.start_byte()),
-        parents: class_like_names_from_direct_child(node, "base_clause", text, namespace),
+        parents: class_like_names_from_direct_child(node, "base_clause", text, namespace, imports),
         interfaces: class_like_names_from_direct_child(
             node,
             "class_interface_clause",
             text,
             namespace,
+            imports,
         ),
         mixins: phpdoc_mixins_before(text, node.start_byte(), namespace),
         ..ClassInfo::default()
@@ -7774,7 +7856,7 @@ fn index_class(
         if child.kind() == "use_declaration" {
             class_info
                 .traits
-                .extend(class_like_names(child, text, namespace));
+                .extend(class_like_names(child, text, namespace, imports));
             continue;
         }
 
@@ -8197,17 +8279,23 @@ fn class_like_names_from_direct_child(
     child_kind: &str,
     text: &str,
     namespace: Option<&str>,
+    imports: &ImportMap,
 ) -> Vec<String> {
     direct_child_kind(node, child_kind)
-        .map(|child| class_like_names(child, text, namespace))
+        .map(|child| class_like_names(child, text, namespace, imports))
         .unwrap_or_default()
 }
 
-fn class_like_names(node: Node, text: &str, namespace: Option<&str>) -> Vec<String> {
+fn class_like_names(
+    node: Node,
+    text: &str,
+    namespace: Option<&str>,
+    imports: &ImportMap,
+) -> Vec<String> {
     let mut cursor = node.walk();
     node.named_children(&mut cursor)
         .filter(|child| is_name_node(*child))
-        .map(|child| qualify_name(node_text(child, text), namespace))
+        .map(|child| qualify_type_name(node_text(child, text), namespace, imports))
         .collect()
 }
 
@@ -9752,10 +9840,16 @@ fn qualify_class_phpdoc_type_name(
         ));
     }
     if normalized == "parent" {
-        return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
-            .into_iter()
-            .next()
-            .map(|type_name| phpdoc_type_name_with_nullability(type_name, allows_null));
+        return class_like_names_from_direct_child(
+            class_node,
+            "base_clause",
+            text,
+            namespace,
+            imports,
+        )
+        .into_iter()
+        .next()
+        .map(|type_name| phpdoc_type_name_with_nullability(type_name, allows_null));
     }
     if is_builtin_type_name(&type_name) {
         return Some(phpdoc_type_name_with_nullability(
@@ -11083,9 +11177,15 @@ fn qualify_parameter_type_name(
     }
     if normalized == "parent" {
         let class_node = containing_class_like_declaration(declaration)?;
-        return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
-            .into_iter()
-            .next();
+        return class_like_names_from_direct_child(
+            class_node,
+            "base_clause",
+            text,
+            namespace,
+            imports,
+        )
+        .into_iter()
+        .next();
     }
     if is_builtin_type_name(type_name) {
         return None;
@@ -11237,6 +11337,7 @@ fn collect_assignment_types(
                 node.child_by_field_name("left"),
                 node.child_by_field_name("right"),
             )
+            && right.end_byte() <= context.byte_offset
             && left.kind() == "variable_name"
             && let Some(type_name) = assigned_variable_type_name(right, context, types)
         {
@@ -11391,10 +11492,16 @@ fn qualify_phpdoc_local_type_name(
     }
     if normalized == "parent" {
         let class_node = find_class_declaration_at_byte(root, byte_offset)?;
-        return class_like_names_from_direct_child(class_node, "base_clause", text, namespace)
-            .into_iter()
-            .next()
-            .map(|type_name| phpdoc_type_name_with_nullability(type_name, allows_null));
+        return class_like_names_from_direct_child(
+            class_node,
+            "base_clause",
+            text,
+            namespace,
+            imports,
+        )
+        .into_iter()
+        .next()
+        .map(|type_name| phpdoc_type_name_with_nullability(type_name, allows_null));
     }
     if is_builtin_type_name(&type_name) {
         return Some(phpdoc_type_name_with_nullability(
@@ -11549,6 +11656,55 @@ fn composer_autoload_paths(project_root: &Path) -> Option<Vec<PathBuf>> {
     }
 
     (!roots.is_empty()).then_some(roots)
+}
+
+fn composer_external_class_prefixes(project_root: &Path) -> Vec<String> {
+    let installed_path = project_root.join("vendor/composer/installed.json");
+    let Some(installed_json) = fs::read_to_string(installed_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+    else {
+        return Vec::new();
+    };
+
+    let packages = installed_json
+        .get("packages")
+        .and_then(|packages| packages.as_array())
+        .or_else(|| installed_json.as_array());
+    let Some(packages) = packages else {
+        return Vec::new();
+    };
+
+    let vendor_dir = project_root.join("vendor");
+    let mut prefixes = Vec::new();
+    for package in packages {
+        let Some(install_path) = package.get("install-path").and_then(|path| path.as_str()) else {
+            continue;
+        };
+        let package_root = vendor_dir.join("composer").join(install_path);
+        if !package_root.exists() {
+            continue;
+        }
+
+        let Some(psr4) = package
+            .get("autoload")
+            .and_then(|autoload| autoload.get("psr-4"))
+            .and_then(|psr4| psr4.as_object())
+        else {
+            continue;
+        };
+
+        for prefix in psr4.keys() {
+            let prefix = prefix.trim_end_matches('\\');
+            if !prefix.is_empty() {
+                prefixes.push(normalize_symbol_key(prefix));
+            }
+        }
+    }
+
+    prefixes.sort();
+    prefixes.dedup();
+    prefixes
 }
 
 fn composer_psr4_mappings(project_root: &Path) -> Vec<(String, PathBuf)> {
@@ -11753,6 +11909,10 @@ fn internal_constructor_signature(class_name: &str) -> Option<Signature> {
 }
 
 fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature> {
+    if let Some(signature) = laravel_request_method_signature(class_name, method) {
+        return Some(signature);
+    }
+
     let normalized_class = normalize_symbol_key(class_name);
     let normalized_method = normalize_method_key(method);
     let (canonical_class, canonical_method, parameters, parameter_types, return_type) =
@@ -11814,8 +11974,74 @@ fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature
     })
 }
 
+fn laravel_request_method_signature(class_name: &str, method: &str) -> Option<Signature> {
+    if normalize_symbol_key(class_name) != "illuminate\\http\\request" {
+        return None;
+    }
+
+    let normalized_method = normalize_method_key(method);
+    let (canonical_method, parameters, parameter_types, return_type, is_variadic) =
+        match normalized_method.as_str() {
+            "validate" => (
+                "validate",
+                &["rules", "params"][..],
+                &[Some("array"), None][..],
+                Some("array"),
+                true,
+            ),
+            "integer" => (
+                "integer",
+                &["key", "default"][..],
+                &[Some("string"), Some("int")][..],
+                Some("int"),
+                false,
+            ),
+            "input" => (
+                "input",
+                &["key", "default"][..],
+                &[Some("string"), None][..],
+                None,
+                false,
+            ),
+            "boolean" => (
+                "boolean",
+                &["key", "default"][..],
+                &[Some("string"), Some("bool")][..],
+                Some("bool"),
+                false,
+            ),
+            "all" => ("all", &["keys"][..], &[None][..], Some("array"), false),
+            "user" => ("user", &["guard"][..], &[Some("string")][..], None, false),
+            _ => return None,
+        };
+
+    Some(Signature {
+        name: format!("Illuminate\\Http\\Request::{canonical_method}"),
+        parameters: parameters
+            .iter()
+            .map(|parameter| parameter.to_string())
+            .collect(),
+        parameter_types: parameter_types
+            .iter()
+            .map(|type_name| {
+                type_name
+                    .map(|type_name| comparable_return_type(type_name, None, &ImportMap::default()))
+            })
+            .collect(),
+        return_type: return_type
+            .map(|type_name| comparable_return_type(type_name, None, &ImportMap::default())),
+        is_variadic,
+        is_abstract: false,
+        location: None,
+        doc_summary: Some("Laravel HTTP request helper.".to_string()),
+    })
+}
+
 fn internal_method_names(class_name: &str) -> Vec<&'static str> {
     match normalize_symbol_key(class_name).as_str() {
+        "illuminate\\http\\request" => {
+            vec!["all", "boolean", "input", "integer", "user", "validate"]
+        }
         "datetime" | "datetimeimmutable" => {
             vec!["createFromFormat", "format", "getTimestamp", "modify"]
         }
@@ -13530,6 +13756,111 @@ mod tests {
         );
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn diagnostics_allows_core_throwable_type() {
+        let mut cache = ProjectIndexCache::default();
+        let diagnostics = analyze_diagnostics_for_document_with_cache(
+            &uri(),
+            "<?php\ntry {\n} catch (Throwable $th) {\n}\n",
+            &HashMap::new(),
+            &mut cache,
+        );
+
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| { !diagnostic.message.contains("unresolved type Throwable") })
+        );
+    }
+
+    #[test]
+    fn diagnostics_allows_composer_external_laravel_request_methods() {
+        let project_root = unique_project_root();
+        fs::create_dir_all(project_root.join("app/Http/Controllers")).expect("create app dir");
+        fs::create_dir_all(project_root.join("vendor/composer")).expect("create composer dir");
+        fs::create_dir_all(project_root.join("vendor/laravel/framework"))
+            .expect("create laravel package dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+        fs::write(
+            project_root.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"laravel/framework","install-path":"../laravel/framework","autoload":{"psr-4":{"Illuminate\\":"src/Illuminate/"}}}]}"#,
+        )
+        .expect("write installed");
+
+        let file = project_root.join("app/Http/Controllers/RequestController.php");
+        let uri = Url::from_file_path(&file).expect("file uri");
+        let text = "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Http\\Request;\nclass RequestController {\n    public function __invoke(Request $request): void {\n        $request->validate(['shop_id' => 'required']);\n        $shopId = $request->integer('shop_id');\n    }\n}\n";
+        let mut cache = ProjectIndexCache::default();
+
+        let diagnostics =
+            analyze_diagnostics_for_document_with_cache(&uri, text, &HashMap::new(), &mut cache);
+
+        assert!(diagnostics.iter().all(|diagnostic| {
+            !matches!(
+                diagnostic.message.as_str(),
+                "unresolved type Request"
+                    | "unresolved callable $request->validate"
+                    | "unresolved callable $request->integer"
+            )
+        }));
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn diagnostics_resolves_imported_parent_methods() {
+        let project_root = unique_project_root();
+        fs::create_dir_all(project_root.join("app/Http/Controllers/Api"))
+            .expect("create controller dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+        fs::write(
+            project_root.join("app/Http/Controllers/Controller.php"),
+            "<?php\nnamespace App\\Http\\Controllers;\nclass Controller { public function respondError($message = null) {} }\n",
+        )
+        .expect("write parent controller");
+
+        let file = project_root.join("app/Http/Controllers/Api/Release.php");
+        let uri = Url::from_file_path(&file).expect("file uri");
+        let text = "<?php\nnamespace App\\Http\\Controllers\\Api;\nuse App\\Http\\Controllers\\Controller;\nclass Release extends Controller {\n    public function __invoke(): void {\n        $this->respondError('failed');\n    }\n}\n";
+        let mut cache = ProjectIndexCache::default();
+
+        let diagnostics =
+            analyze_diagnostics_for_document_with_cache(&uri, text, &HashMap::new(), &mut cache);
+
+        assert!(diagnostics.iter().all(|diagnostic| {
+            !diagnostic
+                .message
+                .contains("unresolved callable $this->respondError")
+        }));
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn diagnostics_still_reports_missing_project_static_method() {
+        let mut cache = ProjectIndexCache::default();
+        let diagnostics = analyze_diagnostics_for_document_with_cache(
+            &uri(),
+            "<?php\nclass A { public function run($value): void { MissingProject::sync($value); } }\n",
+            &HashMap::new(),
+            &mut cache,
+        );
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("unresolved callable MissingProject::sync")
+        }));
     }
 
     #[test]
