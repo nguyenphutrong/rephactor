@@ -1891,11 +1891,8 @@ fn include_literal_target(
 
     let start_byte = node.start_byte() + first_start + 1;
     let end_byte = node.start_byte() + last_end - 1;
-    let target = if include_path_is_base_relative(before_quote) {
-        base_dir.join(relative.trim_start_matches(['/', '\\']))
-    } else {
-        base_dir.join(relative)
-    };
+    let (target_base_dir, target_relative) = include_path_base(before_quote, base_dir, &relative);
+    let target = target_base_dir.join(target_relative);
     Some((target, start_byte, end_byte))
 }
 
@@ -1930,13 +1927,29 @@ fn quoted_string_segments(text: &str) -> Vec<(usize, usize, String)> {
     segments
 }
 
-fn include_path_is_base_relative(before_quote: &str) -> bool {
+fn include_path_base<'a>(
+    before_quote: &str,
+    base_dir: &'a Path,
+    relative: &'a str,
+) -> (&'a Path, &'a str) {
     let normalized = before_quote
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect::<String>()
         .to_ascii_lowercase();
-    normalized.contains("__dir__") || normalized.contains("dirname(__file__)")
+
+    if normalized.contains("dirname(__dir__)") {
+        return (
+            base_dir.parent().unwrap_or(base_dir),
+            relative.trim_start_matches(['/', '\\']),
+        );
+    }
+
+    if normalized.contains("__dir__") || normalized.contains("dirname(__file__)") {
+        return (base_dir, relative.trim_start_matches(['/', '\\']));
+    }
+
+    (base_dir, relative)
 }
 
 fn folding_ranges_for_text(text: &str) -> Result<Vec<FoldingRange>, SkipReason> {

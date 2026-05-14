@@ -4665,6 +4665,29 @@ fn lsp_returns_document_links_for_concatenated_literal_require_paths() {
 }
 
 #[test]
+fn lsp_returns_document_links_for_parent_dir_require_paths() {
+    let root = temp_project("document-links-parent-dir");
+    let mut server = LspProcess::start(&root);
+    let app_dir = root.join("app");
+    std::fs::create_dir_all(&app_dir).expect("create app dir");
+    let shared_dir = root.join("shared");
+    std::fs::create_dir_all(&shared_dir).expect("create shared dir");
+    let target = shared_dir.join("helpers.php");
+    std::fs::write(&target, "<?php\nfunction helper() {}\n").expect("write helper");
+    let file = app_dir.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nrequire_once dirname(__DIR__) . '/shared/helpers.php';\n",
+    );
+
+    let links = server.document_links(&uri);
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["target"], file_uri(&target));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_formats_trailing_whitespace_and_final_newline() {
     let root = temp_project("formatting-whitespace");
     let mut server = LspProcess::start(&root);
