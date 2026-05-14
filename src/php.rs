@@ -9662,6 +9662,7 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "hash" => &["algo", "data", "binary", "options"],
         "html_entity_decode" => &["string", "flags", "encoding"],
         "htmlspecialchars" => &["string", "flags", "encoding", "double_encode"],
+        "http_build_query" => &["data", "numeric_prefix", "arg_separator", "encoding_type"],
         "implode" => &["separator", "array"],
         "in_array" => &["needle", "haystack", "strict"],
         "intval" => &["value", "base"],
@@ -9689,6 +9690,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "mb_substr" => &["string", "start", "length", "encoding"],
         "md5" => &["string", "binary"],
         "min" => &["value", "values"],
+        "parse_url" => &["url", "component"],
+        "pathinfo" => &["path", "flags"],
         "preg_match_all" => &["pattern", "subject", "matches", "flags", "offset"],
         "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
         "preg_split" => &["pattern", "subject", "limit", "flags"],
@@ -9793,6 +9796,7 @@ fn internal_function_parameter_types(
         "hash" => &[Some("string"), Some("string"), Some("bool"), Some("array")],
         "html_entity_decode" => &[Some("string"), Some("int"), Some("string")],
         "htmlspecialchars" => &[Some("string"), Some("int"), Some("string"), Some("bool")],
+        "http_build_query" => &[Some("array"), Some("string"), Some("string"), Some("int")],
         "implode" => &[Some("string"), Some("array")],
         "in_array" => &[None, Some("array"), Some("bool")],
         "intval" => &[None, Some("int")],
@@ -9820,6 +9824,8 @@ fn internal_function_parameter_types(
         "mb_substr" => &[Some("string"), Some("int"), Some("int"), Some("string")],
         "md5" => &[Some("string"), Some("bool")],
         "min" => &[None, None],
+        "parse_url" => &[Some("string"), Some("int")],
+        "pathinfo" => &[Some("string"), Some("int")],
         "preg_match_all" => &[
             Some("string"),
             Some("string"),
@@ -9895,11 +9901,10 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
         "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "random_bytes"
         | "realpath" | "rtrim" | "date" | "file_get_contents" | "gettype" | "hash"
-        | "html_entity_decode" | "htmlspecialchars" | "mb_strtolower" | "mb_strtoupper"
-        | "mb_substr" | "md5" | "serialize" | "sha1" | "sprintf" | "str_pad" | "str_repeat"
-        | "strtolower" | "strtoupper" | "strval" | "substr" | "trim" | "ucfirst" | "ucwords" => {
-            "string"
-        }
+        | "html_entity_decode" | "htmlspecialchars" | "http_build_query" | "mb_strtolower"
+        | "mb_strtoupper" | "mb_substr" | "md5" | "serialize" | "sha1" | "sprintf" | "str_pad"
+        | "str_repeat" | "strtolower" | "strtoupper" | "strval" | "substr" | "trim" | "ucfirst"
+        | "ucwords" => "string",
         "lcfirst" => "string",
         "boolval" => "bool",
         "floatval" | "pow" | "sqrt" => "float",
@@ -9951,6 +9956,7 @@ fn internal_function_names() -> Vec<&'static str> {
         "hash",
         "html_entity_decode",
         "htmlspecialchars",
+        "http_build_query",
         "implode",
         "in_array",
         "intval",
@@ -9978,6 +9984,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "mb_substr",
         "md5",
         "min",
+        "parse_url",
+        "pathinfo",
         "preg_match_all",
         "preg_match",
         "preg_split",

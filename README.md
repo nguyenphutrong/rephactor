@@ -510,7 +510,7 @@ files that are not open in the editor are picked up on the next request.
   `array_fill_keys`, `array_intersect`, `array_reduce`, `array_reverse`,
   `array_unique`, `asort`, `ksort`, `rsort`, `sort`, `date`, `strtotime`,
   `round`, `sqrt`, `pow`, `abs`, `random_int`, `random_bytes`, `hash`, `md5`,
-  `serialize`, `gettype`, `intval`, `strval`,
+  `http_build_query`, `parse_url`, `pathinfo`, `serialize`, `gettype`, `intval`, `strval`,
   `ucfirst`, `ucwords`, `lcfirst`, `file_get_contents`, `file_put_contents`,
   `filesize`, `fopen`, `is_file`, `preg_match_all`, `preg_split`,
   `htmlspecialchars`, `mb_strlen`, and

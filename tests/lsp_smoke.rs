@@ -1491,6 +1491,97 @@ fn lsp_returns_filesystem_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_url_path_internal_function_metadata() {
+    let root = temp_project("url-path-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nhttp_b;\nparse_u;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 6);
+
+    assert!(items.iter().any(|item| item["label"] == "http_build_query"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nhttp_build_query('bad', [], [], 'bad');\nparse_url([], 'bad');\npathinfo([], 'bad');\nfunction takes_int(int $value) {}\ntakes_int(http_build_query([]));\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for data: expected array, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for numeric_prefix: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for arg_separator: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for encoding_type: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for url: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for component: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for path: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for flags: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 6).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(
+        markdown
+            .contains("http_build_query($data, $numeric_prefix, $arg_separator, $encoding_type)")
+    );
+    assert!(markdown.contains("[PHP manual](https://www.php.net/http_build_query)"));
+
+    let parse_hover = server.hover(&diagnostics_uri, 2, 4).expect("hover result");
+    let parse_markdown = parse_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(parse_markdown.contains("parse_url($url, $component)"));
+    assert!(parse_markdown.contains("[PHP manual](https://www.php.net/parse_url)"));
+
+    let pathinfo_hover = server.hover(&diagnostics_uri, 3, 4).expect("hover result");
+    let pathinfo_markdown = pathinfo_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(pathinfo_markdown.contains("pathinfo($path, $flags)"));
+    assert!(pathinfo_markdown.contains("[PHP manual](https://www.php.net/pathinfo)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_filesystem_io_internal_function_metadata() {
     let root = temp_project("filesystem-io-internal-functions");
     let mut server = LspProcess::start(&root);
