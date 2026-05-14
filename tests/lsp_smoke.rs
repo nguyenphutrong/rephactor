@@ -1761,17 +1761,17 @@ fn lsp_returns_runtime_internal_function_metadata() {
     let root = temp_project("runtime-internal-functions");
     let mut server = LspProcess::start(&root);
     let completion_file = root.join("completion.php");
-    let completion_uri = server.open_php(&completion_file, "<?php\nser;\n");
+    let completion_uri = server.open_php(&completion_file, "<?php\nrandom_i;\nser;\n");
     let _ = server.read_notification("textDocument/publishDiagnostics");
 
-    let items = server.completion(&completion_uri, 1, 3);
+    let items = server.completion(&completion_uri, 1, 8);
 
-    assert!(items.iter().any(|item| item["label"] == "serialize"));
+    assert!(items.iter().any(|item| item["label"] == "random_int"));
 
     let diagnostics_file = root.join("diagnostics.php");
     let diagnostics_uri = server.open_php(
         &diagnostics_file,
-        "<?php\nhash([], [], false, 'bad');\nmd5([], 'bad');\nfunction takes_int(int $value) {}\ntakes_int(strval(10));\n",
+        "<?php\nhash([], [], false, 'bad');\nmd5([], 'bad');\nrandom_int('min', 'max');\nfunction takes_int(int $value) {}\ntakes_int(strval(10));\n",
     );
 
     let notification = server.read_notification("textDocument/publishDiagnostics");
@@ -1801,6 +1801,10 @@ fn lsp_returns_runtime_internal_function_metadata() {
             && diagnostic["severity"] == 1
     }));
     assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for min: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic["message"] == "argument type mismatch for value: expected int, got string"
             && diagnostic["severity"] == 1
     }));
@@ -1810,6 +1814,14 @@ fn lsp_returns_runtime_internal_function_metadata() {
 
     assert!(markdown.contains("hash($algo, $data, $binary, $options)"));
     assert!(markdown.contains("[PHP manual](https://www.php.net/hash)"));
+
+    let random_hover = server.hover(&diagnostics_uri, 3, 8).expect("hover result");
+    let random_markdown = random_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(random_markdown.contains("random_int($min, $max)"));
+    assert!(random_markdown.contains("[PHP manual](https://www.php.net/random_int)"));
     std::fs::remove_dir_all(root).expect("remove temp root");
 }
 

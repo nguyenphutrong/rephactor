@@ -9688,6 +9688,8 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         "preg_match" => &["pattern", "subject", "matches", "flags", "offset"],
         "preg_split" => &["pattern", "subject", "limit", "flags"],
         "pow" => &["num", "exponent"],
+        "random_bytes" => &["length"],
+        "random_int" => &["min", "max"],
         "realpath" => &["path"],
         "round" => &["num", "precision", "mode"],
         "rtrim" => &["string", "characters"],
@@ -9822,6 +9824,8 @@ fn internal_function_parameter_types(
         ],
         "preg_split" => &[Some("string"), Some("string"), Some("int"), Some("int")],
         "pow" => &[Some("float"), Some("float")],
+        "random_bytes" => &[Some("int")],
+        "random_int" => &[Some("int"), Some("int")],
         "realpath" => &[Some("string")],
         "round" => &[Some("int"), Some("int"), None],
         "rtrim" => &[Some("string"), Some("string")],
@@ -9873,12 +9877,14 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
         | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all" | "round" | "strlen"
-        | "strpos" | "strrpos" | "strtotime" | "time" => "int",
-        "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "realpath" | "rtrim"
-        | "date" | "file_get_contents" | "gettype" | "hash" | "html_entity_decode"
-        | "htmlspecialchars" | "mb_strtolower" | "mb_strtoupper" | "mb_substr" | "md5"
-        | "serialize" | "sha1" | "sprintf" | "str_pad" | "str_repeat" | "strtolower"
-        | "strtoupper" | "strval" | "substr" | "trim" | "ucfirst" | "ucwords" => "string",
+        | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
+        "basename" | "dirname" | "implode" | "json_encode" | "ltrim" | "random_bytes"
+        | "realpath" | "rtrim" | "date" | "file_get_contents" | "gettype" | "hash"
+        | "html_entity_decode" | "htmlspecialchars" | "mb_strtolower" | "mb_strtoupper"
+        | "mb_substr" | "md5" | "serialize" | "sha1" | "sprintf" | "str_pad" | "str_repeat"
+        | "strtolower" | "strtoupper" | "strval" | "substr" | "trim" | "ucfirst" | "ucwords" => {
+            "string"
+        }
         "lcfirst" => "string",
         "boolval" => "bool",
         "floatval" | "pow" | "sqrt" => "float",
@@ -9956,6 +9962,8 @@ fn internal_function_names() -> Vec<&'static str> {
         "preg_match",
         "preg_split",
         "pow",
+        "random_bytes",
+        "random_int",
         "realpath",
         "round",
         "rtrim",
