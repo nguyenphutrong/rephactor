@@ -2627,36 +2627,48 @@ fn collect_variable_inline_values(
     }
 }
 
+fn push_named_children_reverse<'tree>(node: Node<'tree>, stack: &mut Vec<Node<'tree>>) {
+    let mut cursor = node.walk();
+    let children = node.named_children(&mut cursor).collect::<Vec<_>>();
+    stack.extend(children.into_iter().rev());
+}
+
+fn push_children_reverse<'tree>(node: Node<'tree>, stack: &mut Vec<Node<'tree>>) {
+    let mut cursor = node.walk();
+    let children = node.children(&mut cursor).collect::<Vec<_>>();
+    stack.extend(children.into_iter().rev());
+}
+
 fn collect_supported_call_nodes<'tree>(
     node: Node<'tree>,
     start_byte: usize,
     end_byte: usize,
     calls: &mut Vec<Node<'tree>>,
 ) {
-    if node.end_byte() < start_byte || node.start_byte() > end_byte {
-        return;
-    }
-    if is_supported_call_kind(node.kind()) {
-        calls.push(node);
-        return;
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if node.end_byte() < start_byte || node.start_byte() > end_byte {
+            continue;
+        }
+        if is_supported_call_kind(node.kind()) {
+            calls.push(node);
+            continue;
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_supported_call_nodes(child, start_byte, end_byte, calls);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
 fn collect_folding_ranges(node: Node, text: &str, ranges: &mut Vec<FoldingRange>) {
-    if let Some(kind) = folding_kind_for_node(node)
-        && let Some(range) = folding_range_for_node(node, text, kind)
-    {
-        ranges.push(range);
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if let Some(kind) = folding_kind_for_node(node)
+            && let Some(range) = folding_range_for_node(node, text, kind)
+        {
+            ranges.push(range);
+        }
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_folding_ranges(child, text, ranges);
+        push_children_reverse(node, &mut stack);
     }
 }
 
@@ -2738,29 +2750,29 @@ fn custom_region_marker(line: &str) -> Option<&str> {
 }
 
 fn collect_parse_error_diagnostics(node: Node, text: &str, diagnostics: &mut Vec<Diagnostic>) {
-    if node.is_error() || node.is_missing() {
-        diagnostics.push(Diagnostic {
-            range: range_for_bytes(text, node.start_byte(), node.end_byte())
-                .unwrap_or_else(|_| Range::default()),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: None,
-            code_description: None,
-            source: Some("rephactor".to_string()),
-            message: "PHP parse error".to_string(),
-            related_information: None,
-            tags: None,
-            data: None,
-        });
-        return;
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if node.is_error() || node.is_missing() {
+            diagnostics.push(Diagnostic {
+                range: range_for_bytes(text, node.start_byte(), node.end_byte())
+                    .unwrap_or_else(|_| Range::default()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("rephactor".to_string()),
+                message: "PHP parse error".to_string(),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+            continue;
+        }
 
-    if !node.has_error() {
-        return;
-    }
+        if !node.has_error() {
+            continue;
+        }
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_parse_error_diagnostics(child, text, diagnostics);
+        push_children_reverse(node, &mut stack);
     }
 }
 
@@ -2812,16 +2824,19 @@ fn collect_duplicate_checked_declarations<'tree>(
     node: Node<'tree>,
     declarations: &mut Vec<Node<'tree>>,
 ) {
-    if matches!(
-        node.kind(),
-        "function_definition" | "class_declaration" | "interface_declaration" | "trait_declaration"
-    ) {
-        declarations.push(node);
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if matches!(
+            node.kind(),
+            "function_definition"
+                | "class_declaration"
+                | "interface_declaration"
+                | "trait_declaration"
+        ) {
+            declarations.push(node);
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_duplicate_checked_declarations(child, declarations);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -2991,16 +3006,16 @@ fn first_named_child_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'
 }
 
 fn collect_class_like_declarations<'tree>(node: Node<'tree>, declarations: &mut Vec<Node<'tree>>) {
-    if matches!(
-        node.kind(),
-        "class_declaration" | "interface_declaration" | "trait_declaration"
-    ) {
-        declarations.push(node);
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if matches!(
+            node.kind(),
+            "class_declaration" | "interface_declaration" | "trait_declaration"
+        ) {
+            declarations.push(node);
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_class_like_declarations(child, declarations);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -3251,13 +3266,13 @@ fn collect_function_like_declarations<'tree>(
     node: Node<'tree>,
     declarations: &mut Vec<Node<'tree>>,
 ) {
-    if matches!(node.kind(), "function_definition" | "method_declaration") {
-        declarations.push(node);
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind(), "function_definition" | "method_declaration") {
+            declarations.push(node);
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_function_like_declarations(child, declarations);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -3280,15 +3295,15 @@ fn collect_return_type_mismatch_diagnostics(
     index: &SymbolIndex,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if matches!(node.kind(), "function_definition" | "method_declaration") {
-        diagnostics.extend(return_type_mismatches_for_declaration(
-            root, node, text, imports, index,
-        ));
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind(), "function_definition" | "method_declaration") {
+            diagnostics.extend(return_type_mismatches_for_declaration(
+                root, node, text, imports, index,
+            ));
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_return_type_mismatch_diagnostics(root, child, text, imports, index, diagnostics);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -3631,40 +3646,40 @@ fn collect_local_call_assignment_return_types(
     types: &mut HashMap<String, ComparableReturnType>,
     context: &CallAssignmentInference<'_, '_>,
 ) {
-    if node.start_byte() >= context.byte_offset {
-        return;
-    }
-    if node != declaration
-        && matches!(
-            node.kind(),
-            "function_definition"
-                | "method_declaration"
-                | "anonymous_function"
-                | "anonymous_function_creation_expression"
-                | "arrow_function"
-                | "class_declaration"
-                | "interface_declaration"
-                | "trait_declaration"
-        )
-    {
-        return;
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if node.start_byte() >= context.byte_offset {
+            continue;
+        }
+        if node != declaration
+            && matches!(
+                node.kind(),
+                "function_definition"
+                    | "method_declaration"
+                    | "anonymous_function"
+                    | "anonymous_function_creation_expression"
+                    | "arrow_function"
+                    | "class_declaration"
+                    | "interface_declaration"
+                    | "trait_declaration"
+            )
+        {
+            continue;
+        }
 
-    if node.kind() == "assignment_expression"
-        && let (Some(left), Some(right)) = (
-            node.child_by_field_name("left"),
-            node.child_by_field_name("right"),
-        )
-        && left.kind() == "variable_name"
-        && let Some(return_type) = inferred_call_return_type(right, context)
-            .or_else(|| assigned_variable_return_type(right, context.text, types))
-    {
-        types.insert(node_text(left, context.text).to_string(), return_type);
-    }
+        if node.kind() == "assignment_expression"
+            && let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            )
+            && left.kind() == "variable_name"
+            && let Some(return_type) = inferred_call_return_type(right, context)
+                .or_else(|| assigned_variable_return_type(right, context.text, types))
+        {
+            types.insert(node_text(left, context.text).to_string(), return_type);
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_local_call_assignment_return_types(declaration, child, types, context);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -3882,22 +3897,15 @@ fn collect_assignment_type_mismatch_diagnostics(
     index: &SymbolIndex,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if matches!(node.kind(), "function_definition" | "method_declaration") {
-        diagnostics.extend(assignment_type_mismatches_for_declaration(
-            root, node, text, imports, index,
-        ));
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind(), "function_definition" | "method_declaration") {
+            diagnostics.extend(assignment_type_mismatches_for_declaration(
+                root, node, text, imports, index,
+            ));
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_assignment_type_mismatch_diagnostics(
-            root,
-            child,
-            text,
-            imports,
-            index,
-            diagnostics,
-        );
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -3952,90 +3960,100 @@ fn collect_assignment_type_mismatches(
     context: &AssignmentTypeMismatchContext<'_, '_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if node != declaration
-        && matches!(
-            node.kind(),
-            "function_definition"
-                | "method_declaration"
-                | "anonymous_function_creation_expression"
-                | "arrow_function"
-                | "class_declaration"
-                | "interface_declaration"
-                | "trait_declaration"
-        )
-    {
-        return;
-    }
-
-    if node.kind() == "assignment_expression"
-        && let (Some(left), Some(right)) = (
-            node.child_by_field_name("left"),
-            node.child_by_field_name("right"),
-        )
-    {
-        let assignment_namespace = namespace_at_byte(context.root, context.text, node.start_byte());
-        let assignment_namespace = assignment_namespace.as_deref();
-        if let Some(property_name) = readonly_phpdoc_property_assignment_name(left, context.text) {
-            diagnostics.push(Diagnostic {
-                range: range_for_bytes(context.text, left.start_byte(), left.end_byte())
-                    .unwrap_or_else(|_| Range::default()),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: None,
-                code_description: None,
-                source: Some("rephactor".to_string()),
-                message: format!("assignment to read-only PHPDoc property $this->{property_name}"),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
-        }
-        let expected = expected_assignment_type_for_left(left, context, assignment_namespace);
-        if let Some(expected) = expected
-            && let Some(actual) = inferred_assigned_return_type(
-                right,
-                context.text,
-                assignment_namespace,
-                context.imports,
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if node != declaration
+            && matches!(
+                node.kind(),
+                "function_definition"
+                    | "method_declaration"
+                    | "anonymous_function_creation_expression"
+                    | "arrow_function"
+                    | "class_declaration"
+                    | "interface_declaration"
+                    | "trait_declaration"
             )
-            .or_else(|| {
-                let call_context = CallAssignmentInference {
-                    root: context.root,
-                    text: context.text,
-                    byte_offset: right.end_byte(),
-                    namespace: assignment_namespace,
-                    imports: context.imports,
-                    index: context.index,
-                };
-                inferred_call_return_type(right, &call_context)
-            })
-            .or_else(|| {
-                inferred_assigned_variable_type(declaration, right, context, assignment_namespace)
-            })
-            && !types_compatible(&expected, &actual)
         {
-            diagnostics.push(Diagnostic {
-                range: range_for_bytes(context.text, right.start_byte(), right.end_byte())
-                    .unwrap_or_else(|_| Range::default()),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: None,
-                code_description: None,
-                source: Some("rephactor".to_string()),
-                message: format!(
-                    "assignment type mismatch for {}: expected {}, got {}",
-                    node_text(left, context.text),
-                    expected.display,
-                    actual.display
-                ),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
+            continue;
         }
-    }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_assignment_type_mismatches(declaration, child, context, diagnostics);
+        if node.kind() == "assignment_expression"
+            && let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            )
+        {
+            let assignment_namespace =
+                namespace_at_byte(context.root, context.text, node.start_byte());
+            let assignment_namespace = assignment_namespace.as_deref();
+            if let Some(property_name) =
+                readonly_phpdoc_property_assignment_name(left, context.text)
+            {
+                diagnostics.push(Diagnostic {
+                    range: range_for_bytes(context.text, left.start_byte(), left.end_byte())
+                        .unwrap_or_else(|_| Range::default()),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("rephactor".to_string()),
+                    message: format!(
+                        "assignment to read-only PHPDoc property $this->{property_name}"
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
+            let expected = expected_assignment_type_for_left(left, context, assignment_namespace);
+            if let Some(expected) = expected
+                && let Some(actual) = inferred_assigned_return_type(
+                    right,
+                    context.text,
+                    assignment_namespace,
+                    context.imports,
+                )
+                .or_else(|| {
+                    let call_context = CallAssignmentInference {
+                        root: context.root,
+                        text: context.text,
+                        byte_offset: right.end_byte(),
+                        namespace: assignment_namespace,
+                        imports: context.imports,
+                        index: context.index,
+                    };
+                    inferred_call_return_type(right, &call_context)
+                })
+                .or_else(|| {
+                    inferred_assigned_variable_type(
+                        declaration,
+                        right,
+                        context,
+                        assignment_namespace,
+                    )
+                })
+                && !types_compatible(&expected, &actual)
+            {
+                diagnostics.push(Diagnostic {
+                    range: range_for_bytes(context.text, right.start_byte(), right.end_byte())
+                        .unwrap_or_else(|_| Range::default()),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("rephactor".to_string()),
+                    message: format!(
+                        "assignment type mismatch for {}: expected {}, got {}",
+                        node_text(left, context.text),
+                        expected.display,
+                        actual.display
+                    ),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+            }
+        }
+
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -4253,32 +4271,32 @@ fn collect_return_expressions<'tree>(
     node: Node<'tree>,
     expressions: &mut Vec<Node<'tree>>,
 ) {
-    if node != declaration
-        && matches!(
-            node.kind(),
-            "function_definition"
-                | "method_declaration"
-                | "anonymous_function_creation_expression"
-                | "arrow_function"
-                | "class_declaration"
-                | "interface_declaration"
-                | "trait_declaration"
-        )
-    {
-        return;
-    }
-
-    if node.kind() == "return_statement" {
-        let mut cursor = node.walk();
-        if let Some(expression) = node.named_children(&mut cursor).next() {
-            expressions.push(expression);
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if node != declaration
+            && matches!(
+                node.kind(),
+                "function_definition"
+                    | "method_declaration"
+                    | "anonymous_function_creation_expression"
+                    | "arrow_function"
+                    | "class_declaration"
+                    | "interface_declaration"
+                    | "trait_declaration"
+            )
+        {
+            continue;
         }
-        return;
-    }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_return_expressions(declaration, child, expressions);
+        if node.kind() == "return_statement" {
+            let mut cursor = node.walk();
+            if let Some(expression) = node.named_children(&mut cursor).next() {
+                expressions.push(expression);
+            }
+            continue;
+        }
+
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -4428,31 +4446,31 @@ fn find_smallest_named_node_at_byte<'tree>(
 }
 
 fn collect_type_reference_nodes<'tree>(node: Node<'tree>, type_nodes: &mut Vec<Node<'tree>>) {
-    if let Some(type_node) = node.child_by_field_name("type") {
-        collect_named_type_nodes(type_node, type_nodes);
-    }
-    if let Some(type_node) = node.child_by_field_name("return_type") {
-        collect_named_type_nodes(type_node, type_nodes);
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if let Some(type_node) = node.child_by_field_name("type") {
+            collect_named_type_nodes(type_node, type_nodes);
+        }
+        if let Some(type_node) = node.child_by_field_name("return_type") {
+            collect_named_type_nodes(type_node, type_nodes);
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_type_reference_nodes(child, type_nodes);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
 fn collect_named_type_nodes<'tree>(node: Node<'tree>, type_nodes: &mut Vec<Node<'tree>>) {
-    if matches!(
-        node.kind(),
-        "named_type" | "name" | "qualified_name" | "relative_name"
-    ) {
-        type_nodes.push(node);
-        return;
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if matches!(
+            node.kind(),
+            "named_type" | "name" | "qualified_name" | "relative_name"
+        ) {
+            type_nodes.push(node);
+            continue;
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_named_type_nodes(child, type_nodes);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -4519,70 +4537,50 @@ fn collect_phpdoc_type_annotation_diagnostics(
     index: &SymbolIndex,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if matches!(node.kind(), "function_definition" | "method_declaration") {
-        let namespace = namespace_at_byte(root, text, node.start_byte());
-        let template_names = phpdoc_template_names_before(text, node.start_byte());
-        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@param") {
-            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
-            if let Some((type_name, _)) = phpdoc_var_tokens(&tokens) {
-                if template_names.contains(type_name) {
-                    continue;
-                }
-                maybe_push_unresolved_phpdoc_type_diagnostic(
-                    text,
-                    imports,
-                    index,
-                    namespace.as_deref(),
-                    &record,
-                    type_name,
-                    diagnostics,
-                );
-            }
-        }
-
-        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@return") {
-            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
-            if let Some(type_name) = phpdoc_var_type_token(&tokens) {
-                if template_names.contains(type_name) {
-                    continue;
-                }
-                maybe_push_unresolved_phpdoc_type_diagnostic(
-                    text,
-                    imports,
-                    index,
-                    namespace.as_deref(),
-                    &record,
-                    type_name,
-                    diagnostics,
-                );
-            }
-        }
-
-        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@throws") {
-            let tokens = record.text.split_whitespace().collect::<Vec<_>>();
-            if let Some(type_name) = phpdoc_var_type_token(&tokens) {
-                maybe_push_unresolved_phpdoc_type_diagnostic(
-                    text,
-                    imports,
-                    index,
-                    namespace.as_deref(),
-                    &record,
-                    type_name,
-                    diagnostics,
-                );
-            }
-        }
-    }
-
-    if matches!(
-        node.kind(),
-        "class_declaration" | "interface_declaration" | "trait_declaration"
-    ) {
-        let namespace = namespace_at_byte(root, text, node.start_byte());
-        for tag in ["@property", "@property-read", "@property-write"] {
-            for record in phpdoc_tag_line_records_before(text, node.start_byte(), tag) {
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind(), "function_definition" | "method_declaration") {
+            let namespace = namespace_at_byte(root, text, node.start_byte());
+            let template_names = phpdoc_template_names_before(text, node.start_byte());
+            for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@param") {
                 let tokens = record.text.split_whitespace().collect::<Vec<_>>();
                 if let Some((type_name, _)) = phpdoc_var_tokens(&tokens) {
+                    if template_names.contains(type_name) {
+                        continue;
+                    }
+                    maybe_push_unresolved_phpdoc_type_diagnostic(
+                        text,
+                        imports,
+                        index,
+                        namespace.as_deref(),
+                        &record,
+                        type_name,
+                        diagnostics,
+                    );
+                }
+            }
+
+            for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@return") {
+                let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+                if let Some(type_name) = phpdoc_var_type_token(&tokens) {
+                    if template_names.contains(type_name) {
+                        continue;
+                    }
+                    maybe_push_unresolved_phpdoc_type_diagnostic(
+                        text,
+                        imports,
+                        index,
+                        namespace.as_deref(),
+                        &record,
+                        type_name,
+                        diagnostics,
+                    );
+                }
+            }
+
+            for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@throws") {
+                let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+                if let Some(type_name) = phpdoc_var_type_token(&tokens) {
                     maybe_push_unresolved_phpdoc_type_diagnostic(
                         text,
                         imports,
@@ -4596,36 +4594,56 @@ fn collect_phpdoc_type_annotation_diagnostics(
             }
         }
 
-        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@mixin") {
-            if let Some(type_name) = record.text.split_whitespace().next() {
-                let type_name = type_name.split('<').next().unwrap_or(type_name);
-                maybe_push_unresolved_phpdoc_type_diagnostic(
+        if matches!(
+            node.kind(),
+            "class_declaration" | "interface_declaration" | "trait_declaration"
+        ) {
+            let namespace = namespace_at_byte(root, text, node.start_byte());
+            for tag in ["@property", "@property-read", "@property-write"] {
+                for record in phpdoc_tag_line_records_before(text, node.start_byte(), tag) {
+                    let tokens = record.text.split_whitespace().collect::<Vec<_>>();
+                    if let Some((type_name, _)) = phpdoc_var_tokens(&tokens) {
+                        maybe_push_unresolved_phpdoc_type_diagnostic(
+                            text,
+                            imports,
+                            index,
+                            namespace.as_deref(),
+                            &record,
+                            type_name,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+
+            for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@mixin") {
+                if let Some(type_name) = record.text.split_whitespace().next() {
+                    let type_name = type_name.split('<').next().unwrap_or(type_name);
+                    maybe_push_unresolved_phpdoc_type_diagnostic(
+                        text,
+                        imports,
+                        index,
+                        namespace.as_deref(),
+                        &record,
+                        type_name,
+                        diagnostics,
+                    );
+                }
+            }
+
+            for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@method") {
+                collect_phpdoc_method_type_diagnostics(
                     text,
                     imports,
                     index,
                     namespace.as_deref(),
                     &record,
-                    type_name,
                     diagnostics,
                 );
             }
         }
 
-        for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@method") {
-            collect_phpdoc_method_type_diagnostics(
-                text,
-                imports,
-                index,
-                namespace.as_deref(),
-                &record,
-                diagnostics,
-            );
-        }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_phpdoc_type_annotation_diagnostics(root, child, text, imports, index, diagnostics);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -6286,10 +6304,31 @@ fn index_children(
     namespace: Option<String>,
     imports: &ImportMap,
 ) {
-    let mut cursor = node.walk();
-    let mut active_namespace = namespace;
+    struct IndexFrame<'tree> {
+        children: Vec<Node<'tree>>,
+        next_child: usize,
+        active_namespace: Option<String>,
+    }
 
-    for child in node.named_children(&mut cursor) {
+    fn named_children(node: Node) -> Vec<Node> {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor).collect()
+    }
+
+    let mut stack = vec![IndexFrame {
+        children: named_children(node),
+        next_child: 0,
+        active_namespace: namespace,
+    }];
+
+    while let Some(frame) = stack.last_mut() {
+        let Some(child) = frame.children.get(frame.next_child).copied() else {
+            stack.pop();
+            continue;
+        };
+        frame.next_child += 1;
+        let active_namespace = frame.active_namespace.clone();
+
         match child.kind() {
             "namespace_definition" => {
                 let namespace_name = child
@@ -6298,9 +6337,13 @@ fn index_children(
                     .filter(|name| !name.is_empty());
 
                 if let Some(body) = child.child_by_field_name("body") {
-                    index_children(index, body, text, path, namespace_name, imports);
+                    stack.push(IndexFrame {
+                        children: named_children(body),
+                        next_child: 0,
+                        active_namespace: namespace_name,
+                    });
                 } else {
-                    active_namespace = namespace_name;
+                    frame.active_namespace = namespace_name;
                 }
             }
             "function_definition" => {
@@ -6326,7 +6369,11 @@ fn index_children(
                     imports,
                 );
             }
-            _ => index_children(index, child, text, path, active_namespace.clone(), imports),
+            _ => stack.push(IndexFrame {
+                children: named_children(child),
+                next_child: 0,
+                active_namespace,
+            }),
         }
     }
 }
@@ -9890,24 +9937,24 @@ fn collect_assignment_types(
     context: &AssignmentTypeCollectionContext<'_, '_>,
     types: &mut HashMap<String, String>,
 ) {
-    if node.start_byte() >= context.byte_offset {
-        return;
-    }
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        if node.start_byte() >= context.byte_offset {
+            continue;
+        }
 
-    if node.kind() == "assignment_expression"
-        && let (Some(left), Some(right)) = (
-            node.child_by_field_name("left"),
-            node.child_by_field_name("right"),
-        )
-        && left.kind() == "variable_name"
-        && let Some(type_name) = assigned_variable_type_name(right, context, types)
-    {
-        types.insert(node_text(left, context.text).to_string(), type_name);
-    }
+        if node.kind() == "assignment_expression"
+            && let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            )
+            && left.kind() == "variable_name"
+            && let Some(type_name) = assigned_variable_type_name(right, context, types)
+        {
+            types.insert(node_text(left, context.text).to_string(), type_name);
+        }
 
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_assignment_types(child, context, types);
+        push_named_children_reverse(node, &mut stack);
     }
 }
 
@@ -12122,6 +12169,41 @@ mod tests {
             .expect("system time")
             .as_nanos();
         std::env::temp_dir().join(format!("rephactor-test-{nanos}"))
+    }
+
+    fn deeply_nested_if_document(depth: usize, close_blocks: bool) -> String {
+        let mut text = String::from("<?php\nfunction demo(): void {\n");
+        for _ in 0..depth {
+            text.push_str("if ($ready) {\n");
+        }
+        text.push_str("$ready = true;\n");
+        if close_blocks {
+            for _ in 0..depth {
+                text.push_str("}\n");
+            }
+            text.push_str("}\n");
+        }
+        text
+    }
+
+    #[test]
+    fn parse_diagnostics_handles_deep_error_trees_without_stack_overflow() {
+        let diagnostics = analyze_parse_diagnostics(&deeply_nested_if_document(2_048, false));
+
+        assert!(!diagnostics.is_empty());
+    }
+
+    #[test]
+    fn document_diagnostics_handles_deep_valid_trees_without_stack_overflow() {
+        let mut cache = ProjectIndexCache::default();
+        let diagnostics = analyze_diagnostics_for_document_with_cache(
+            &uri(),
+            &deeply_nested_if_document(2_048, true),
+            &HashMap::new(),
+            &mut cache,
+        );
+
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
