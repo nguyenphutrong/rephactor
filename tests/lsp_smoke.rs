@@ -4679,6 +4679,85 @@ fn lsp_publishes_semantic_diagnostics_for_local_variable_return_type_mismatch() 
 }
 
 #[test]
+fn lsp_allows_phpdoc_array_shape_return_type_diagnostics() {
+    let root = temp_project("phpdoc-array-shape-return-type-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\n/** @return array{foo:int} */\nfunction payload() { return []; }\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().all(|diagnostic| {
+        diagnostic["message"] != "return type mismatch: declared array{foo:int}, returned array"
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_uses_phpdoc_callable_signature_for_argument_diagnostics() {
+    let root = temp_project("phpdoc-callable-signature-argument-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\nclass Invoice {}\n/** @param callable(Customer): Invoice $factory */\nfunction run($factory) {}\nrun(new Customer());\nrun(fn(Customer $customer) => new Invoice());\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            == "argument type mismatch for factory: expected callable, got App\\Customer"
+            && diagnostic["severity"] == 1
+    }));
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["message"]
+                == "argument type mismatch for factory: expected callable, got callable")
+            .count(),
+        0
+    );
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_treats_same_scope_phpdoc_templates_as_conservative_unknowns() {
+    let root = temp_project("phpdoc-template-conservative-unknowns");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App;\nclass Customer {}\n/**\n * @template T\n * @param T $value\n * @return T\n */\nfunction identity($value) { return $value; }\nidentity(new Customer());\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().all(|diagnostic| {
+        !diagnostic["message"]
+            .as_str()
+            .expect("diagnostic message")
+            .contains("unresolved PHPDoc type T")
+    }));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_internal_method_argument_type_mismatch() {
     let root = temp_project("internal-method-argument-type-mismatch");
     let mut server = LspProcess::start(&root);

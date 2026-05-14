@@ -3427,6 +3427,9 @@ fn comparable_phpdoc_type_name(type_name: &str) -> String {
     if type_name.ends_with("[]") {
         return "array".to_string();
     }
+    if type_name.starts_with("array{") {
+        return "array".to_string();
+    }
 
     let Some(generic_start) = type_name.find('<') else {
         return type_name.to_string();
@@ -3446,6 +3449,16 @@ fn comparable_phpdoc_type_name(type_name: &str) -> String {
         }
         _ => type_name.to_string(),
     }
+}
+
+fn callable_phpdoc_signature(type_name: &str) -> Option<(&str, &str)> {
+    let type_name = type_name.trim();
+    let rest = type_name.strip_prefix("callable(")?;
+    let (parameters, return_type) = rest.rsplit_once("):")?;
+    if parameters.trim().is_empty() || return_type.trim().is_empty() {
+        return None;
+    }
+    Some((parameters.trim(), return_type.trim()))
 }
 
 fn inferred_return_expression_type(
@@ -3500,6 +3513,19 @@ fn inferred_return_expression_type(
         return Some(ComparableReturnType {
             key: "scalar:array".to_string(),
             display: "array".to_string(),
+            allows_null: false,
+        });
+    }
+    if matches!(
+        kind,
+        "anonymous_function"
+            | "anonymous_function_creation_expression"
+            | "arrow_function"
+            | "closure_creation_expression"
+    ) {
+        return Some(ComparableReturnType {
+            key: "scalar:callable".to_string(),
+            display: "callable".to_string(),
             allows_null: false,
         });
     }
@@ -4495,9 +4521,13 @@ fn collect_phpdoc_type_annotation_diagnostics(
 ) {
     if matches!(node.kind(), "function_definition" | "method_declaration") {
         let namespace = namespace_at_byte(root, text, node.start_byte());
+        let template_names = phpdoc_template_names_before(text, node.start_byte());
         for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@param") {
             let tokens = record.text.split_whitespace().collect::<Vec<_>>();
             if let Some((type_name, _)) = phpdoc_var_tokens(&tokens) {
+                if template_names.contains(type_name) {
+                    continue;
+                }
                 maybe_push_unresolved_phpdoc_type_diagnostic(
                     text,
                     imports,
@@ -4513,6 +4543,9 @@ fn collect_phpdoc_type_annotation_diagnostics(
         for record in phpdoc_tag_line_records_before(text, node.start_byte(), "@return") {
             let tokens = record.text.split_whitespace().collect::<Vec<_>>();
             if let Some(type_name) = phpdoc_var_type_token(&tokens) {
+                if template_names.contains(type_name) {
+                    continue;
+                }
                 maybe_push_unresolved_phpdoc_type_diagnostic(
                     text,
                     imports,
@@ -6909,6 +6942,7 @@ fn declaration_signature_parameter_types(
     imports: &ImportMap,
 ) -> Vec<Option<ComparableReturnType>> {
     let native_types = parameter_types(declaration, parameters_node, text, namespace, imports);
+    let template_names = phpdoc_template_names_before(text, declaration.start_byte());
     let phpdoc_types = phpdoc_param_types_before(
         declaration,
         text,
@@ -6917,6 +6951,7 @@ fn declaration_signature_parameter_types(
         imports,
     )
     .into_iter()
+    .filter(|(_, type_name)| !template_names.contains(type_name.as_str()))
     .filter_map(|(variable_name, type_name)| {
         comparable_parameter_type(&type_name, namespace, imports)
             .map(|return_type| (variable_name, return_type))
@@ -6937,21 +6972,27 @@ fn comparable_parameter_type(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> Option<ComparableReturnType> {
+    if callable_phpdoc_signature(type_name).is_some() {
+        return Some(ComparableReturnType {
+            key: "scalar:callable".to_string(),
+            display: "callable".to_string(),
+            allows_null: false,
+        });
+    }
     let (normalized_type_name, allows_null) = supported_single_type_name(type_name)?;
     let normalized = normalize_return_type_name(&normalized_type_name);
     if matches!(
         normalized.as_str(),
-        "callable"
-            | "iterable"
-            | "mixed"
-            | "never"
-            | "object"
-            | "parent"
-            | "self"
-            | "static"
-            | "void"
+        "iterable" | "mixed" | "never" | "object" | "parent" | "self" | "static" | "void"
     ) {
         return None;
+    }
+    if normalized == "callable" {
+        return Some(ComparableReturnType {
+            key: "scalar:callable".to_string(),
+            display: "callable".to_string(),
+            allows_null,
+        });
     }
 
     let mut comparable = comparable_return_type(&normalized_type_name, namespace, imports);
@@ -7021,6 +7062,9 @@ fn phpdoc_return_type_before(
         .into_iter()
         .next()?;
     let return_type = return_line.split_whitespace().next()?.trim();
+    if phpdoc_template_names_before(text, byte_offset).contains(return_type) {
+        return None;
+    }
     let type_name =
         qualify_phpdoc_parameter_type_name(return_type, declaration, text, namespace, imports);
     comparable_parameter_type(&type_name, None, &ImportMap::default())
@@ -8441,6 +8485,13 @@ fn phpdoc_tag_lines_before(text: &str, byte_offset: usize, tag: &str) -> Vec<Str
         .collect()
 }
 
+fn phpdoc_template_names_before(text: &str, byte_offset: usize) -> HashSet<String> {
+    phpdoc_tag_lines_before(text, byte_offset, "@template")
+        .into_iter()
+        .filter_map(|line| line.split_whitespace().next().map(str::to_string))
+        .collect()
+}
+
 fn phpdoc_for_declaration(text: &str, declaration: Node) -> String {
     let indent = line_indent_before(text, declaration.start_byte());
     let mut lines = Vec::new();
@@ -9766,14 +9817,12 @@ fn phpdoc_param_types_before(
                 .trim_end_matches("*/")
                 .trim();
             let param_offset = line.find("@param")?;
-            let tokens = line[param_offset + 6..]
-                .split_whitespace()
-                .collect::<Vec<_>>();
-            let (type_name, variable_name) = phpdoc_var_tokens(&tokens)?;
+            let (type_name, variable_name) =
+                phpdoc_param_type_and_variable(&line[param_offset + 6..])?;
             Some((
-                variable_name.to_string(),
+                variable_name,
                 qualify_phpdoc_parameter_type_name(
-                    type_name,
+                    &type_name,
                     declaration,
                     text,
                     namespace,
@@ -9784,6 +9833,18 @@ fn phpdoc_param_types_before(
         .collect()
 }
 
+fn phpdoc_param_type_and_variable(text: &str) -> Option<(String, String)> {
+    let tokens = text.split_whitespace().collect::<Vec<_>>();
+    let variable_index = tokens.iter().position(|token| token.starts_with('$'))?;
+    if variable_index == 0 {
+        let type_name = tokens.get(1)?.to_string();
+        let variable_name = tokens[0].to_string();
+        return Some((type_name, variable_name));
+    }
+    let type_name = tokens[..variable_index].join(" ");
+    (!type_name.is_empty()).then(|| (type_name, tokens[variable_index].to_string()))
+}
+
 fn qualify_phpdoc_parameter_type_name(
     type_name: &str,
     declaration: Node,
@@ -9791,6 +9852,9 @@ fn qualify_phpdoc_parameter_type_name(
     namespace: Option<&str>,
     imports: &ImportMap,
 ) -> String {
+    if callable_phpdoc_signature(type_name).is_some() {
+        return type_name.trim().to_string();
+    }
     let (type_name, allows_null) = supported_single_type_name(type_name)
         .unwrap_or_else(|| (type_name.trim().to_string(), false));
     let qualified = qualify_parameter_type_name(&type_name, declaration, text, namespace, imports)

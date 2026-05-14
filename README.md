@@ -243,8 +243,11 @@ diagnostics and resolved-call return-type propagation, including `self`,
 Function-like PHPDoc `@param` annotations understand `self`, `static`, and
 direct `parent` inside class-like scopes, including single-type `|null` unions.
 PHPDoc `@return` annotations use the same relative class handling. PHPDoc array
-and list generics such as `array<int,Foo>`, `list<Foo>`, and `Foo[]` are
-treated as conservative `array` contracts for mismatch diagnostics.
+and list generics such as `array<int,Foo>`, `list<Foo>`, `Foo[]`, and
+conservative `array{...}` shapes are treated as `array` contracts for mismatch
+diagnostics. PHPDoc callable signatures such as `callable(Foo): Bar` are treated
+as callable contracts for argument diagnostics. Same-scope `@template` names are
+recognized as intentionally unknown rather than guessed as classes.
 Class-level PHPDoc magic property annotations also understand `self`, `static`,
 and direct `parent`, including single-type `|null` unions, for conservative
 property assignment/type-definition flows.
@@ -434,7 +437,9 @@ files that are not open in the editor are picked up on the next request.
 - Nullable native and PHPDoc parameter diagnostics that accept `null` for
   `?Type` and `Type|null`.
 - Conservative PHPDoc generic array/list diagnostics that treat `array<int,Foo>`,
-  `list<Foo>`, and `Foo[]` as array contracts.
+  `list<Foo>`, `Foo[]`, and `array{...}` shapes as array contracts.
+- Conservative PHPDoc callable signature diagnostics that distinguish callable
+  arguments from non-callable arguments.
 - Conservative argument-type mismatch diagnostics for seeded PHP internal
   function and method parameter contracts.
 - Conservative argument-type mismatch diagnostics for resolved-call arguments
@@ -575,8 +580,7 @@ Rephactor returns no action instead of guessing for:
   in `autoload` or `autoload-dev`
 - parent/interface/trait resolution that depends on unindexed or ambiguous
   symbols
-- PHPStan/Psalm metadata, including generics, template annotations, and
-  framework-specific dynamic return type extensions
+- PHPStan/Psalm metadata and framework-specific dynamic return type extensions
 - Composer `require.php` constraints that allow PHP 7.x, because named
   arguments require PHP 8
 
