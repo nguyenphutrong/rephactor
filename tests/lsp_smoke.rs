@@ -2076,6 +2076,85 @@ fn lsp_returns_filter_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_symbol_existence_internal_function_metadata() {
+    let root = temp_project("symbol-existence-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nclass_ex;\nmethod_ex;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 8);
+
+    assert!(items.iter().any(|item| item["label"] == "class_exists"));
+    let method_items = server.completion(&completion_uri, 2, 9);
+    assert!(
+        method_items
+            .iter()
+            .any(|item| item["label"] == "method_exists")
+    );
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nclass_exists([], 'bad');\ninterface_exists([], 'bad');\ntrait_exists([], 'bad');\nfunction_exists([]);\nmethod_exists($object, []);\nproperty_exists($object, []);\nfunction takes_string(string $value) {}\ntakes_string(class_exists('App\\\\Service'));\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for class: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for autoload: expected bool, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for interface: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for trait: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for function: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for method: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for property: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got bool"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("class_exists($class, $autoload)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/class_exists)"));
+
+    let method_hover = server.hover(&diagnostics_uri, 5, 5).expect("hover result");
+    let method_markdown = method_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(method_markdown.contains("method_exists($object_or_class, $method)"));
+    assert!(method_markdown.contains("[PHP manual](https://www.php.net/method_exists)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_regex_escaping_internal_function_metadata() {
     let root = temp_project("regex-escaping-internal-functions");
     let mut server = LspProcess::start(&root);
