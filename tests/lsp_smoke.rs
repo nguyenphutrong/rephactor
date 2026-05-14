@@ -2015,6 +2015,67 @@ fn lsp_returns_type_check_internal_function_metadata() {
 }
 
 #[test]
+fn lsp_returns_filter_internal_function_metadata() {
+    let root = temp_project("filter-internal-functions");
+    let mut server = LspProcess::start(&root);
+    let completion_file = root.join("completion.php");
+    let completion_uri = server.open_php(&completion_file, "<?php\nfilter_v;\n");
+    let _ = server.read_notification("textDocument/publishDiagnostics");
+
+    let items = server.completion(&completion_uri, 1, 8);
+
+    assert!(items.iter().any(|item| item["label"] == "filter_var"));
+
+    let diagnostics_file = root.join("diagnostics.php");
+    let diagnostics_uri = server.open_php(
+        &diagnostics_file,
+        "<?php\nfilter_input('bad', [], 'bad');\nfilter_has_var('bad', []);\nfunction takes_string(string $value) {}\ntakes_string(filter_has_var(0, 'email'));\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], diagnostics_uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for type: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for var_name: expected string, got array"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for filter: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for input_type: expected int, got string"
+            && diagnostic["severity"] == 1
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"] == "argument type mismatch for value: expected string, got bool"
+            && diagnostic["severity"] == 1
+    }));
+
+    let hover = server.hover(&diagnostics_uri, 1, 5).expect("hover result");
+    let markdown = hover["contents"]["value"].as_str().expect("hover markdown");
+
+    assert!(markdown.contains("filter_input($type, $var_name, $filter, $options)"));
+    assert!(markdown.contains("[PHP manual](https://www.php.net/filter_input)"));
+
+    let has_var_hover = server.hover(&diagnostics_uri, 2, 7).expect("hover result");
+    let has_var_markdown = has_var_hover["contents"]["value"]
+        .as_str()
+        .expect("hover markdown");
+
+    assert!(has_var_markdown.contains("filter_has_var($input_type, $var_name)"));
+    assert!(has_var_markdown.contains("[PHP manual](https://www.php.net/filter_has_var)"));
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_returns_regex_escaping_internal_function_metadata() {
     let root = temp_project("regex-escaping-internal-functions");
     let mut server = LspProcess::start(&root);

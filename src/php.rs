@@ -9698,6 +9698,9 @@ fn internal_function_signature(name: &str) -> Option<Signature> {
         ],
         "file_put_contents" => &["filename", "data", "flags", "context"],
         "filesize" => &["filename"],
+        "filter_has_var" => &["input_type", "var_name"],
+        "filter_input" => &["type", "var_name", "filter", "options"],
+        "filter_var" => &["value", "filter", "options"],
         "fclose" => &["stream"],
         "feof" => &["stream"],
         "floor" => &["num"],
@@ -9856,6 +9859,9 @@ fn internal_function_parameter_types(
         "file_get_contents" => &[Some("string"), Some("bool"), None, Some("int"), Some("int")],
         "file_put_contents" => &[Some("string"), None, Some("int"), None],
         "filesize" => &[Some("string")],
+        "filter_has_var" => &[Some("int"), Some("string")],
+        "filter_input" => &[Some("int"), Some("string"), Some("int"), None],
+        "filter_var" => &[None, Some("int"), None],
         "fclose" => &[None],
         "feof" => &[None],
         "floor" => &[Some("int")],
@@ -9981,10 +9987,10 @@ fn internal_function_return_type(normalized_name: &str) -> Option<ComparableRetu
         | "array_filter" | "array_intersect" | "array_keys" | "array_map" | "array_merge"
         | "array_reverse" | "array_slice" | "array_unique" | "array_values" | "explode"
         | "preg_grep" | "preg_split" => "array",
-        "array_key_exists" | "fclose" | "feof" | "file_exists" | "in_array" | "is_array"
-        | "is_bool" | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric" | "is_object"
-        | "is_readable" | "is_string" | "is_writable" | "asort" | "ksort" | "rsort" | "sort"
-        | "str_contains" | "str_ends_with" | "str_starts_with" => "bool",
+        "array_key_exists" | "fclose" | "feof" | "file_exists" | "filter_has_var" | "in_array"
+        | "is_array" | "is_bool" | "is_dir" | "is_file" | "is_int" | "is_null" | "is_numeric"
+        | "is_object" | "is_readable" | "is_string" | "is_writable" | "asort" | "ksort"
+        | "rsort" | "sort" | "str_contains" | "str_ends_with" | "str_starts_with" => "bool",
         "abs" | "ceil" | "count" | "file_put_contents" | "filesize" | "floor" | "intval"
         | "json_last_error" | "mb_strlen" | "mb_strpos" | "preg_match" | "preg_match_all"
         | "round" | "strlen" | "strpos" | "strrpos" | "strtotime" | "time" | "random_int" => "int",
@@ -10076,6 +10082,9 @@ fn internal_function_names() -> Vec<&'static str> {
         "file_get_contents",
         "file_put_contents",
         "filesize",
+        "filter_has_var",
+        "filter_input",
+        "filter_var",
         "fclose",
         "feof",
         "floor",
