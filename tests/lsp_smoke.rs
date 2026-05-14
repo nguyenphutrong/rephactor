@@ -4224,6 +4224,60 @@ fn lsp_publishes_semantic_diagnostics_for_unresolved_call() {
 }
 
 #[test]
+fn lsp_php_constructs_do_not_publish_unresolved_callable_diagnostics() {
+    let root = temp_project("php-construct-diagnostics");
+    let mut server = LspProcess::start(&root);
+    let file = root.join("example.php");
+    let uri = server.open_php(&file, "<?php\nempty($x);\nisset($x);\n");
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    for unexpected in ["unresolved callable empty", "unresolved callable isset"] {
+        assert!(
+            diagnostics.iter().all(|diagnostic| {
+                diagnostic["message"].as_str().expect("diagnostic message") != unexpected
+            }),
+            "unexpected diagnostic {unexpected}: {diagnostics:?}"
+        );
+    }
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
+fn lsp_posapp_sync_order_controller_allows_php_constructs() {
+    let fixture = Path::new(
+        "/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Http/Controllers/Api/v1/SyncOrderController.php",
+    );
+    if !fixture.is_file() {
+        return;
+    }
+
+    let text = std::fs::read_to_string(fixture).expect("read SyncOrderController");
+    let root = Path::new("/Volumes/Avocado/code/posapp-vn/dev-admin-api");
+    let mut server = LspProcess::start(root);
+    let uri = server.open_php(fixture, &text);
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    for unexpected in ["unresolved callable empty", "unresolved callable isset"] {
+        assert!(
+            diagnostics.iter().all(|diagnostic| {
+                diagnostic["message"].as_str().expect("diagnostic message") != unexpected
+            }),
+            "unexpected diagnostic {unexpected}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn lsp_publishes_semantic_diagnostics_for_unresolved_type() {
     let root = temp_project("type-diagnostics");
     let mut server = LspProcess::start(&root);

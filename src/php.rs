@@ -321,6 +321,11 @@ pub fn analyze_diagnostics_for_document_with_cache(
             Err(
                 reason @ (SkipReason::UnresolvedCallable(_) | SkipReason::AmbiguousCallable(_)),
             ) => {
+                if let CallTarget::Function(name) = &call.target
+                    && is_php_language_construct_call(name)
+                {
+                    continue;
+                }
                 if !index.should_suppress_unresolved_callable(
                     &call.target,
                     root,
@@ -1026,6 +1031,11 @@ fn named_argument_code_action_with_cache(
         Ok(call) => call,
         Err(reason) => return CodeActionOutcome::NoAction(reason),
     };
+    if let CallTarget::Function(name) = &call.target
+        && is_php_language_construct_call(name)
+    {
+        return CodeActionOutcome::NoAction(SkipReason::NoEdits);
+    }
     let index = cache.index_for_document(uri, text, open_documents);
     let signature = match index.resolve(
         &call.target,
@@ -1077,6 +1087,11 @@ fn large_named_argument_code_action_with_cache(
         Ok(call) => call,
         Err(reason) => return CodeActionOutcome::NoAction(reason),
     };
+    if let CallTarget::Function(name) = &call.target
+        && is_php_language_construct_call(name)
+    {
+        return CodeActionOutcome::NoAction(SkipReason::NoEdits);
+    }
     if call.arguments.iter().any(|argument| argument.is_unpacking) {
         return CodeActionOutcome::NoAction(SkipReason::UnpackingArgument);
     }
@@ -8728,6 +8743,20 @@ fn is_supported_call_kind(kind: &str) -> bool {
     )
 }
 
+fn is_php_language_construct_call(name: &str) -> bool {
+    let name = clean_name_text(name)
+        .trim_start_matches('\\')
+        .to_ascii_lowercase();
+    if name.contains('\\') {
+        return false;
+    }
+
+    matches!(
+        name.as_str(),
+        "empty" | "isset" | "unset" | "eval" | "print" | "exit" | "die"
+    )
+}
+
 fn call_info(node: Node, text: &str) -> Result<CallInfo, SkipReason> {
     call_info_with_empty(node, text, false)
 }
@@ -13647,6 +13676,14 @@ mod tests {
             .expect("edits")
     }
 
+    fn diagnostic_messages(text: &str) -> Vec<String> {
+        let mut cache = ProjectIndexCache::default();
+        analyze_diagnostics_for_document_with_cache(&uri(), text, &HashMap::new(), &mut cache)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect()
+    }
+
     fn action_by_title(text: &str, line: u32, character: u32, title: &str) -> CodeAction {
         analyze_code_actions_for_position(&uri(), text, position(line, character), &HashMap::new())
             .actions
@@ -13784,6 +13821,33 @@ mod tests {
             diagnostics
                 .iter()
                 .all(|diagnostic| { !diagnostic.message.contains("unresolved type Throwable") })
+        );
+    }
+
+    #[test]
+    fn language_construct_calls_do_not_report_unresolved_callables() {
+        let messages = diagnostic_messages(
+            "<?php\nempty($value);\nisset($value);\nunset($value);\neval($code);\nprint($value);\nexit($code);\ndie($code);\n",
+        );
+
+        for construct in ["empty", "isset", "unset", "eval", "print", "exit", "die"] {
+            let unexpected = format!("unresolved callable {construct}");
+            assert!(
+                messages.iter().all(|message| message != &unexpected),
+                "unexpected diagnostic {unexpected}: {messages:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostics_still_report_missing_function_call() {
+        let messages = diagnostic_messages("<?php\nmissing_function($value);\n");
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message == "unresolved callable missing_function"),
+            "expected missing function diagnostic: {messages:?}"
         );
     }
 
@@ -14941,5 +15005,12 @@ mod tests {
                 "missing_function".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn skips_named_argument_action_for_language_construct_call() {
+        let text = "<?php\nisset($value);\n";
+
+        assert!(named_argument_code_action(&uri(), text, position(1, 5)).is_none());
     }
 }
