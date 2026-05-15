@@ -3908,20 +3908,20 @@ fn comparable_phpdoc_type_name(type_name: &str) -> String {
     let Some(generic_start) = type_name.find('<') else {
         return type_name.to_string();
     };
-    if !type_name.ends_with('>') {
-        return type_name.to_string();
-    }
 
     let base_name = normalize_return_type_name(last_name_segment(&type_name[..generic_start]));
-    match base_name {
-        base if matches!(
-            base.as_str(),
-            "array" | "list" | "non-empty-array" | "non-empty-list"
-        ) =>
-        {
-            "array".to_string()
-        }
+    match phpdoc_builtin_generic_comparable_name(&base_name) {
+        Some(comparable) => comparable.to_string(),
         _ => type_name.to_string(),
+    }
+}
+
+fn phpdoc_builtin_generic_comparable_name(base_name: &str) -> Option<&'static str> {
+    match base_name {
+        "array" | "list" | "non-empty-array" | "non-empty-list" => Some("array"),
+        "iterable" => Some("iterable"),
+        "class-string" => Some("string"),
+        _ => None,
     }
 }
 
@@ -5181,6 +5181,7 @@ fn maybe_push_unresolved_phpdoc_type_diagnostic(
     if index
         .resolve_class(&type_name, namespace, imports)
         .is_some()
+        || index.is_known_external_class(&type_name, namespace, imports)
     {
         return;
     }
@@ -6862,11 +6863,7 @@ impl SymbolIndex {
     fn index_project(&mut self, project_root: &Path, open_documents: &HashMap<PathBuf, String>) {
         self.external_class_prefixes = composer_external_class_prefixes(project_root);
 
-        let Some(paths) = composer_autoload_paths(project_root) else {
-            return;
-        };
-
-        for path in paths {
+        for path in composer_project_index_paths(project_root) {
             self.index_php_path(&path, open_documents);
         }
     }
@@ -7196,8 +7193,12 @@ impl SymbolIndex {
     ) -> bool {
         match target {
             CallTarget::Function(_) => false,
-            CallTarget::StaticMethod { class_name, .. }
-            | CallTarget::Constructor { class_name } => {
+            CallTarget::StaticMethod { class_name, .. } => {
+                self.is_eloquent_model_like_class(class_name, namespace, imports)
+                    || (self.resolve_class(class_name, namespace, imports).is_none()
+                        && self.is_known_external_class(class_name, namespace, imports))
+            }
+            CallTarget::Constructor { class_name } => {
                 self.resolve_class(class_name, namespace, imports).is_none()
                     && self.is_known_external_class(class_name, namespace, imports)
             }
@@ -7211,6 +7212,38 @@ impl SymbolIndex {
                     && self.is_known_external_class_fqn(class_name)
             }
         }
+    }
+
+    fn is_eloquent_model_like_class(
+        &self,
+        class_name: &str,
+        namespace: Option<&str>,
+        imports: &ImportMap,
+    ) -> bool {
+        imports
+            .resolve_class_name(class_name, namespace)
+            .into_iter()
+            .any(|candidate| self.class_extends_eloquent_model(&candidate, &mut Vec::new()))
+    }
+
+    fn class_extends_eloquent_model(&self, class_name: &str, visited: &mut Vec<String>) -> bool {
+        let class_key = normalize_symbol_key(class_name);
+        if class_key == "illuminate\\database\\eloquent\\model" {
+            return true;
+        }
+        if visited.contains(&class_key) {
+            return false;
+        }
+        visited.push(class_key.clone());
+
+        let Some(class_info) = self.classes.get(&class_key) else {
+            return false;
+        };
+
+        class_info.parents.iter().any(|parent| {
+            normalize_symbol_key(parent) == "illuminate\\database\\eloquent\\model"
+                || self.class_extends_eloquent_model(parent, visited)
+        })
     }
 
     fn resolve_constant(
@@ -7255,6 +7288,20 @@ impl SymbolIndex {
                 &mut visited,
                 &mut signatures,
             );
+        }
+
+        for related_name in class_info
+            .parents
+            .iter()
+            .chain(class_info.interfaces.iter())
+            .chain(class_info.traits.iter())
+            .chain(class_info.mixins.iter())
+        {
+            if let Some(signature) = internal_method_signature(related_name, method)
+                && !signatures.contains(&signature)
+            {
+                signatures.push(signature);
+            }
         }
 
         match signatures.len() {
@@ -11684,6 +11731,13 @@ fn php_constraint_token_requires_at_least_8(token: &str) -> bool {
     token == "8" || token.starts_with("8.") || token.starts_with("8.*") || token.starts_with("9")
 }
 
+fn composer_project_index_paths(project_root: &Path) -> Vec<PathBuf> {
+    let mut paths = composer_autoload_paths(project_root).unwrap_or_default();
+    paths.extend(composer_generated_autoload_file_paths(project_root));
+    paths.extend(project_stub_paths(project_root));
+    dedup_existing_paths(paths)
+}
+
 fn composer_autoload_paths(project_root: &Path) -> Option<Vec<PathBuf>> {
     let composer_text = fs::read_to_string(project_root.join("composer.json")).ok()?;
     let composer_json: serde_json::Value = serde_json::from_str(&composer_text).ok()?;
@@ -11699,13 +11753,91 @@ fn composer_autoload_paths(project_root: &Path) -> Option<Vec<PathBuf>> {
     (!roots.is_empty()).then_some(roots)
 }
 
+fn composer_generated_autoload_file_paths(project_root: &Path) -> Vec<PathBuf> {
+    let autoload_files = project_root.join("vendor/composer/autoload_files.php");
+    let Ok(text) = fs::read_to_string(autoload_files) else {
+        return Vec::new();
+    };
+
+    let vendor_dir = project_root.join("vendor");
+    let base_dir = project_root.to_path_buf();
+    text.lines()
+        .filter_map(|line| composer_generated_autoload_path_from_line(line, &vendor_dir, &base_dir))
+        .collect()
+}
+
+fn composer_generated_autoload_path_from_line(
+    line: &str,
+    vendor_dir: &Path,
+    base_dir: &Path,
+) -> Option<PathBuf> {
+    let expression = line.split_once("=>")?.1.trim().trim_end_matches(',').trim();
+    let base_path = if expression.starts_with("$vendorDir") {
+        vendor_dir
+    } else if expression.starts_with("$baseDir") {
+        base_dir
+    } else {
+        return None;
+    };
+
+    let suffix = php_string_literals_in_expression(expression).concat();
+    (!suffix.is_empty()).then(|| base_path.join(suffix.trim_start_matches('/')))
+}
+
+fn php_string_literals_in_expression(expression: &str) -> Vec<String> {
+    let bytes = expression.as_bytes();
+    let mut literals = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let quote = bytes[index];
+        if quote != b'\'' && quote != b'"' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        let start = index;
+        while index < bytes.len() && bytes[index] != quote {
+            index += 1;
+        }
+        if index <= bytes.len()
+            && let Some(literal) = expression.get(start..index)
+        {
+            literals.push(literal.to_string());
+        }
+        index += 1;
+    }
+    literals
+}
+
+fn project_stub_paths(project_root: &Path) -> Vec<PathBuf> {
+    ["_ide_helper.php", "_ide_helper_models.php"]
+        .into_iter()
+        .map(|file| project_root.join(file))
+        .collect()
+}
+
+fn dedup_existing_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    let mut unique = Vec::new();
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        let key = path.to_string_lossy().to_string();
+        if seen.insert(key) {
+            unique.push(path);
+        }
+    }
+    unique
+}
+
 fn composer_external_class_prefixes(project_root: &Path) -> Vec<String> {
     let installed_path = project_root.join("vendor/composer/installed.json");
-    let Some(installed_json) = fs::read_to_string(installed_path)
+    let Some(installed_json) = fs::read_to_string(&installed_path)
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
     else {
-        return Vec::new();
+        return composer_autoload_psr4_external_class_prefixes(project_root);
     };
 
     let packages = installed_json
@@ -11743,6 +11875,29 @@ fn composer_external_class_prefixes(project_root: &Path) -> Vec<String> {
         }
     }
 
+    prefixes.sort();
+    prefixes.dedup();
+    prefixes.extend(composer_autoload_psr4_external_class_prefixes(project_root));
+    prefixes.sort();
+    prefixes.dedup();
+    prefixes
+}
+
+fn composer_autoload_psr4_external_class_prefixes(project_root: &Path) -> Vec<String> {
+    let autoload_psr4 = project_root.join("vendor/composer/autoload_psr4.php");
+    let Ok(text) = fs::read_to_string(autoload_psr4) else {
+        return Vec::new();
+    };
+
+    let mut prefixes = text
+        .lines()
+        .filter_map(|line| {
+            let prefix = line.split_once("=>")?.0.trim();
+            let prefix = prefix.trim_matches([',', '\'', '"', ' ']);
+            let prefix = prefix.trim_end_matches("\\\\").trim_end_matches('\\');
+            (!prefix.is_empty()).then(|| normalize_symbol_key(prefix))
+        })
+        .collect::<Vec<_>>();
     prefixes.sort();
     prefixes.dedup();
     prefixes
@@ -11953,6 +12108,9 @@ fn internal_method_signature(class_name: &str, method: &str) -> Option<Signature
     if let Some(signature) = laravel_request_method_signature(class_name, method) {
         return Some(signature);
     }
+    if let Some(signature) = laravel_console_command_method_signature(class_name, method) {
+        return Some(signature);
+    }
 
     let normalized_class = normalize_symbol_key(class_name);
     let normalized_method = normalize_method_key(method);
@@ -12051,6 +12209,13 @@ fn laravel_request_method_signature(class_name: &str, method: &str) -> Option<Si
                 Some("bool"),
                 false,
             ),
+            "filled" => (
+                "filled",
+                &["key"][..],
+                &[Some("string")][..],
+                Some("bool"),
+                false,
+            ),
             "all" => ("all", &["keys"][..], &[None][..], Some("array"), false),
             "user" => ("user", &["guard"][..], &[Some("string")][..], None, false),
             _ => return None,
@@ -12078,10 +12243,47 @@ fn laravel_request_method_signature(class_name: &str, method: &str) -> Option<Si
     })
 }
 
+fn laravel_console_command_method_signature(class_name: &str, method: &str) -> Option<Signature> {
+    if normalize_symbol_key(class_name) != "illuminate\\console\\command" {
+        return None;
+    }
+
+    let canonical_method = match normalize_method_key(method).as_str() {
+        "error" => "error",
+        "info" => "info",
+        "line" => "line",
+        "warn" | "warning" => "warn",
+        _ => return None,
+    };
+
+    Some(Signature {
+        name: format!("Illuminate\\Console\\Command::{canonical_method}"),
+        parameters: vec!["string".to_string(), "verbosity".to_string()],
+        parameter_types: vec![
+            Some(comparable_return_type(
+                "string",
+                None,
+                &ImportMap::default(),
+            )),
+            None,
+        ],
+        return_type: None,
+        is_variadic: false,
+        is_abstract: false,
+        location: None,
+        doc_summary: Some("Laravel console output helper.".to_string()),
+    })
+}
+
 fn internal_method_names(class_name: &str) -> Vec<&'static str> {
     match normalize_symbol_key(class_name).as_str() {
         "illuminate\\http\\request" => {
-            vec!["all", "boolean", "input", "integer", "user", "validate"]
+            vec![
+                "all", "boolean", "filled", "input", "integer", "user", "validate",
+            ]
+        }
+        "illuminate\\console\\command" => {
+            vec!["error", "info", "line", "warn"]
         }
         "datetime" | "datetimeimmutable" => {
             vec!["createFromFormat", "format", "getTimestamp", "modify"]
@@ -13684,6 +13886,14 @@ mod tests {
             .collect()
     }
 
+    fn diagnostic_messages_for_uri(uri: &Url, text: &str) -> Vec<String> {
+        let mut cache = ProjectIndexCache::default();
+        analyze_diagnostics_for_document_with_cache(uri, text, &HashMap::new(), &mut cache)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect()
+    }
+
     fn action_by_title(text: &str, line: u32, character: u32, title: &str) -> CodeAction {
         analyze_code_actions_for_position(&uri(), text, position(line, character), &HashMap::new())
             .actions
@@ -13852,6 +14062,181 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_resolves_composer_generated_autoload_files() {
+        let project_root = unique_project_root();
+        fs::create_dir_all(project_root.join("app/Http/Controllers")).expect("create app dir");
+        fs::create_dir_all(project_root.join("app/Helper")).expect("create helper dir");
+        fs::create_dir_all(project_root.join("vendor/composer")).expect("create composer dir");
+        fs::create_dir_all(project_root.join("vendor/laravel/framework/src/Illuminate/Foundation"))
+            .expect("create foundation dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+        fs::write(
+            project_root.join("vendor/composer/autoload_files.php"),
+            "<?php\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\nreturn [\n    'helpers' => $vendorDir . '/laravel/framework/src/Illuminate/Foundation/helpers.php',\n    'app_helpers' => $baseDir . '/app/Helper/helpers.php',\n];\n",
+        )
+        .expect("write autoload files");
+        fs::write(
+            project_root.join("vendor/laravel/framework/src/Illuminate/Foundation/helpers.php"),
+            "<?php\nfunction config($key = null, $default = null) {}\nfunction __($key = null, $replace = [], $locale = null) {}\n",
+        )
+        .expect("write helpers");
+        fs::write(
+            project_root.join("app/Helper/helpers.php"),
+            "<?php\nfunction app_helper($value) {}\n",
+        )
+        .expect("write app helpers");
+
+        let file = project_root.join("app/Http/Controllers/ExampleController.php");
+        let uri = Url::from_file_path(&file).expect("file uri");
+        let text = "<?php\nnamespace App\\Http\\Controllers;\nclass ExampleController { public function __invoke(): void { config('app.name'); __('messages.ok'); app_helper('value'); } }\n";
+        let messages = diagnostic_messages_for_uri(&uri, text);
+
+        for unexpected in [
+            "unresolved callable config",
+            "unresolved callable __",
+            "unresolved callable app_helper",
+        ] {
+            assert!(
+                messages.iter().all(|message| message != unexpected),
+                "unexpected diagnostic {unexpected}: {messages:?}"
+            );
+        }
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn diagnostics_indexes_project_ide_helper_stub() {
+        let project_root = unique_project_root();
+        fs::create_dir_all(project_root.join("app/Http/Controllers")).expect("create app dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+        fs::write(
+            project_root.join("_ide_helper.php"),
+            "<?php\nfunction project_helper($value) {}\nclass ProjectStub { public static function known($value) {} }\n",
+        )
+        .expect("write ide helper");
+
+        let file = project_root.join("app/Http/Controllers/ExampleController.php");
+        let uri = Url::from_file_path(&file).expect("file uri");
+        let text = "<?php\nnamespace App\\Http\\Controllers;\nclass ExampleController { public function __invoke($value): void { project_helper($value); \\ProjectStub::known($value); } }\n";
+        let messages = diagnostic_messages_for_uri(&uri, text);
+
+        for unexpected in [
+            "unresolved callable project_helper",
+            "unresolved callable ProjectStub::known",
+        ] {
+            assert!(
+                messages.iter().all(|message| message != unexpected),
+                "unexpected diagnostic {unexpected}: {messages:?}"
+            );
+        }
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn diagnostics_suppresses_eloquent_model_static_magic_call() {
+        let project_root = unique_project_root();
+        fs::create_dir_all(project_root.join("app/Models")).expect("create models dir");
+        fs::create_dir_all(project_root.join("app/Http/Controllers")).expect("create app dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+        fs::write(
+            project_root.join("app/Models/BaseModel.php"),
+            "<?php\nnamespace App\\Models;\nclass BaseModel extends \\Illuminate\\Database\\Eloquent\\Model {}\n",
+        )
+        .expect("write base model");
+        fs::write(
+            project_root.join("app/Models/promotion_code.php"),
+            "<?php\nnamespace App\\Models;\nclass promotion_code extends BaseModel {}\n",
+        )
+        .expect("write promotion model");
+
+        let file = project_root.join("app/Http/Controllers/ExampleController.php");
+        let uri = Url::from_file_path(&file).expect("file uri");
+        let text = "<?php\nnamespace App\\Http\\Controllers;\nuse App\\Models\\promotion_code;\nclass ExampleController { public function __invoke($rows): void { promotion_code::insert($rows); } }\n";
+        let messages = diagnostic_messages_for_uri(&uri, text);
+
+        assert!(
+            messages
+                .iter()
+                .all(|message| message != "unresolved callable promotion_code::insert"),
+            "unexpected Eloquent magic diagnostic: {messages:?}"
+        );
+        let analysis = analyze_code_actions_for_position(
+            &uri,
+            text,
+            lsp_position_for_byte_offset(text, text.find("insert").expect("insert call"))
+                .expect("insert position"),
+            &HashMap::new(),
+        );
+        assert!(analysis.actions.iter().all(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => !action.title.contains("Add name"),
+            CodeActionOrCommand::Command(_) => true,
+        }));
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn diagnostics_still_reports_plain_static_insert_call() {
+        let messages = diagnostic_messages(
+            "<?php\nclass PlainClass {}\nclass Caller { public function run($rows): void { PlainClass::insert($rows); } }\n",
+        );
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message == "unresolved callable PlainClass::insert"),
+            "expected plain static diagnostic: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_allows_phpdoc_builtin_generic_types() {
+        let messages = diagnostic_messages(
+            "<?php\n/**\n * @return array<string, mixed>\n */\nfunction values() {}\n/**\n * @return array<string,\n */\nfunction incomplete() {}\n/**\n * @return list<int>\n */\nfunction ids() {}\n/**\n * @return class-string<Throwable>\n */\nfunction type_name() {}\n",
+        );
+
+        for unexpected in [
+            "unresolved PHPDoc type array<string,",
+            "unresolved PHPDoc type array<string, mixed>",
+            "unresolved PHPDoc type list<int>",
+            "unresolved PHPDoc type class-string<Throwable>",
+        ] {
+            assert!(
+                messages.iter().all(|message| message != unexpected),
+                "unexpected PHPDoc generic diagnostic {unexpected}: {messages:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostics_still_reports_missing_phpdoc_type() {
+        let messages = diagnostic_messages(
+            "<?php\n/**\n * @return MissingCustomer\n */\nfunction customer() {}\n",
+        );
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message == "unresolved PHPDoc type MissingCustomer"),
+            "expected missing PHPDoc type diagnostic: {messages:?}"
+        );
+    }
+
+    #[test]
     fn diagnostics_allows_composer_external_laravel_request_methods() {
         let project_root = unique_project_root();
         fs::create_dir_all(project_root.join("app/Http/Controllers")).expect("create app dir");
@@ -13871,7 +14256,7 @@ mod tests {
 
         let file = project_root.join("app/Http/Controllers/RequestController.php");
         let uri = Url::from_file_path(&file).expect("file uri");
-        let text = "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Http\\Request;\nclass RequestController {\n    public function __invoke(Request $request): void {\n        $request->validate(['shop_id' => 'required']);\n        $shopId = $request->integer('shop_id');\n    }\n}\n";
+        let text = "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Http\\JsonResponse;\nuse Illuminate\\Http\\Request;\nclass RequestController {\n    /**\n     * @return JsonResponse\n     */\n    public function __invoke(Request $request): void {\n        $request->validate(['shop_id' => 'required']);\n        $shopId = $request->integer('shop_id');\n        $active = $request->boolean('active');\n        $filled = $request->filled('name');\n    }\n}\n";
         let mut cache = ProjectIndexCache::default();
 
         let diagnostics =
@@ -13881,8 +14266,39 @@ mod tests {
             !matches!(
                 diagnostic.message.as_str(),
                 "unresolved type Request"
+                    | "unresolved PHPDoc type JsonResponse"
                     | "unresolved callable $request->validate"
                     | "unresolved callable $request->integer"
+                    | "unresolved callable $request->boolean"
+                    | "unresolved callable $request->filled"
+            )
+        }));
+
+        fs::remove_dir_all(project_root).expect("remove project root");
+    }
+
+    #[test]
+    fn diagnostics_resolves_laravel_console_command_output_helpers() {
+        let project_root = unique_project_root();
+        fs::create_dir_all(project_root.join("app/Console/Commands")).expect("create command dir");
+        fs::write(
+            project_root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("write composer");
+
+        let file = project_root.join("app/Console/Commands/SyncCommand.php");
+        let uri = Url::from_file_path(&file).expect("file uri");
+        let text = "<?php\nnamespace App\\Console\\Commands;\nclass SyncCommand extends \\Illuminate\\Console\\Command {\n    public function handle(): void {\n        $this->info('Started');\n        $this->warn('Deprecated');\n    }\n}\n";
+        let mut cache = ProjectIndexCache::default();
+
+        let diagnostics =
+            analyze_diagnostics_for_document_with_cache(&uri, text, &HashMap::new(), &mut cache);
+
+        assert!(diagnostics.iter().all(|diagnostic| {
+            !matches!(
+                diagnostic.message.as_str(),
+                "unresolved callable $this->info" | "unresolved callable $this->warn"
             )
         }));
 

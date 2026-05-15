@@ -4248,6 +4248,80 @@ fn lsp_php_constructs_do_not_publish_unresolved_callable_diagnostics() {
 }
 
 #[test]
+fn lsp_allows_laravel_helpers_eloquent_magic_and_phpdoc_generics() {
+    let root = temp_project("laravel-helper-diagnostics");
+    std::fs::create_dir_all(root.join("app/Http/Controllers")).expect("create controllers dir");
+    std::fs::create_dir_all(root.join("app/Models")).expect("create models dir");
+    std::fs::create_dir_all(root.join("vendor/composer")).expect("create composer dir");
+    std::fs::create_dir_all(root.join("vendor/laravel/framework/src/Illuminate/Foundation"))
+        .expect("create foundation dir");
+    std::fs::write(
+        root.join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+    )
+    .expect("write composer");
+    std::fs::write(
+        root.join("vendor/composer/autoload_files.php"),
+        "<?php\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\nreturn [\n    'helpers' => $vendorDir . '/laravel/framework/src/Illuminate/Foundation/helpers.php',\n];\n",
+    )
+    .expect("write autoload files");
+    std::fs::write(
+        root.join("vendor/composer/autoload_psr4.php"),
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn [\n    'Illuminate\\\\' => [$vendorDir . '/laravel/framework/src/Illuminate'],\n];\n",
+    )
+    .expect("write autoload psr4");
+    std::fs::write(
+        root.join("vendor/laravel/framework/src/Illuminate/Foundation/helpers.php"),
+        "<?php\nfunction config($key = null, $default = null) {}\nfunction __($key = null, $replace = [], $locale = null) {}\n",
+    )
+    .expect("write helpers");
+    std::fs::write(
+        root.join("app/Models/BaseModel.php"),
+        "<?php\nnamespace App\\Models;\nclass BaseModel extends \\Illuminate\\Database\\Eloquent\\Model {}\n",
+    )
+    .expect("write base model");
+    std::fs::write(
+        root.join("app/Models/promotion_code.php"),
+        "<?php\nnamespace App\\Models;\nclass promotion_code extends BaseModel {}\n",
+    )
+    .expect("write promotion model");
+
+    let mut server = LspProcess::start(&root);
+    let file = root.join("app/Http/Controllers/ExampleController.php");
+    let uri = server.open_php(
+        &file,
+        "<?php\nnamespace App\\Http\\Controllers;\nuse App\\Models\\promotion_code;\nuse Illuminate\\Http\\JsonResponse;\nuse Illuminate\\Http\\Request;\n/**\n * @return array<string, mixed>\n */\nfunction payload() {}\nclass ExampleController {\n    /**\n     * @return JsonResponse\n     */\n    public function __invoke(Request $request, $rows): void {\n        config('app.name');\n        __('messages.ok');\n        promotion_code::insert($rows);\n        $request->boolean('active');\n        $request->filled('name');\n    }\n}\nclass SyncCommand extends \\Illuminate\\Console\\Command {\n    public function handle(): void {\n        $this->info('Started');\n        $this->warn('Deprecated');\n    }\n}\n",
+    );
+
+    let notification = server.read_notification("textDocument/publishDiagnostics");
+
+    assert_eq!(notification["params"]["uri"], uri);
+    let diagnostics = notification["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    for unexpected in [
+        "unresolved callable config",
+        "unresolved callable __",
+        "unresolved callable promotion_code::insert",
+        "unresolved callable $request->boolean",
+        "unresolved callable $request->filled",
+        "unresolved callable $this->info",
+        "unresolved callable $this->warn",
+        "unresolved PHPDoc type JsonResponse",
+        "unresolved PHPDoc type array<string,",
+        "unresolved PHPDoc type array<string, mixed>",
+    ] {
+        assert!(
+            diagnostics.iter().all(|diagnostic| {
+                diagnostic["message"].as_str().expect("diagnostic message") != unexpected
+            }),
+            "unexpected diagnostic {unexpected}: {diagnostics:?}"
+        );
+    }
+    std::fs::remove_dir_all(root).expect("remove temp root");
+}
+
+#[test]
 fn lsp_posapp_sync_order_controller_allows_php_constructs() {
     let fixture = Path::new(
         "/Volumes/Avocado/code/posapp-vn/dev-admin-api/app/Http/Controllers/Api/v1/SyncOrderController.php",
@@ -4267,7 +4341,14 @@ fn lsp_posapp_sync_order_controller_allows_php_constructs() {
     let diagnostics = notification["params"]["diagnostics"]
         .as_array()
         .expect("diagnostics array");
-    for unexpected in ["unresolved callable empty", "unresolved callable isset"] {
+    for unexpected in [
+        "unresolved callable empty",
+        "unresolved callable isset",
+        "unresolved callable promotion_code::insert",
+        "unresolved callable __",
+        "unresolved callable config",
+        "unresolved PHPDoc type array<string,",
+    ] {
         assert!(
             diagnostics.iter().all(|diagnostic| {
                 diagnostic["message"].as_str().expect("diagnostic message") != unexpected
